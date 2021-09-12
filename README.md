@@ -8,7 +8,7 @@ After connection with APRX based DIGI it can be used as KISS-TNC
 
 ## Contributors
 * Initial work: OE1ACM, OE3CJB
-* Redesigned: SQ9MDD
+* Redesigned: SQ9MDD, DO3BOX
 * KISS TNC Over Seriall or Bluetooth: SQ5RWU
 * Lora32 board support DJ1AN
 
