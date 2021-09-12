@@ -549,6 +549,7 @@ public:
 	Bw125Cr45Sf4096,                ///< APRS 
     Bw125Cr45Sf2048,                ///< M0IGA Messup speed / 698baud (not 1200)
     Bw125Cr47Sf512,                 ///< corrected 1200 baud
+    Bw125Cr48Sf1024,                /// Bw 125, Cr = 4/8, Sf = 1024chips/symbol, CRC on
     } ModemConfigChoice;
 
     /// Constructor. You can have multiple instances, but each instance must have its own
