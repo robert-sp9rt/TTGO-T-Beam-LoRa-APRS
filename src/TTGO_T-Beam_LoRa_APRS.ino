@@ -55,8 +55,8 @@
   #define BUZZER 15                 // enter your buzzer pin gpio
   const byte TXLED  = 4;            //pin number for LED on TX Tracker
 #elif LORA32_21
-  #define I2C_SDA 4
-  #define I2C_SCL 15
+  #define I2C_SDA 21
+  #define I2C_SCL 22
   #define BUTTON 2                  //pin number for BUTTO
   #define BUZZER 13                 // enter your buzzer pin gpio
   const byte TXLED  = 4;            //pin number for LED on TX Tracker
@@ -242,7 +242,7 @@ void prepareAPRSFrame(){
   outString += Tcall;
 
   if (relay_path){
-    outString += ">APLO01," + relay_path + ":!";
+    outString += ">APLO01:!"; // ," + relay_path + ":!"; 
   }else{
     outString += ">APLO01:!";
   }
@@ -338,6 +338,9 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, const String &message) {
   message.toCharArray((char*)lora_TXBUFF, messageSize + 1, 0);
   if(lora_speed==1200){
     rf95.setModemConfig(BG_RF95::Bw125Cr47Sf512);
+  }
+  else if(lora_speed==600){
+    rf95.setModemConfig(BG_RF95::Bw125Cr48Sf1024);
   }
   else{
     rf95.setModemConfig(BG_RF95::Bw125Cr45Sf4096);
@@ -783,6 +786,8 @@ void setup(){
   
   if(lora_speed==1200)
     rf95.setModemConfig(BG_RF95::Bw125Cr47Sf512);
+  else if(lora_speed==600)
+    rf95.setModemConfig(BG_RF95::Bw125Cr48Sf1024);
   else
     rf95.setModemConfig(BG_RF95::Bw125Cr45Sf4096);
 
