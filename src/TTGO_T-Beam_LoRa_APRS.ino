@@ -188,6 +188,9 @@ uint oled_timeout; // OLED Timeout, same as "Display show RX Time"
 bool tempOled = true; // Turn ON OLED at first startup
 ulong oled_timer = millis();
 
+// Variable to manually send beacon from html page
+bool manBeacon = false;
+
 #define ANGLE_AVGS 3                  // angle averaging - x times
 float average_course[ANGLE_AVGS];
 float avg_c_y, avg_c_x;
@@ -249,9 +252,9 @@ void prepareAPRSFrame(){
   outString += Tcall;
 
   if (relay_path.isEmpty()){
-    outString += ">APLO01:!"; 
+    outString += ">APLO01:!";
   }else{
-    outString += ">APLO01," + relay_path + ":!"; 
+    outString += ">APLO01," + relay_path + ":!";
   }
 
   if(gps_state && gps.location.isValid()){
@@ -868,6 +871,12 @@ void loop() {
     }
   }
 
+  if (manBeacon) {
+    enableOled();
+    writedisplaytext("((WEB TX))","","","","","");
+    sendpacket();
+    manBeacon=false;
+  }
   // Only wake up OLED when necessary, note that DIM is to turn OFF the backlight
   if (enabled_oled) {
     display.dim(!tempOled);
