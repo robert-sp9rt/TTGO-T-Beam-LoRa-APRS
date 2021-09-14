@@ -241,7 +241,7 @@ void prepareAPRSFrame(){
   outString = "";
   outString += Tcall;
 
-  if ( ! relay_path ){
+  if (relay_path.isEmpty()){
     outString += ">APLO01:!"; 
   }else{
     outString += ">APLO01," + relay_path + ":!"; 
