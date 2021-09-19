@@ -211,6 +211,9 @@ void handle_Cfg() {
   jsonData += jsonLineFromPreferenceBool(PREF_APRS_FIXED_BEACON_PRESET);
   jsonData += jsonLineFromPreferenceBool(PREF_APRS_SHOW_ALTITUDE);
   jsonData += jsonLineFromPreferenceBool(PREF_APRS_GPS_EN);
+  jsonData += jsonLineFromPreferenceBool(PREF_ENABLE_TNC_SELF_TELEMETRY);
+  jsonData += jsonLineFromPreferenceInt(PREF_TNC_SELF_TELEMETRY_INTERVAL);
+  jsonData += jsonLineFromPreferenceInt(PREF_TNC_SELF_TELEMETRY_MIC);
   jsonData += jsonLineFromPreferenceBool(PREF_DEV_OL_EN);
   jsonData += jsonLineFromPreferenceBool(PREF_APRS_SHOW_CMT);
   jsonData += jsonLineFromPreferenceBool(PREF_DEV_BT_EN);
@@ -277,6 +280,12 @@ void handle_SaveAPRSCfg() {
   if (server.hasArg(PREF_APRS_LONGITUDE_PRESET)){
     preferences.putString(PREF_APRS_LONGITUDE_PRESET, server.arg(PREF_APRS_LONGITUDE_PRESET));
   }
+  if (server.hasArg(PREF_TNC_SELF_TELEMETRY_INTERVAL)){
+    preferences.putInt(PREF_TNC_SELF_TELEMETRY_INTERVAL, server.arg(PREF_TNC_SELF_TELEMETRY_INTERVAL).toInt());
+  }
+  if (server.hasArg(PREF_TNC_SELF_TELEMETRY_MIC)){
+    preferences.putInt(PREF_TNC_SELF_TELEMETRY_MIC, server.arg(PREF_TNC_SELF_TELEMETRY_MIC).toInt());
+  }
 
   // Smart Beaconing settings 
   if (server.hasArg(PREF_APRS_FIXED_BEACON_INTERVAL_PRESET)){
@@ -297,8 +306,10 @@ void handle_SaveAPRSCfg() {
   if (server.hasArg(PREF_APRS_SB_ANGLE_PRESET)){
     preferences.putDouble(PREF_APRS_SB_ANGLE_PRESET, server.arg(PREF_APRS_SB_ANGLE_PRESET).toDouble());
   }
+  
 
   preferences.putBool(PREF_APRS_SHOW_BATTERY, server.hasArg(PREF_APRS_SHOW_BATTERY));
+  preferences.putBool(PREF_ENABLE_TNC_SELF_TELEMETRY, server.hasArg(PREF_ENABLE_TNC_SELF_TELEMETRY));
   preferences.putBool(PREF_APRS_SHOW_ALTITUDE, server.hasArg(PREF_APRS_SHOW_ALTITUDE));
   preferences.putBool(PREF_APRS_FIXED_BEACON_PRESET, server.hasArg(PREF_APRS_FIXED_BEACON_PRESET));
   preferences.putBool(PREF_APRS_GPS_EN, server.hasArg(PREF_APRS_GPS_EN));
@@ -391,6 +402,9 @@ void handle_saveDeviceCfg(){
     int retryWifi = 0;
     WiFi.begin(wifi_ssid.c_str(), wifi_password.length() ? wifi_password.c_str() : nullptr);
     Serial.println("Connecting to " + wifi_ssid);
+    // Set power to minimum (max 20)
+    // https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/network/esp_wifi.html
+    esp_wifi_set_max_tx_power(8);
     while (WiFi.status() != WL_CONNECTED) {
       Serial.print("Not connected: ");
       Serial.println((int)WiFi.status());
@@ -406,6 +420,8 @@ void handle_saveDeviceCfg(){
         Serial.print(apSSID.c_str());
         Serial.print(" Password: ");
         Serial.println(apPassword.c_str());
+        // Set power to minimum (max 20)
+        esp_wifi_set_max_tx_power(8);
         break;
       }
     }
@@ -419,6 +435,9 @@ void handle_saveDeviceCfg(){
       infoApPass = apSSID.c_str();
       infoApAddr = WiFi.softAPIP().toString();
     } else if (WiFi.getMode() == 1) {
+      // Save some battery
+      //WiFi.setSleep(true);
+      esp_wifi_set_ps(WIFI_PS_MAX_MODEM);
       Serial.println("Connected. IP: " + WiFi.localIP().toString());
       apConnected=true;
       infoApName = wifi_ssid.c_str();
