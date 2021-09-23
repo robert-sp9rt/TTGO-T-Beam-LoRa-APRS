@@ -935,7 +935,7 @@ void setup(){
   else if(lora_speed==600)
     rf95.setModemConfig(BG_RF95::Bw125Cr48Sf1024);
   else
-    rf95.setModemConfig(BG_RF95::Bw125Cr45Sf4096);
+    rf95.setModemConfig(BG_RF95::Bw125Cr48Sf4096);
 
   Serial.printf("LoRa Speed:\t%d\n", lora_speed);
   
