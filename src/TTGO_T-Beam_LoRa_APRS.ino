@@ -388,7 +388,7 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, const String &message) {
     rf95.setModemConfig(BG_RF95::Bw125Cr48Sf1024);
   }
   else{
-    rf95.setModemConfig(BG_RF95::Bw125Cr45Sf4096);
+    rf95.setModemConfig(BG_RF95::Bw125Cr48Sf4096);
   }
   rf95.setFrequency(lora_FREQ);
   rf95.setTxPower(lora_LTXPower);
