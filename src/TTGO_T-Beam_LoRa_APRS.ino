@@ -287,9 +287,9 @@ void prepareAPRSFrame(){
   outString += Tcall;
 
   if (relay_path.isEmpty()){
-    outString += ">APLO01:!";
+    outString += ">APLO02:!";
   }else{
-    outString += ">APLO01," + relay_path + ":!";
+    outString += ">APLO02," + relay_path + ":!";
   }
 
   if(gps_state && gps.location.isValid()){
@@ -431,7 +431,7 @@ void writedisplaytext(String HeaderTxt, String Line1, String Line2, String Line3
   }else if(BattVolts <= 3.3){
     #ifdef T_BEAM_V1_0
       axp.setChgLEDMode(AXP20X_LED_OFF);
-      axp.shutdown();
+      //axp.shutdown(); <-we need fix this 
     #endif
   }
   display.clearDisplay();
@@ -583,7 +583,7 @@ String prepareCallsign(const String& callsign){
         String telemetryEquations = String(":") + Tcall_message + ":EQNS.0,5.1,3000,0,10,0,0,10,0,0,28,3000,0,10,0";
         String telemetryData = String("T#") + tel_sequence_str + "," + String(b_volt) + "," + String(b_in_c) + "," + String(b_out_c) + "," + String(ac_volt) + "," + String(ac_c) + ",00000000";
         String telemetryBase = "";
-        telemetryBase += Tcall + ">APLO01" + tel_path_str + ":";
+        telemetryBase += Tcall + ">APLO02" + tel_path_str + ":";
         Serial.print(telemetryBase);
         sendToTNC(telemetryBase + telemetryParamsNames);
         sendToTNC(telemetryBase + telemetryUnitNames);
