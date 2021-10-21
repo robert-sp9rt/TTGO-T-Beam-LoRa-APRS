@@ -1182,8 +1182,8 @@ void loop() {
     point_avg_speed=0;
   }
   average_speed_final = (average_speed[0]+average_speed[1]+average_speed[2]+average_speed[3]+average_speed[4])/5;
-  nextTX = (sb_max_interval-sb_min_interval)/(sb_max_speed-sb_min_speed)*(sb_max_speed-average_speed_final)+sb_min_interval;
-  if (nextTX < sb_min_interval) {nextTX=sb_min_interval;}
+  nextTX = ((sb_max_speed > average_speed_final) ? ((sb_max_interval-sb_min_interval)/(sb_max_speed-sb_min_speed)*(sb_max_speed-average_speed_final)+sb_min_interval) : sb_min_interval);
+  //if (nextTX < sb_min_interval) {nextTX=sb_min_interval;}   // already assured (  (sb_max_speed <= average_speed_final) -> sb_min_interval)
   if (nextTX > sb_max_interval) {nextTX=sb_max_interval;}
   average_course[point_avg_course] = gps.course.deg();   // calculate smart beaconing course
   ++point_avg_course;
