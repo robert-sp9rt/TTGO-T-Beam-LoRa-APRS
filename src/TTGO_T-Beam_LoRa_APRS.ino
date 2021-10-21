@@ -366,8 +366,6 @@ void prepareAPRSFrame(){
     outString += ("V");
   }
 
-  outString = outString + '\r';
-
   #ifdef KISS_PROTOCOL
     sendToTNC(outString);
   #endif
