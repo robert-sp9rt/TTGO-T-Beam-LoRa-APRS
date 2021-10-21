@@ -551,7 +551,7 @@ String prepareCallsign(const String& callsign){
         uint8_t ac_c = (axp.getVbusCurrent()) / 10;
         // Pad telemetry message address to 9 characters
         char Tcall_message_char[9];
-        sprintf_P(Tcall_message_char, "%-9s", Tcall);
+        sprintf_P(Tcall_message_char, "%-9s", Tcall.c_str());
         String Tcall_message = String(Tcall_message_char);
         // Flash the light when telemetry is being sent
         #ifdef ENABLE_LED_SIGNALING
@@ -782,15 +782,15 @@ void setup(){
 
     if (!preferences.getBool(PREF_APRS_SB_MIN_SPEED_PRESET_INIT)){
       preferences.putBool(PREF_APRS_SB_MIN_SPEED_PRESET_INIT, true);
-      preferences.putInt(PREF_APRS_SB_MIN_SPEED_PRESET, sb_min_speed);
+      preferences.putInt(PREF_APRS_SB_MIN_SPEED_PRESET, (int ) sb_min_speed);
     }
-    sb_min_speed = preferences.getInt(PREF_APRS_SB_MIN_SPEED_PRESET);
+    sb_min_speed = (float) preferences.getInt(PREF_APRS_SB_MIN_SPEED_PRESET);
 
     if (!preferences.getBool(PREF_APRS_SB_MAX_SPEED_PRESET_INIT)){
       preferences.putBool(PREF_APRS_SB_MAX_SPEED_PRESET_INIT, true);
-      preferences.putInt(PREF_APRS_SB_MAX_SPEED_PRESET, sb_max_speed);
+      preferences.putInt(PREF_APRS_SB_MAX_SPEED_PRESET, (int ) sb_max_speed);
     }
-    sb_max_speed = preferences.getInt(PREF_APRS_SB_MAX_SPEED_PRESET);
+    sb_max_speed = (float) preferences.getInt(PREF_APRS_SB_MAX_SPEED_PRESET);
 
     if (!preferences.getBool(PREF_APRS_SB_ANGLE_PRESET_INIT)){
       preferences.putBool(PREF_APRS_SB_ANGLE_PRESET_INIT, true);
@@ -958,7 +958,7 @@ void setup(){
     rf95.setModemConfig(BG_RF95::Bw125Cr45Sf4096);
   }
 
-  Serial.printf("LoRa Speed:\t%d\n", lora_speed);
+  Serial.printf("LoRa Speed:\t%lu\n", lora_speed);
   
   rf95.setFrequency(lora_freq);
   Serial.printf("LoRa FREQ:\t%f\n", lora_freq);
