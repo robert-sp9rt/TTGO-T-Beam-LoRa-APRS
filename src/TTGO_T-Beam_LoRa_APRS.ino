@@ -1178,6 +1178,9 @@ void loop() {
   LongShown = String(gps.location.lng(),5);
   average_speed[point_avg_speed] = gps.speed.kmph();   // calculate smart beaconing
   ++point_avg_speed;
+  // not transmitted due to rate limit in previous round? Try again without recomputing nextTX
+  if (nextTX && nextTX <= 20000L)
+    goto behind_recomputation_of_nextTX;
   if (point_avg_speed>4) {
     point_avg_speed=0;
   }
@@ -1216,11 +1219,16 @@ void loop() {
     }
     old_course = new_course;
   }
+
   if ((millis()<sb_max_interval)&&(lastTX == 0)) {
     nextTX = 0;
   }
-  if ( (lastTX+nextTX) <= millis()  ) {
-    if (gps.location.age() < 2000) {
+
+  behind_recomputation_of_nextTX:
+
+  // rate limit to 20s¶
+  if ((lastTX+nextTX) < millis()) && ((millis()-lastTX) >= 20000L)) {
+     if (gps.location.age() < 2000) {
       enableOled(); // enable OLED
       writedisplaytext(" ((TX))","","LAT: "+LatShown,"LON: "+LongShown,"SPD: "+String(gps.speed.kmph(),1)+"  CRS: "+String(gps.course.deg(),1),getSatAndBatInfo());
       sendpacket();
