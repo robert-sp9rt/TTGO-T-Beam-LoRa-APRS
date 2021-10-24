@@ -306,7 +306,7 @@ void prepareAPRSFrame(){
   outString += Tcall;
 
   //if (relay_path.isEmpty()){
-  outString += ">APLOB1";
+  outString += ">APLOX1";
   if (relay_path.length() < 3) {
     int ssid = relay_path.toInt();
     if (ssid > 0 && ssid <= /* 15 // no, max hop 3 */ 3) {
@@ -619,7 +619,7 @@ String prepareCallsign(const String& callsign){
         String telemetryEquations = String(":") + Tcall_message + ":EQNS.0,5.1,3000,0,10,0,0,10,0,0,28,3000,0,10,0";
         String telemetryData = String("T#") + tel_sequence_str + "," + String(b_volt) + "," + String(b_in_c) + "," + String(b_out_c) + "," + String(ac_volt) + "," + String(ac_c) + ",00000000";
         String telemetryBase = "";
-        telemetryBase += Tcall + ">APLOB1" + tel_path_str + ":";
+        telemetryBase += Tcall + ">APLOX1" + tel_path_str + ":";
         Serial.print(telemetryBase);
         sendToTNC(telemetryBase + telemetryParamsNames);
         sendToTNC(telemetryBase + telemetryUnitNames);
