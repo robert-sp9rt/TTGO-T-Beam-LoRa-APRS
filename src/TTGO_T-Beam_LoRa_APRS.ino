@@ -233,22 +233,28 @@ float avg_c_y, avg_c_x;
 uint8_t txPower = TXdbmW;
 
 
-// may be coonfigured
+// may be configured
 boolean rate_limit_message_text = true;		// ratelimit adding messate text (-> saves airtime)
+boolean lora_automatic_cr_adaption = true;	// automatic CR adaption (should be configurable in Web-Interface).
+						// We'll count users (except own digipeated packets), and if we're alone, CR4/8 doesn't disturb anyone.
+						// If we have a high load on the channel, we'll decrease up to CR4/5.
+						// You may set this to off if you are a fixed station / repeater / gateway
 
 #ifdef KISS_PROTOCOL
 bool acceptOwnLocationReportsViaKiss = true;		// may be a web-configurable variable true: Switches of local beacons as long as a kiss device is sending positions with our local callsign. false: filters out position packets with own callsign coming from kiss (-> do not send to LoRa).
 boolean allow_gps_sleep_while_kiss = true;		// may be a web-configurable variable. If user has a display attached to this tracker, he'll will be able to see his position because our gps does not go to sleep (-> set this to false). Why sleep? Energy saving
 
 // do not configure
-uint32_t time_last_own_position_via_kiss_received = 0L;
-uint32_t time_last_frame_via_kiss_received = 0L;
+uint32_t time_last_own_position_via_kiss_received = 0L;	// kiss client sends position report with our call+ssid. Remember when.
+uint32_t time_last_frame_via_kiss_received = 0L;	// kiss client sends aprs-text-messages with our call+ssid. Remember when.
 boolean kiss_client_came_via_bluetooth = false;
 #endif
 
 // do not configure
 boolean dont_send_own_position_packets = false;		// dynamicaly set if kiss device sends position. Maybe there are other usecases (-> kiss-independent)
 boolean gps_state_before_autochange = false;		// remember gps state before autochange
+uint32_t time_last_lora_frame_received = 0L;
+uint32_t time_last_own_text_message_via_kiss_received = 0L;
 
 
 #ifdef ENABLE_WIFI
@@ -317,7 +323,16 @@ void prepareAPRSFrame(){
   } else {
     outString = outString + "," + relay_path;
   }
-  outString += ":!";
+  outString += ":";
+  if (
+#ifdef ENABLE_BLUETOOTH
+       SerialBT.hasClient() ||
+#endif
+       ((time_last_own_text_message_via_kiss_received + 24*60*60*1000L) > millis())
+     )
+    outString += "=";
+  else
+    outString += "!";
 
   if(gps_state && gps.location.isValid()){
     outString += aprsSymbolTable;
@@ -1132,10 +1147,10 @@ void loop() {
   if (dont_send_own_position_packets) {
   #ifdef KISS_PROTOCOL
     // reset to default state if kiss device is disconnected, silent or last position frame was seen long time ago (i.e. 1h).
-     if (
-   #ifdef ENABLE_BLUETOOTH
+    if (
+#ifdef ENABLE_BLUETOOTH
          (kiss_client_came_via_bluetooth && !SerialBT.hasClient()) ||
-   #endif
+#endif
          (((time_last_own_position_via_kiss_received + sb_max_interval + 10*1000L) < millis()) &&
              time_last_own_position_via_kiss_received >= time_last_frame_via_kiss_received) ||
            // ^kiss client has not recently sent a position gain (sb_max_interval plus 10 seconds grace) and kiss client sent no other data
@@ -1149,11 +1164,10 @@ void loop() {
       dont_send_own_position_packets = false;
       time_last_own_position_via_kiss_received = 0L;
       time_last_frame_via_kiss_received = 0L;
-   #ifdef ENABLE_BLUETOOTH
+#ifdef ENABLE_BLUETOOTH
       if (kiss_client_came_via_bluetooth && !SerialBT.hasClient())
         kiss_client_came_via_bluetooth = false;
-   #endif
-
+#endif
     }
   #endif
   }
@@ -1217,7 +1231,8 @@ void loop() {
                   kiss_client_came_via_bluetooth = true;
               #endif
 	    }
-	  }
+	  } else if (*p == ':')
+	    time_last_own_text_message_via_kiss_received = millis();
         }
         enableOled(); // enable OLED
         writedisplaytext("((KISSTX))","","","","","");
@@ -1242,6 +1257,7 @@ out:
     #ifdef SHOW_RX_PACKET                                                 // only show RX packets when activitated in config
       loraReceivedLength = sizeof(lora_RXBUFF);                           // reset max length before receiving!
       if (rf95.recvAPRS(lora_RXBUFF, &loraReceivedLength)) {
+	uint32_t t_now = millis();
         loraReceivedFrameString = "";
         //int rssi = rf95.lastSNR();
         //Serial.println(rssi);
@@ -1249,6 +1265,36 @@ out:
         for (int i=0 ; i < loraReceivedLength ; i++) {
           loraReceivedFrameString += (char) lora_RXBUFF[i];
         }
+	const char *received_frame = loraReceivedFrameString.c_str();
+	// CR adaption: because only for SF12 different CR levels have been defined, we unfortunately cannot deal with SF < 12.
+	if (lora_automatic_cr_adaption && lora_speed <= 300L) {
+	  static uint16_t rf_transmissions_heard_in_timeslot = 0;
+	  uint32_t time_measurement_start = 0L;
+
+	  // not our own digipeated call?
+	  if (! (!strcmp(received_frame, Tcall.c_str()) && received_frame[Tcall.length()] == '>')) {
+	    rf_transmissions_heard_in_timeslot++;
+	    // was digipeated? -> there was another rf transmission
+	    char *p = strchr(received_frame, '>');
+	    char *q = strchr(received_frame, ',');
+	    char *r = strchr(received_frame, '*');
+	    if (p && q && r && q > p && r > q && strchr(r, ':') > r)
+	      rf_transmissions_heard_in_timeslot++;
+	    }
+	  if (t_now > (5*60*1000L) && ((time_measurement_start + 5*60*1000L) < t_now)) {
+	    rf_transmissions_heard_in_timeslot /= 2L;
+	    time_measurement_start = t_now - (5*60*1000L/2L);
+	  }
+	  if (rf_transmissions_heard_in_timeslot <= 3 && (time_last_lora_frame_received+40000L) < t_now)
+	    lora_speed = 180;
+	  else if (rf_transmissions_heard_in_timeslot <= 5 && (time_last_lora_frame_received+35000L) < t_now)
+	    lora_speed = 210;
+	  else if (rf_transmissions_heard_in_timeslot <= 6 && (time_last_lora_frame_received+25000L) < t_now)
+	    lora_speed = 210;
+	  else
+	    lora_speed = 300;
+	}
+	time_last_lora_frame_received = t_now;
         writedisplaytext("  ((RX))", "", loraReceivedFrameString, "", "", "");
         #ifdef KISS_PROTOCOL
           sendToTNC(loraReceivedFrameString);
@@ -1265,7 +1311,7 @@ out:
       #endif
     #endif
   }
- 
+
   // Send position, if not requested to do not ;) But enter this part if user likes our LA/LON/SPD/CRS to be displayed on his screen ('!allow_gps_sleep_while_kiss' caused gps_state false')
   if (!dont_send_own_position_packets && !gps_state)
     goto behind_position_tx;
@@ -1283,7 +1329,7 @@ out:
   ++point_avg_course;
 
   // not transmitted due to rate limit in previous round? Try again without recomputing nextTX
-  if (nextTX && nextTX <= 20000L)
+  if (nextTX && (nextTX <= ((uint32_t ) (6000000L / lora_speed ))))
     goto behind_recomputation_of_nextTX;
 
 
@@ -1330,12 +1376,8 @@ out:
 
 behind_recomputation_of_nextTX:
 
-  // rate limit to 20s
-  //if (nextTX && (nextTX < 20000L) && (millis()-lastTX) < 20000L)
-    //nextTX = 20000L;
-
-  // rate limit to 20s
-  if (!dont_send_own_position_packets && ((lastTX+nextTX) < millis()) && ((millis()-lastTX) >= 20000L)) {
+  // rate limit to 20s in SF12 CR4/5 aka lora_speed 300; 5s in lora_speed 1200 (SF9 CR4/7). -> 1200/lora_speed*5 seconds == 6000000 / lora_speed ms
+  if (!dont_send_own_position_packets && ((lastTX+nextTX) < millis()) && ((millis()-lastTX) >= ((uint32_t ) (6000000L / lora_speed )))) {
     if (gps.location.age() < 2000) {
       enableOled(); // enable OLED
       writedisplaytext(" ((TX))","","LAT: "+LatShown,"LON: "+LongShown,"SPD: "+String(gps.speed.kmph(),1)+"  CRS: "+String(gps.course.deg(),1),getSatAndBatInfo());
