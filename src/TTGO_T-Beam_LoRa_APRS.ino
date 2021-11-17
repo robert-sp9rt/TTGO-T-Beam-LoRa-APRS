@@ -312,7 +312,7 @@ void prepareAPRSFrame(){
   outString += Tcall;
 
   //if (relay_path.isEmpty()){
-  outString += ">APLO02";
+  outString += ">APLOX1";
   if (relay_path.length() < 3) {
     int ssid = relay_path.toInt();
     if (ssid > 0 && ssid <= /* 15 // no, max hop 3 */ 3) {
@@ -634,7 +634,7 @@ String prepareCallsign(const String& callsign){
         String telemetryEquations = String(":") + Tcall_message + ":EQNS.0,5.1,3000,0,10,0,0,10,0,0,28,3000,0,10,0";
         String telemetryData = String("T#") + tel_sequence_str + "," + String(b_volt) + "," + String(b_in_c) + "," + String(b_out_c) + "," + String(ac_volt) + "," + String(ac_c) + ",00000000";
         String telemetryBase = "";
-        telemetryBase += Tcall + ">APLO02" + tel_path_str + ":";
+        telemetryBase += Tcall + ">APLOX1" + tel_path_str + ":";
         Serial.print(telemetryBase);
         sendToTNC(telemetryBase + telemetryParamsNames);
         sendToTNC(telemetryBase + telemetryUnitNames);
@@ -1145,7 +1145,7 @@ void loop() {
   }
 
   if (dont_send_own_position_packets) {
-#ifdef KISS_PROTOCOL
+  #ifdef KISS_PROTOCOL
     // reset to default state if kiss device is disconnected, silent or last position frame was seen long time ago (i.e. 1h).
     if (
 #ifdef ENABLE_BLUETOOTH
@@ -1154,12 +1154,12 @@ void loop() {
          (((time_last_own_position_via_kiss_received + sb_max_interval + 10*1000L) < millis()) &&
              time_last_own_position_via_kiss_received >= time_last_frame_via_kiss_received) ||
            // ^kiss client has not recently sent a position gain (sb_max_interval plus 10 seconds grace) and kiss client sent no other data
-	 ((time_last_frame_via_kiss_received + sb_max_interval * 2 + 10*1000L) < millis())) {
+         ((time_last_frame_via_kiss_received + sb_max_interval * 2 + 10*1000L) < millis())) {
             // ^ kiss client sent no positions and stoped sending other data for 2*sb_max_interval (plus 10 seconds grace)
-#ifdef T_BEAM_V1_0
+   #ifdef T_BEAM_V1_0
       if (!gps_state && gps_state_before_autochange)
         axp.setPowerOutPut(AXP192_LDO3, AXP202_ON);
-#endif
+   #endif
       gps_state = gps_state_before_autochange;
       dont_send_own_position_packets = false;
       time_last_own_position_via_kiss_received = 0L;
@@ -1169,7 +1169,7 @@ void loop() {
         kiss_client_came_via_bluetooth = false;
 #endif
     }
-#endif
+  #endif
   }
   if (fixed_beacon_enabled && !dont_send_own_position_packets) {
     if (millis() >= next_fixed_beacon && !gps_state) {
@@ -1219,17 +1219,17 @@ void loop() {
             if (!dont_send_own_position_packets) {
 	      gps_state_before_autochange = gps_state;
 	      if (allow_gps_sleep_while_kiss) {
-#ifdef T_BEAM_V1_0
+              #ifdef T_BEAM_V1_0
 	        if (gps_state)
 	          axp.setPowerOutPut(AXP192_LDO3, AXP202_OFF);                           // switch off GPS
-#endif
+              #endif
 	        gps_state = false;
 	      }
 	      dont_send_own_position_packets = true;
-#ifdef ENABLE_BLUETOOTH
-	      if (SerialBT.hasClient())
-	        kiss_client_came_via_bluetooth = true;
-#endif
+              #ifdef ENABLE_BLUETOOTH
+                if (SerialBT.hasClient())
+                  kiss_client_came_via_bluetooth = true;
+              #endif
 	    }
 	  } else if (*p == ':')
 	    time_last_own_text_message_via_kiss_received = millis();
