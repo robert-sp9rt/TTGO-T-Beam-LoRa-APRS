@@ -195,6 +195,12 @@ void handle_Cfg() {
   jsonData += jsonLineFromPreferenceString(PREF_WIFI_SSID);
   jsonData += jsonLineFromPreferenceDouble(PREF_LORA_FREQ_PRESET);
   jsonData += jsonLineFromPreferenceInt(PREF_LORA_SPEED_PRESET);
+  jsonData += jsonLineFromPreferenceBool(PREF_LORA_AUTOMATIC_CR_ADAPTION_PRESET);
+  jsonData += jsonLineFromPreferenceBool(PREF_LORA_ADD_SNR_RSSI_TO_PATH_PRESET);
+  jsonData += jsonLineFromPreferenceInt(PREF_APRS_DIGIPEATING_MODE_PRESET);
+  jsonData += jsonLineFromPreferenceInt(PREF_APRS_CROSS_DIGIPEATING_MODE_PRESET);
+  jsonData += jsonLineFromPreferenceDouble(PREF_LORA_FREQ_CROSSDIGI_PRESET);
+  jsonData += jsonLineFromPreferenceInt(PREF_LORA_SPEED_CROSSDIGI_PRESET);
   jsonData += jsonLineFromPreferenceString(PREF_APRS_CALLSIGN);
   jsonData += jsonLineFromPreferenceString(PREF_APRS_RELAY_PATH);
   jsonData += jsonLineFromPreferenceString(PREF_APRS_SYMBOL_TABLE);
@@ -208,16 +214,21 @@ void handle_Cfg() {
   jsonData += jsonLineFromPreferenceInt(PREF_APRS_SB_MIN_SPEED_PRESET);
   jsonData += jsonLineFromPreferenceInt(PREF_APRS_SB_MAX_SPEED_PRESET);
   jsonData += jsonLineFromPreferenceDouble(PREF_APRS_SB_ANGLE_PRESET);
+  jsonData += jsonLineFromPreferenceInt(PREF_APRS_SB_TURN_SLOPE_PRESET);
+  jsonData += jsonLineFromPreferenceInt(PREF_APRS_SB_TURN_TIME_PRESET);
   jsonData += jsonLineFromPreferenceBool(PREF_APRS_SHOW_BATTERY);
   jsonData += jsonLineFromPreferenceBool(PREF_APRS_FIXED_BEACON_PRESET);
   jsonData += jsonLineFromPreferenceBool(PREF_APRS_SHOW_ALTITUDE);
   jsonData += jsonLineFromPreferenceBool(PREF_APRS_GPS_EN);
+  jsonData += jsonLineFromPreferenceBool(PREF_ACCEPT_OWN_POSITION_REPORTS_VIA_KISS);
+  jsonData += jsonLineFromPreferenceBool(PREF_GPS_ALLOW_SLEEP_WHILE_KISS);
   jsonData += jsonLineFromPreferenceBool(PREF_ENABLE_TNC_SELF_TELEMETRY);
   jsonData += jsonLineFromPreferenceInt(PREF_TNC_SELF_TELEMETRY_INTERVAL);
   jsonData += jsonLineFromPreferenceInt(PREF_TNC_SELF_TELEMETRY_MIC);
   jsonData += jsonLineFromPreferenceString(PREF_TNC_SELF_TELEMETRY_PATH);
   jsonData += jsonLineFromPreferenceBool(PREF_DEV_OL_EN);
   jsonData += jsonLineFromPreferenceBool(PREF_APRS_SHOW_CMT);
+  jsonData += jsonLineFromPreferenceBool(PREF_APRS_COMMENT_RATELIMIT_PRESET);
   jsonData += jsonLineFromPreferenceBool(PREF_DEV_BT_EN);
   jsonData += jsonLineFromPreferenceInt(PREF_DEV_SHOW_RX_TIME);
   jsonData += jsonLineFromPreferenceBool(PREF_DEV_AUTO_SHUT);
@@ -260,6 +271,18 @@ void handle_SaveAPRSCfg() {
   if (server.hasArg(PREF_LORA_SPEED_PRESET)){
     preferences.putInt(PREF_LORA_SPEED_PRESET, server.arg(PREF_LORA_SPEED_PRESET).toInt());
   }
+  preferences.putBool(PREF_LORA_AUTOMATIC_CR_ADAPTION_PRESET, server.hasArg(PREF_LORA_AUTOMATIC_CR_ADAPTION_PRESET));
+  preferences.putBool(PREF_LORA_ADD_SNR_RSSI_TO_PATH_PRESET, server.hasArg(PREF_LORA_ADD_SNR_RSSI_TO_PATH_PRESET));
+  if (server.hasArg(PREF_APRS_CROSS_DIGIPEATING_MODE_PRESET)){
+    preferences.putInt(PREF_APRS_CROSS_DIGIPEATING_MODE_PRESET, server.arg(PREF_APRS_CROSS_DIGIPEATING_MODE_PRESET).toInt());
+  }
+  if (server.hasArg(PREF_LORA_FREQ_CROSSDIGI_PRESET)){
+    preferences.putDouble(PREF_LORA_FREQ_CROSSDIGI_PRESET, server.arg(PREF_LORA_FREQ_CROSSDIGI_PRESET).toDouble());
+    Serial.printf("FREQ crossdigi saved:\t%f\n", server.arg(PREF_LORA_FREQ_CROSSDIGI_PRESET).toDouble());
+  }
+  if (server.hasArg(PREF_LORA_SPEED_CROSSDIGI_PRESET)){
+    preferences.putInt(PREF_LORA_SPEED_CROSSDIGI_PRESET, server.arg(PREF_LORA_SPEED_CROSSDIGI_PRESET).toInt());
+  }
   // APRS station settings
   if (server.hasArg(PREF_APRS_CALLSIGN) && !server.arg(PREF_APRS_CALLSIGN).isEmpty()){
     preferences.putString(PREF_APRS_CALLSIGN, server.arg(PREF_APRS_CALLSIGN));
@@ -300,28 +323,43 @@ void handle_SaveAPRSCfg() {
     preferences.putInt(PREF_APRS_SB_MIN_INTERVAL_PRESET, server.arg(PREF_APRS_SB_MIN_INTERVAL_PRESET).toInt());
   }
   if (server.hasArg(PREF_APRS_SB_MAX_INTERVAL_PRESET)){
-    preferences.putInt(PREF_APRS_SB_MAX_INTERVAL_PRESET, server.arg(PREF_APRS_SB_MAX_INTERVAL_PRESET).toInt());
+    //preferences.putInt(PREF_APRS_SB_MAX_INTERVAL_PRESET, server.arg(PREF_APRS_SB_MAX_INTERVAL_PRESET).toInt());
+    int i = server.arg(PREF_APRS_SB_MAX_INTERVAL_PRESET).toInt();
+    if (i <= preferences.getInt(PREF_APRS_SB_MIN_INTERVAL_PRESET)) i = preferences.getInt(PREF_APRS_SB_MIN_INTERVAL_PRESET) +1;
+    preferences.putInt(PREF_APRS_SB_MAX_INTERVAL_PRESET, i);
   }
   if (server.hasArg(PREF_APRS_SB_MIN_SPEED_PRESET)){
     preferences.putInt(PREF_APRS_SB_MIN_SPEED_PRESET, server.arg(PREF_APRS_SB_MIN_SPEED_PRESET).toInt());
   }
   if (server.hasArg(PREF_APRS_SB_MAX_SPEED_PRESET)){
-    preferences.putInt(PREF_APRS_SB_MAX_SPEED_PRESET, server.arg(PREF_APRS_SB_MAX_SPEED_PRESET).toInt());
+    //preferences.putInt(PREF_APRS_SB_MAX_SPEED_PRESET, server.arg(PREF_APRS_SB_MAX_SPEED_PRESET).toInt());
+    int i = server.arg(PREF_APRS_SB_MAX_SPEED_PRESET).toInt();
+    if (i <= preferences.getInt(PREF_APRS_SB_MIN_SPEED_PRESET)) i = preferences.getInt(PREF_APRS_SB_MIN_SPEED_PRESET) +1;
+    preferences.putInt(PREF_APRS_SB_MAX_SPEED_PRESET, i);
   }
   if (server.hasArg(PREF_APRS_SB_ANGLE_PRESET)){
     preferences.putDouble(PREF_APRS_SB_ANGLE_PRESET, server.arg(PREF_APRS_SB_ANGLE_PRESET).toDouble());
   }
-  
+  if (server.hasArg(PREF_APRS_SB_TURN_SLOPE_PRESET)){
+    preferences.putInt(PREF_APRS_SB_TURN_SLOPE_PRESET, server.arg(PREF_APRS_SB_TURN_SLOPE_PRESET).toInt());
+  }
+  if (server.hasArg(PREF_APRS_SB_TURN_TIME_PRESET)){
+    preferences.putInt(PREF_APRS_SB_TURN_TIME_PRESET, server.arg(PREF_APRS_SB_TURN_TIME_PRESET).toInt());
+  }
 
   preferences.putBool(PREF_APRS_SHOW_BATTERY, server.hasArg(PREF_APRS_SHOW_BATTERY));
   preferences.putBool(PREF_ENABLE_TNC_SELF_TELEMETRY, server.hasArg(PREF_ENABLE_TNC_SELF_TELEMETRY));
   preferences.putBool(PREF_APRS_SHOW_ALTITUDE, server.hasArg(PREF_APRS_SHOW_ALTITUDE));
   preferences.putBool(PREF_APRS_FIXED_BEACON_PRESET, server.hasArg(PREF_APRS_FIXED_BEACON_PRESET));
   preferences.putBool(PREF_APRS_GPS_EN, server.hasArg(PREF_APRS_GPS_EN));
+  preferences.putBool(PREF_ACCEPT_OWN_POSITION_REPORTS_VIA_KISS, server.hasArg(PREF_ACCEPT_OWN_POSITION_REPORTS_VIA_KISS));
+  preferences.putBool(PREF_GPS_ALLOW_SLEEP_WHILE_KISS, server.hasArg(PREF_GPS_ALLOW_SLEEP_WHILE_KISS));
   preferences.putBool(PREF_APRS_SHOW_CMT, server.hasArg(PREF_APRS_SHOW_CMT));
+  preferences.putBool(PREF_APRS_COMMENT_RATELIMIT_PRESET, server.hasArg(PREF_APRS_COMMENT_RATELIMIT_PRESET));
 
   server.sendHeader("Location", "/");
   server.send(302,"text/html", "");
+  
 }
 
 void handle_saveDeviceCfg(){
