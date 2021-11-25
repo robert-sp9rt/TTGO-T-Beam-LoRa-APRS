@@ -772,11 +772,11 @@ void setup(){
       preferences.putBool(PREF_LORA_ADD_SNR_RSSI_TO_PATH_PRESET_INIT, true);
       preferences.putBool(PREF_LORA_ADD_SNR_RSSI_TO_PATH_PRESET, lora_add_snr_rssi_to_path);
     }
-    lora_add_snr_rssi_to_path = preferences.getBool(PREF_LORA_AUTOMATIC_CR_ADAPTION_PRESET);
+    lora_add_snr_rssi_to_path = preferences.getBool(PREF_LORA_ADD_SNR_RSSI_TO_PATH_PRESET);
 
     if (!preferences.getBool(PREF_APRS_DIGIPEATING_MODE_PRESET_INIT)){
       preferences.putBool(PREF_APRS_DIGIPEATING_MODE_PRESET_INIT, true);
-      preferences.putInt(PREF_APRS_DIGIPEATING_MODE_PRESET_INIT, lora_digipeating_mode);
+      preferences.putInt(PREF_APRS_DIGIPEATING_MODE_PRESET, lora_digipeating_mode);
     }
     lora_digipeating_mode = preferences.getInt(PREF_APRS_DIGIPEATING_MODE_PRESET);
 
@@ -797,7 +797,7 @@ void setup(){
       preferences.putBool(PREF_LORA_SPEED_CROSSDIGI_PRESET_INIT, true);
       preferences.putInt(PREF_LORA_SPEED_CROSSDIGI_PRESET, lora_speed_cross_digi);
     }
-    lora_speed_cross_digi = preferences.getInt(PREF_LORA_SPEED_PRESET);
+    lora_speed_cross_digi = preferences.getInt(PREF_LORA_SPEED_CROSSDIGI_PRESET);
 
     // APRS station settings
 
@@ -856,7 +856,7 @@ void setup(){
     }
     showBattery = preferences.getBool(PREF_APRS_SHOW_BATTERY);
 
-     if (!preferences.getBool(PREF_ENABLE_TNC_SELF_TELEMETRY_INIT)){
+    if (!preferences.getBool(PREF_ENABLE_TNC_SELF_TELEMETRY_INIT)){
       preferences.putBool(PREF_ENABLE_TNC_SELF_TELEMETRY_INIT, true);
       preferences.putBool(PREF_ENABLE_TNC_SELF_TELEMETRY, enable_tel);
     }
@@ -1834,7 +1834,6 @@ out:
   }
 
   if (lora_automatic_cr_adaption && lora_speed <= 300L && millis() > (5*60*1000L) && (time_lora_automaic_cr_adoption_rx_measurement_window + 5*60*1000L) < millis()) {
-ulong lora_old_speed = lora_speed;
     // recalculate automatic adapted CR
     // transmissions in 5 min window.
     // Approx seconds between frames: if transmission takes with CR4/5 3s and sleeps 3x so long, we see every 25s a transmission in a 5s window.
@@ -1851,7 +1850,6 @@ ulong lora_old_speed = lora_speed;
       lora_speed = 300;
     lora_automaic_cr_adoption_rf_transmissions_heard_in_timeslot /= 2L;
     time_lora_automaic_cr_adoption_rx_measurement_window = millis() - (5*60*1000L/2L);
-    lora_old_speed = lora_speed;
   }
 
   // Send position, if not requested to do not ;) But enter this part if user likes our LA/LON/SPD/CRS to be displayed on his screen ('!gps_allow_sleep_while_kiss' caused 'gps_state false')
