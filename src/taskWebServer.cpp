@@ -251,12 +251,12 @@ void handle_ReceivedList() {
   auto received = root.createNestedArray("received");
   for (auto element: receivedPackets){
     char buf[64];
-    strftime(buf, 64, "%Y.%m.%d %H:%M:%S", &element->rxTime);
+    strftime(buf, 64, "%Y-%m-%d %H:%M:%S", &element->rxTime);
     auto packet_data = received.createNestedObject();
     packet_data["time"] = String(buf);
     packet_data["packet"] = element->packet->c_str();
     packet_data["rssi"] = element->RSSI;
-    packet_data["snr"] = element->SNR / 10.0f;
+    packet_data["snr"] = element->SNR;
   }
 
   server.send(200,"application/json", doc.as<String>());
