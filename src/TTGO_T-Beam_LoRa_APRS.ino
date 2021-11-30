@@ -1181,12 +1181,64 @@ void enableOled() {
 }
 
 
+// rf95.lastSNR() returns unsigned 8bit value, which we get as input
+int bg_rf95snr_to_snr(uint8_t snr)
+{
+    // SNR values reported by rf95.lastSNR() are not plausible. See those two projects:
+    // https://github.com/Lora-net/LoRaMac-node/issues/275
+    // https://github.com/mayeranalytics/pySX127x/blob/master/SX127x/LoRa.py
+    // We use an old BG_RF95 library from 2001. RadioHead/RH_RF95.cpp implements _lastSNR and _lastRssi correctly accordingg to the specs
+    // Remember the last signal to noise ratio, LORA mode
+    // Per page 111, SX1276/77/78/79 datasheetk
+    //return ( ( snr > 127 ) ? (snr - 256) : snr ) / 4.0;
+    if (snr & 0x80) {
+      return -(( ( ~snr + 1 ) & 0xFF ) >> 2);
+    }
+    return ( snr & 0x7F ) >> 2;
+}
+
+int bg_rf95rssi_to_rssi(int rssi)
+{
+  // We use an old BG_RF95 library from 2001. RadioHead/RH_RF95.cpp implements _lastSNR and _lastRssi correctly accordingg to the specs
+  int _lastSNR = bg_rf95snr_to_snr(rf95.lastSNR());
+  boolean _usingHFport = (lora_freq >= 779.0);
+
+  // bg_rf95 library: _lastRssi = spiRead(BG_RF95_REG_1A_PKT_RSSI_VALUE) - 137. First, undo -137 ooperation
+  int _lastRssi = rf95.lastRssi() + 137;
+
+  if (_lastSNR < 0)
+    _lastRssi = _lastRssi + _lastSNR;
+  else
+    _lastRssi = (int)_lastRssi * 16 / 15;
+  if (_usingHFport)
+    _lastRssi -= 157;
+  else
+     _lastRssi -= 164;
+  return _lastRssi;
+}
+
 char *encode_snr_rssi_in_path()
 {
   static char buf[8]; // length for "Q23073*" == 7 + 1 (\0) == 8
   *buf = 0;
-  if (lora_add_snr_rssi_to_path)
-    sprintf(buf, "Q%02d%03d*", min(rf95.lastSNR(), (uint8_t) 99), max(-999, (int ) rf95.lastRssi())*-1);
+  if (lora_add_snr_rssi_to_path) {
+    // SNR values reported by rf95.lastSNR() are not plausible. See those two projects:
+    // https://github.com/Lora-net/LoRaMac-node/issues/275
+    // https://github.com/mayeranalytics/pySX127x/blob/master/SX127x/LoRa.py
+    // rf95snr_to_snr returns values in range -32 to 31. The lower two bits are RFU
+    int snr = bg_rf95snr_to_snr(rf95.lastSNR());
+    char c_snr[3];
+    int rssi = bg_rf95rssi_to_rssi(rf95.lastRssi());
+    if (snr >= 0) {
+      // make SNR < 0 human readable.
+      sprintf(c_snr, "%02d", snr % 100);
+    } else {
+      // SNR < 0: replace -1 by A1, -10 by B0, ...
+      sprintf(c_snr, "%c%01d", ((snr/-10) % 10) + 'A', (-snr) % 10);
+    }
+    // SSID 0-15 could be used for BER, RX antenna gain, EIRP, ..
+    sprintf(buf, "Q%s%03d*", c_snr, (rssi < -999) ? 999 : ((rssi > -1) ? 0 : -rssi));
+  }
   return buf;
 }
 
@@ -1793,9 +1845,9 @@ out:
     #ifdef SHOW_RX_PACKET                                                 // only show RX packets when activitated in config
         writedisplaytext("  ((RX))", "", loraReceivedFrameString, "", "", "");
         #ifdef ENABLE_WIFI
-          sendToWebList(loraReceivedFrameString, rf95.lastRssi(), rf95.lastSNR());
+          sendToWebList(loraReceivedFrameString, bg_rf95rssi_to_rssi(rf95.lastRssi()), bg_rf95snr_to_snr(rf95.lastSNR()));
         #endif
-        syslog_log(LOG_INFO, String("Received LoRa: '") + loraReceivedFrameString + "', RSSI:" + rf95.lastRssi() + ", SNR: "  + rf95.lastSNR());
+          syslog_log(LOG_INFO, String("Received LoRa: '") + loraReceivedFrameString + "', RSSI:" + bg_rf95rssi_to_rssi(rf95.lastRssi()) + ", SNR: " + bg_rf95snr_to_snr(rf95.lastSNR()));
     #endif
         #ifdef KISS_PROTOCOL
 	char *s = 0;
