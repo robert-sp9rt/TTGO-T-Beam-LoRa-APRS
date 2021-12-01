@@ -1188,14 +1188,14 @@ int bg_rf95snr_to_snr(uint8_t snr)
     // https://github.com/Lora-net/LoRaMac-node/issues/275
     // https://github.com/mayeranalytics/pySX127x/blob/master/SX127x/LoRa.py
     // We use an old BG_RF95 library from 2001. RadioHead/RH_RF95.cpp implements _lastSNR and _lastRssi correctly accordingg to the specs
-    // Remember the last signal to noise ratio, LORA mode
-    // Per page 111, SX1276/77/78/79 datasheetk
+    // Per page 111, SX1276/77/78/79 datasheet
     //return ( ( snr > 127 ) ? (snr - 256) : snr ) / 4.0;
     if (snr & 0x80) {
       return -(( ( ~snr + 1 ) & 0xFF ) >> 2);
     }
     return ( snr & 0x7F ) >> 2;
 }
+
 
 int bg_rf95rssi_to_rssi(int rssi)
 {
@@ -1217,27 +1217,36 @@ int bg_rf95rssi_to_rssi(int rssi)
   return _lastRssi;
 }
 
+
 char *encode_snr_rssi_in_path()
 {
-  static char buf[8]; // length for "Q23073*" == 7 + 1 (\0) == 8
+  static char buf[8]; // length for "Q2373X*" == 7 + 1 (\0) == 8
   *buf = 0;
   if (lora_add_snr_rssi_to_path) {
     // SNR values reported by rf95.lastSNR() are not plausible. See those two projects:
     // https://github.com/Lora-net/LoRaMac-node/issues/275
     // https://github.com/mayeranalytics/pySX127x/blob/master/SX127x/LoRa.py
-    // rf95snr_to_snr returns values in range -32 to 31. The lower two bits are RFU
+    // rf95snr_to_snr returns values in range -32 to 31. The lowest two bits are RFU
     int snr = bg_rf95snr_to_snr(rf95.lastSNR());
-    char c_snr[3];
     int rssi = bg_rf95rssi_to_rssi(rf95.lastRssi());
-    if (snr >= 0) {
-      // make SNR < 0 human readable.
-      sprintf(c_snr, "%02d", snr % 100);
-    } else {
-      // SNR < 0: replace -1 by A1, -10 by B0, ...
-      sprintf(c_snr, "%c%01d", ((snr/-10) % 10) + 'A', (-snr) % 10);
-    }
-    // SSID 0-15 could be used for BER, RX antenna gain, EIRP, ..
-    sprintf(buf, "Q%s%03d*", c_snr, (rssi < -999) ? 999 : ((rssi > -1) ? 0 : -rssi));
+    if (snr > 99) snr = 99;			// snr will not go upper 31
+    else if (snr < -99) snr = -99;		// snr will not go below -32
+    if (rssi > 0) rssi = 0;			// rssi is always negative
+    else if (rssi < -259) rssi = -259;		// rssi will not be below -174 anyway ;)
+    // Make SNR >= 0 human readable:
+    //   First position: SNR < 0: replace -1 by A1, -10 by B0, ...
+    //   This way, we reduce "-10" to two letters: B0.
+    // Make RSSI  > -100 RSSI human readable.
+    //   First position: rssi < -99 -> 0. We'll use 91 for rssi -91 instead of J1 for better readibility.
+    //   K means -10x, L means -11x, M means -12x, N means -13x, ...   (everone knows, 'N' is #13 in alphabet out of 26 chars ;)
+    //   => With this, we reduce "-110" to two letters: L0.
+    // Last position of call (6) is left empty for future use. As well as SSID 1-15. Could be used for BER, RX antenna gain, EIRP, ..
+    // => This is a good compromise between efficiency and being able to quickly interprete snr and rssi
+    sprintf(buf, "Q%c%01d%c%01d*",
+      ((snr >= 0 ? snr : -snr) / 10) + (snr >= 0 ? '0' : 'A'),
+      (snr >= 0 ? snr : -snr) % 10,
+      (-rssi / 10) + (rssi > -100 ? '0' : 'A'),
+      (-rssi) % 10);
   }
   return buf;
 }
