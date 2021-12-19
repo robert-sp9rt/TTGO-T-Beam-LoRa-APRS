@@ -195,6 +195,8 @@ void handle_Cfg() {
   jsonData += jsonLineFromPreferenceString(PREF_WIFI_SSID);
   jsonData += jsonLineFromPreferenceDouble(PREF_LORA_FREQ_PRESET);
   jsonData += jsonLineFromPreferenceInt(PREF_LORA_SPEED_PRESET);
+  jsonData += jsonLineFromPreferenceBool(PREF_LORA_TX_ENABLE);
+  jsonData += jsonLineFromPreferenceInt(PREF_LORA_TX_POWER);
   jsonData += jsonLineFromPreferenceBool(PREF_LORA_AUTOMATIC_CR_ADAPTION_PRESET);
   jsonData += jsonLineFromPreferenceBool(PREF_LORA_ADD_SNR_RSSI_TO_PATH_PRESET);
   jsonData += jsonLineFromPreferenceInt(PREF_APRS_DIGIPEATING_MODE_PRESET);
@@ -270,6 +272,10 @@ void handle_SaveAPRSCfg() {
   }
   if (server.hasArg(PREF_LORA_SPEED_PRESET)){
     preferences.putInt(PREF_LORA_SPEED_PRESET, server.arg(PREF_LORA_SPEED_PRESET).toInt());
+  }
+  preferences.putBool(PREF_LORA_TX_ENABLE, server.hasArg(PREF_LORA_TX_ENABLE));
+  if (server.hasArg(PREF_LORA_TX_POWER)) {
+    preferences.putInt(PREF_LORA_TX_POWER, server.arg(PREF_LORA_TX_POWER).toInt());
   }
   preferences.putBool(PREF_LORA_AUTOMATIC_CR_ADAPTION_PRESET, server.hasArg(PREF_LORA_AUTOMATIC_CR_ADAPTION_PRESET));
   preferences.putBool(PREF_LORA_ADD_SNR_RSSI_TO_PATH_PRESET, server.hasArg(PREF_LORA_ADD_SNR_RSSI_TO_PATH_PRESET));

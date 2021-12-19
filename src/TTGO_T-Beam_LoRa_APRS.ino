@@ -258,7 +258,17 @@ String infoApAddr = "";
 float average_course[ANGLE_AVGS];
 float avg_c_y, avg_c_x;
 
+#ifdef TXDISABLE		// define TXDISABLE if you like to ensure that we never TX (i.e. if we are behind an rx-amplifier)
+boolean lora_tx_enabled = false;
+uint8_t txPower = 0;
+#else
+boolean lora_tx_enabled = true;
+#ifdef TXdbmW
 uint8_t txPower = TXdbmW;
+#else
+uint8_t txPower = 23;
+#endif
+#endif
 
 
 // may be configured
@@ -461,6 +471,8 @@ void sendpacket(){
  */
 // Feauture request: add param lora_speed. Currently, we need a variable for storing the old speed, and affer loraSend(), we have to revert :(
 void loraSend(byte lora_LTXPower, float lora_FREQ, const String &message) {
+  if (!lora_tx_enabled)
+    return;
   #ifdef ENABLE_LED_SIGNALING
     digitalWrite(TXLED, LOW);
   #endif
@@ -761,6 +773,18 @@ void setup(){
       preferences.putInt(PREF_LORA_SPEED_PRESET, lora_speed);
     }
     lora_speed = preferences.getInt(PREF_LORA_SPEED_PRESET);
+
+    if (!preferences.getBool(PREF_LORA_TX_ENABLE_INIT)){
+      preferences.putBool(PREF_LORA_TX_ENABLE_INIT, true);
+      preferences.putBool(PREF_LORA_TX_ENABLE, lora_tx_enabled);
+    }
+    lora_tx_enabled = preferences.getBool(PREF_LORA_TX_ENABLE);
+
+    if (!preferences.getInt(PREF_LORA_TX_POWER_INIT)){
+      preferences.putBool(PREF_LORA_TX_POWER_INIT, true);
+      preferences.putInt(PREF_LORA_TX_POWER, txPower);
+    }
+    txPower = lora_tx_enabled ? preferences.getInt(PREF_LORA_TX_POWER) : 0;
 
     if (!preferences.getBool(PREF_LORA_AUTOMATIC_CR_ADAPTION_PRESET_INIT)){
       preferences.putBool(PREF_LORA_AUTOMATIC_CR_ADAPTION_PRESET_INIT, true);
@@ -1291,7 +1315,7 @@ char *add_element_to_path(const char *data, const char *element)
   }
   char *pos = header_end;
   if (q && (!r || r+1 != header_end)) {
-    // Something like DL9SAU>APRS,NOGATE -> DL9SAU>APPRS,MYCALL*,NOGATE DL9SAU>APRS,DL1AAA*,WIDE2-1 -> DL9SAU>APRS,DL1AAA*,MYCALL*,WIDE2-1
+    // Something like DL9SAU>APRS,NOGATE -> DL9SAU>APRS,MYCALL*,NOGATE DL9SAU>APRS,DL1AAA*,WIDE2-1 -> DL9SAU>APRS,DL1AAA*,MYCALL*,WIDE2-1
     // r+1 points to ','; q points to ','
     pos = r ? r+1 : q;
   } // else: Something like DL9SAU>APRS:... (no via path), or DL9SAU>APRS,DB0AAA*:
@@ -1690,7 +1714,7 @@ void loop() {
     }
 #endif
   }
-  if (fixed_beacon_enabled && !dont_send_own_position_packets) {
+  if (fixed_beacon_enabled && !dont_send_own_position_packets && lora_tx_enabled) {
     if (millis() >= next_fixed_beacon && !gps_state) {
       enableOled(); // enable OLED
       next_fixed_beacon = millis() + fix_beacon_interval;
@@ -1807,11 +1831,13 @@ void loop() {
 	    }
 	  }
 	}
-        loraSend(txPower, lora_freq, String(data));
+	if (lora_tx_enabled) {
+          loraSend(txPower, lora_freq, String(data));
+          enableOled(); // enable OLED
+          writedisplaytext("((KISSTX))","","","","","");
+          time_to_refresh = millis() + showRXTime;
+	}
 out:
-        enableOled(); // enable OLED
-        writedisplaytext("((KISSTX))","","","","","");
-        time_to_refresh = millis() + showRXTime;
         delete TNC2DataFrame;
       }
     }
@@ -1866,7 +1892,7 @@ out:
         #endif
 
 	// Are we configured as lora digi?
-	if (lora_digipeating_mode > 0) {
+	if (lora_digipeating_mode > 0 && lora_tx_enabled) {
 	  uint32_t time_lora_TXBUFF_for_digipeating_was_filled_prev = time_lora_TXBUFF_for_digipeating_was_filled;
           handle_lora_frame_for_lora_digipeating(received_frame, encode_snr_rssi_in_path());
 	  // new frame in digipeating queue? cross-digi freq enabled and freq set? Send without delay.
@@ -1914,7 +1940,7 @@ out:
   }
 
   // Send position, if not requested to do not ;) But enter this part if user likes our LA/LON/SPD/CRS to be displayed on his screen ('!gps_allow_sleep_while_kiss' caused 'gps_state false')
-  if (!dont_send_own_position_packets && !gps_state)
+  if (!gps_state && (!dont_send_own_position_packets || !lora_tx_enabled))
     goto behind_position_tx;
 
   LatShown = String(gps.location.lat(),5);
@@ -1995,7 +2021,7 @@ out:
 
   // rate limit to 20s in SF12 CR4/5 aka lora_speed 300; 5s in lora_speed 1200 (SF9 CR4/7). -> 1200/lora_speed*5 seconds == 6000000 / lora_speed ms
   // If special case nextTX <= 1: we already enforced rate-limiting (see course computation)
-  if (!dont_send_own_position_packets && (lastTX+nextTX) < millis() && (nextTX <= 1 || (millis()-lastTX) >= (6000000L / lora_speed ))) {
+  if (!dont_send_own_position_packets && lora_tx_enabled && (lastTX+nextTX) < millis() && (nextTX <= 1 || (millis()-lastTX) >= (6000000L / lora_speed ))) {
     if (gps.location.age() < 2000) {
       enableOled(); // enable OLED
       writedisplaytext(" ((TX))","","LAT: "+LatShown,"LON: "+LongShown,"SPD: "+String(gps.speed.kmph(),1)+"  CRS: "+String(gps.course.deg(),1),getSatAndBatInfo());
@@ -2010,7 +2036,7 @@ out:
   }else{
     if (millis() > time_to_refresh){
       if (gps.location.age() < 2000) {
-        writedisplaytext(" "+Tcall,"Time to TX: "+(dont_send_own_position_packets ? "never" : (String(((lastTX+nextTX)-millis())/1000)+"sec")),"LAT: "+LatShown,"LON: "+LongShown,"SPD: "+String(gps.speed.kmph())+"  CRS: "+String(gps.course.deg(),1),getSatAndBatInfo());
+        writedisplaytext(" "+Tcall,"Time to TX: "+((dont_send_own_position_packets || !lora_tx_enabled) ? "never" : (String(((lastTX+nextTX)-millis())/1000)+"sec")),"LAT: "+LatShown,"LON: "+LongShown,"SPD: "+String(gps.speed.kmph())+"  CRS: "+String(gps.course.deg(),1),getSatAndBatInfo());
       } else {
         displayInvalidGPS();
       }
@@ -2060,7 +2086,7 @@ behind_position_tx:
 
 
   // Data for digipeating in queue?
-  if (lora_digipeating_mode && *lora_TXBUFF_for_digipeating) {
+  if (lora_digipeating_mode && *lora_TXBUFF_for_digipeating && lora_tx_enabled) {
     // 5s grace time (plus up to 250ms random) for digipeating. 10s if we are a fill-in digi
     if ((time_lora_TXBUFF_for_digipeating_was_filled + 5*lora_digipeating_mode*1000L + (millis() % 250)) < millis()) {
       if (lora_cross_digipeating_mode < 2 && (time_lora_TXBUFF_for_digipeating_was_filled + 2* 5*lora_digipeating_mode*1000L) > millis()) {

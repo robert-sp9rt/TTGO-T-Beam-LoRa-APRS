@@ -69,6 +69,14 @@
                         </select>
                     </div>
 		    <div>
+		        <label for="lora_tx_en">Enable LoRa transmitter</label>
+                        <input name="lora_tx_en" id="lora_tx_en" type="checkbox" value="1" title="Allow TX on LoRa. Disable this if you like to prevent TX under all circumstances (i.e. if your tracker is behind an rx-amplifier)">
+		    </div>
+                    <div>
+                        <label for="txPower">dBm</label>
+                        <input name="txPower" id="txPower" type="number" min="0" max="23" title="LoRa TX Power. Range 0 to 23dBm">
+                    </div>
+		    <div>
 		        <label for="lora_cradapt">Automatic CodeRate adaption</label>
                         <input name="lora_cradapt" id="lora_cradapt" type="checkbox" value="1" title="Enable automatic CR adaption. Still testing, if it behaves good to our network. Currently works only for SF12 modes, because for SF 10 and lower the code for programming CR+SF+BW-combination has not been written yet">
 
@@ -371,6 +379,9 @@
                         <input class="button-primary" type="submit" value="Update">
                     </div>
                 </form>
+            </div>
+            <div class="grid-container full">
+		Click <a href="/cfg">here</a> to view your configuration.
             </div>
         </article>
     </section>
