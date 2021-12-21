@@ -1244,7 +1244,7 @@ int bg_rf95rssi_to_rssi(int rssi)
 
 char *encode_snr_rssi_in_path()
 {
-  static char buf[8]; // length for "Q2373X*" == 7 + 1 (\0) == 8
+  static char buf[7]; // length for "Q2373X" == 6 + 1 (\0) == 7
   *buf = 0;
   if (lora_add_snr_rssi_to_path) {
     // SNR values reported by rf95.lastSNR() are not plausible. See those two projects:
@@ -1266,7 +1266,7 @@ char *encode_snr_rssi_in_path()
     //   => With this, we reduce "-110" to two letters: L0.
     // Last position of call (6) is left empty for future use. As well as SSID 1-15. Could be used for BER, RX antenna gain, EIRP, ..
     // => This is a good compromise between efficiency and being able to quickly interprete snr and rssi
-    sprintf(buf, "Q%c%01d%c%01d*",
+    sprintf(buf, "Q%c%01d%c%01d",
       ((snr >= 0 ? snr : -snr) / 10) + (snr >= 0 ? '0' : 'A'),
       (snr >= 0 ? snr : -snr) % 10,
       (-rssi / 10) + (rssi > -100 ? '0' : 'A'),
@@ -1314,13 +1314,13 @@ char *add_element_to_path(const char *data, const char *element)
     }
   }
   char *pos = header_end;
-  if (q && (!r || r+1 != header_end)) {
-    // Something like DL9SAU>APRS,NOGATE -> DL9SAU>APRS,MYCALL*,NOGATE DL9SAU>APRS,DL1AAA*,WIDE2-1 -> DL9SAU>APRS,DL1AAA*,MYCALL*,WIDE2-1
-    // r+1 points to ','; q points to ','
-    pos = r ? r+1 : q;
-  } // else: Something like DL9SAU>APRS:... (no via path), or DL9SAU>APRS,DB0AAA*:
+  if (q) {
+    // Something like DL9SAU>APRS,NOGATE -> DL9SAU>APRS,MYCALL*,NOGATE DL9SAU>APRS,DL1AAA*,WIDE2-1 -> DL9SAU>APRS,DL1AAA,MYCALL*,WIDE2-1
+    // r points to '*', r+1 points to ',' and we omit '*'; q points to ','
+    pos = r ? r : q;
+  } // else: Something like DL9SAU>APRS:... (no via path)
   snprintf(buf, pos-data +1, "%s,", data);
-  sprintf(buf + strlen(buf), ",%s%s", element, pos);
+  sprintf(buf + strlen(buf), ",%s*%s", element, pos + (*pos == '*' ? 1 : 0));
   return buf;
 }
 
@@ -1571,19 +1571,32 @@ add_our_data:
   // Build txbuff:
 
   char buf[sizeof(lora_TXBUFF_for_digipeating)];
+
   sprintf(buf, "%s>%s", frame->src.addr, frame->dst.addr);
+  char *digi_paths_start = buf + strlen(buf);
 
   for (i = 0; i < insert_our_data_before; i++)
-    sprintf(buf + strlen(buf), ",%s*", frame->digis[i].addr);
+    sprintf(buf + strlen(buf), ",%s", frame->digis[i].addr);
 
   if (*snr_rssi)
     sprintf(buf + strlen(buf), ",%s", snr_rssi);
 
   if (add_our_call)
-    sprintf(buf + strlen(buf), ",%s*", Tcall.c_str());
+    sprintf(buf + strlen(buf), ",%s", Tcall.c_str());
 
-  for (i = insert_our_data_before; i < frame->n_digis; i++)
-    sprintf(buf + strlen(buf), ",%s%s", frame->digis[i].addr, (frame->digis[i].repeated ? "*" : ""));
+  for (i = insert_our_data_before; i < frame->n_digis; i++) {
+    sprintf(buf + strlen(buf), ",%s", frame->digis[i].addr);
+    if (frame->digis[i].repeated) {
+      i++;
+      break;
+    }
+  }
+
+  // we have something added after "SRC>DST"?
+  if (strlen(buf) > (digi_paths_start-buf))
+    strcat(buf, "*");
+  for (; i < frame->n_digis; i++)
+    sprintf(buf + strlen(buf), ",%s", frame->digis[i].addr);
 
   // length check:
   if (strlen(buf) + 1 /* : */ + strlen(frame->data) > sizeof(lora_TXBUFF_for_digipeating)-1)
@@ -1785,7 +1798,7 @@ void loop() {
             const char *header_end = strchr(data, ':');
 	    // packet (sender not our call) came via kiss and we gate it to lora? If we are a configured as a digipeater,
 	    // and our gated packet will be repeated, then we have avoid repeating it again, by adding our call to the digi path.
-	    // Example: DL9SAU>APRS,WIDE1-1,WIDE2-1. If we gate it and a fill-in-digi hears it, if becomes DL9SAU>APRS,DL1AAA*,WIDE1*,WIDE2-1.
+	    // Example: DL9SAU>APRS,WIDE1-1,WIDE2-1. If we gate it and a fill-in-digi hears it, if becomes DL9SAU>APRS,DL1AAA,WIDE1*,WIDE2-1.
 	    // If we are a wide-digi, we see that packet and don't find our callsign in the path, we would repeat it.
 	    // => We should add our callsign to path, with the following exceptions:
 	    //   1. if sender is our call (already checked above);
@@ -1825,7 +1838,7 @@ void loop() {
 	      }
 
 	      if (add_our_call) {
-		char *s = add_element_to_path(data, (Tcall + "*").c_str());
+		char *s = add_element_to_path(data, Tcall.c_str());
 	        if (s) data = s;
 	      }
 	    }
@@ -1906,7 +1919,7 @@ out:
               lora_speed = lora_speed_prev;  // we really need an argument for speed in loraSend()
               writedisplaytext("  ((TX cross-digi))", "", String(lora_TXBUFF_for_digipeating), "", "", "");
 #ifdef KISS_PROTOCOL
-	      char *s = add_element_to_path(lora_TXBUFF_for_digipeating, "GATE*");
+	      char *s = add_element_to_path(lora_TXBUFF_for_digipeating, "GATE");
 	      sendToTNC(s ? String(s) : lora_TXBUFF_for_digipeating);
 #endif
 	    }
