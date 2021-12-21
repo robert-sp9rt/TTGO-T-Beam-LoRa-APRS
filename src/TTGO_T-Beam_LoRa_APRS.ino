@@ -1319,7 +1319,7 @@ char *add_element_to_path(const char *data, const char *element)
     // r points to '*', r+1 points to ',' and we omit '*'; q points to ','
     pos = r ? r : q;
   } // else: Something like DL9SAU>APRS:... (no via path)
-  snprintf(buf, pos-data +1, "%s,", data);
+  snprintf(buf, pos-data +1, "%s", data);
   sprintf(buf + strlen(buf), ",%s*%s", element, pos + (*pos == '*' ? 1 : 0));
   return buf;
 }
@@ -1811,7 +1811,7 @@ void loop() {
 	    if (r > header_end) r = 0;
 	    if (p && header_end > p) {
 	      boolean add_our_call = true;
-	      // Has the path only one hop or less left (WIDE1-1 or WIDEn or WiDEn*, WIDEn*,WIDEn-1 or WIDEn-1?
+	      // Has the path only one hop or less left (WIDE1-1 or WIDEn or WiDEn* or WIDEn*,WIDEn-1 or WIDEn-1)?
 	      // Also check for digicall,WIDE1-1;  digicall*,WIDE1-1 is ok.   Pos ',' before wide is != q (q is first ',' in ..>APRS,DIGICALL,WIDE2-1)
 	      char *wide_hop = strstr(data, ",WIDE");
 	      if (wide_hop && wide_hop < header_end && wide_hop != q && *(wide_hop-1) != '*')
