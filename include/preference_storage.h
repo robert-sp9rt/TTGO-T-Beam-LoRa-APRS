@@ -10,6 +10,7 @@ extern Preferences preferences;
 static const char *const PREF_WIFI_SSID = "wifi_ssid";
 static const char *const PREF_WIFI_PASSWORD = "wifi_password";
 static const char *const PREF_AP_PASSWORD = "ap_password";
+
 // LoRa settings
 static const char *const PREF_LORA_FREQ_PRESET_INIT = "lora_freq_i";
 static const char *const PREF_LORA_FREQ_PRESET = "lora_freq";
@@ -21,10 +22,18 @@ static const char *const PREF_LORA_TX_POWER_INIT = "txPower_i";
 static const char *const PREF_LORA_TX_POWER = "txPower";
 static const char *const PREF_LORA_ADD_SNR_RSSI_TO_PATH_PRESET_INIT = "lora_rssi2p_i";
 static const char *const PREF_LORA_ADD_SNR_RSSI_TO_PATH_PRESET = "lora_rssi2p";
+static const char *const PREF_LORA_ADD_SNR_RSSI_TO_PATH_END_AT_KISS_PRESET_INIT = "snraprsis_i";
+static const char *const PREF_LORA_ADD_SNR_RSSI_TO_PATH_END_AT_KISS_PRESET = "snraprsis";
 static const char *const PREF_LORA_FREQ_CROSSDIGI_PRESET_INIT = "lora_freq_x_i";
 static const char *const PREF_LORA_FREQ_CROSSDIGI_PRESET = "lora_freq_x";
+static const char *const PREF_LORA_TX_BEACON_AND_KISS_ON_FREQUENCIES_PRESET_INIT = "tx_qrg_bc_i";
+static const char *const PREF_LORA_TX_BEACON_AND_KISS_ON_FREQUENCIES_PRESET = "tx_qrg_bc";
 static const char *const PREF_LORA_SPEED_CROSSDIGI_PRESET_INIT = "lora_speed_x_i";
 static const char *const PREF_LORA_SPEED_CROSSDIGI_PRESET = "lora_speed_x";
+static const char *const PREF_LORA_TX_POWER_CROSSDIGI_PRESET_INIT = "txPower_x_i";
+static const char *const PREF_LORA_TX_POWER_CROSSDIGI_PRESET = "txPower_x";
+static const char *const PREF_LORA_RX_ON_FREQUENCIES_PRESET_INIT = "rx_qrg_i";
+static const char *const PREF_LORA_RX_ON_FREQUENCIES_PRESET = "rx_qrg";
 static const char *const PREF_LORA_AUTOMATIC_CR_ADAPTION_PRESET_INIT = "lora_cradapt_i";
 static const char *const PREF_LORA_AUTOMATIC_CR_ADAPTION_PRESET = "lora_cradapt";
 static const char *const PREF_APRS_DIGIPEATING_MODE_PRESET_INIT = "lora_dig_mode_i";
@@ -102,5 +111,21 @@ static const char *const PREF_DEV_AUTO_SHUT_PRESET = "shutdown_dt";
 static const char *const PREF_DEV_AUTO_SHUT_PRESET_INIT = "shutdown_dtini";
 static const char *const PREF_DEV_SHOW_OLED_TIME = "sh_oledtime"; // set OLED timeout
 static const char *const PREF_DEV_SHOW_OLED_TIME_INIT = "sh_oledtime_i";
+
+// APRSIS settings
+static const char *const PREF_APRSIS_EN_INIT = "aprsis_en_i";
+static const char *const PREF_APRSIS_EN = "aprsis_en";
+static const char *const PREF_APRSIS_SERVER_NAME_INIT = "aprsis_srv_h_i";
+static const char *const PREF_APRSIS_SERVER_NAME = "aprsis_srv_h";
+static const char *const PREF_APRSIS_SERVER_PORT_INIT = "aprsis_srv_p_i";
+static const char *const PREF_APRSIS_SERVER_PORT = "aprsis_srv_p";
+static const char *const PREF_APRSIS_FILTER_INIT = "aprsis_fltr_i";
+static const char *const PREF_APRSIS_FILTER = "aprsis_fltr";
+static const char *const PREF_APRSIS_CALLSIGN_INIT = "aprsis_call_i";
+static const char *const PREF_APRSIS_CALLSIGN = "aprsis_call";
+static const char *const PREF_APRSIS_PASSWORD_INIT = "aprsis_pw_i";
+static const char *const PREF_APRSIS_PASSWORD = "aprsis_pw";
+static const char *const PREF_APRSIS_ALLOW_INET_TO_RF_INIT = "aprsis_2rf_i";
+static const char *const PREF_APRSIS_ALLOW_INET_TO_RF = "aprsis_2rf";
 
 #endif

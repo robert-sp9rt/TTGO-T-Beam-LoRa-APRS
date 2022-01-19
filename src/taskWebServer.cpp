@@ -26,6 +26,20 @@ extern String infoApName;
 extern String infoApPass;
 extern String infoApAddr;
 
+// For APRS-IS connection
+extern String to_aprsis_data;
+extern boolean aprsis_enabled;
+extern String aprsis_host;
+extern uint16_t aprsis_port;
+extern String aprsis_filter;
+extern String aprsis_callsign;
+extern String aprsis_password;
+extern boolean aprsis_data_allow_inet_to_rf;
+
+extern double lora_freq_rx_curr;
+extern boolean lora_tx_enabled;
+
+
 QueueHandle_t webListReceivedQueue = nullptr;
 std::list <tReceivedPacketData*> receivedPackets;
 const int MAX_RECEIVED_LIST_SIZE = 50;
@@ -33,6 +47,19 @@ const int MAX_RECEIVED_LIST_SIZE = 50;
 String apSSID = "";
 String apPassword;
 String defApPassword = "xxxxxxxxxx";
+
+// needed for aprsis igate functionality
+String aprsis_status = "Disconnected";
+// aprsis 3rd party traffic encoding
+String generate_third_party_packet(String, String);
+#ifdef KISS_PROTOCOL
+extern void sendToTNC(const String &);
+#endif
+extern uint8_t txPower;
+extern double lora_freq;
+extern ulong lora_speed;
+extern void loraSend(byte, float, ulong, const String &);
+
 
 WebServer server(80);
 #ifdef KISS_PROTOCOL
@@ -152,7 +179,7 @@ void handle_SaveWifiCfg() {
       Serial.println("Updated AP PASS: " + server.arg(PREF_AP_PASSWORD));
     }
   }
-  
+
   server.sendHeader("Location", "/");
   server.send(302,"text/html", "");
 }
@@ -198,11 +225,15 @@ void handle_Cfg() {
   jsonData += jsonLineFromPreferenceBool(PREF_LORA_TX_ENABLE);
   jsonData += jsonLineFromPreferenceInt(PREF_LORA_TX_POWER);
   jsonData += jsonLineFromPreferenceBool(PREF_LORA_AUTOMATIC_CR_ADAPTION_PRESET);
-  jsonData += jsonLineFromPreferenceBool(PREF_LORA_ADD_SNR_RSSI_TO_PATH_PRESET);
+  jsonData += jsonLineFromPreferenceInt(PREF_LORA_ADD_SNR_RSSI_TO_PATH_PRESET);
+  jsonData += jsonLineFromPreferenceBool(PREF_LORA_ADD_SNR_RSSI_TO_PATH_END_AT_KISS_PRESET);
   jsonData += jsonLineFromPreferenceInt(PREF_APRS_DIGIPEATING_MODE_PRESET);
   jsonData += jsonLineFromPreferenceInt(PREF_APRS_CROSS_DIGIPEATING_MODE_PRESET);
+  jsonData += jsonLineFromPreferenceInt(PREF_LORA_TX_BEACON_AND_KISS_ON_FREQUENCIES_PRESET);
   jsonData += jsonLineFromPreferenceDouble(PREF_LORA_FREQ_CROSSDIGI_PRESET);
   jsonData += jsonLineFromPreferenceInt(PREF_LORA_SPEED_CROSSDIGI_PRESET);
+  jsonData += jsonLineFromPreferenceInt(PREF_LORA_TX_POWER_CROSSDIGI_PRESET);
+  jsonData += jsonLineFromPreferenceInt(PREF_LORA_RX_ON_FREQUENCIES_PRESET);
   jsonData += jsonLineFromPreferenceString(PREF_APRS_CALLSIGN);
   jsonData += jsonLineFromPreferenceString(PREF_APRS_RELAY_PATH);
   jsonData += jsonLineFromPreferenceString(PREF_APRS_SYMBOL_TABLE);
@@ -236,6 +267,16 @@ void handle_Cfg() {
   jsonData += jsonLineFromPreferenceBool(PREF_DEV_AUTO_SHUT);
   jsonData += jsonLineFromPreferenceInt(PREF_DEV_AUTO_SHUT_PRESET);
   jsonData += jsonLineFromPreferenceInt(PREF_DEV_SHOW_OLED_TIME);
+  jsonData += jsonLineFromPreferenceBool(PREF_APRSIS_EN);
+  jsonData += jsonLineFromPreferenceString(PREF_APRSIS_SERVER_NAME);
+  jsonData += jsonLineFromPreferenceInt(PREF_APRSIS_SERVER_PORT);
+  jsonData += jsonLineFromPreferenceString(PREF_APRSIS_FILTER);
+  jsonData += jsonLineFromPreferenceString(PREF_APRSIS_CALLSIGN);
+  jsonData += jsonLineFromPreferenceString(PREF_APRSIS_PASSWORD);
+  jsonData += jsonLineFromPreferenceBool(PREF_APRSIS_ALLOW_INET_TO_RF);
+  jsonData += jsonLineFromInt("lora_freq_rx_curr", (unsigned long ) (lora_freq_rx_curr*1000L));
+  //jsonData += jsonLineFromPreferenceDouble("lora_freq_rx_curr", lora_freq_rx_curr);
+  jsonData += jsonLineFromString("aprsis_status", aprsis_status.c_str());
   jsonData += jsonLineFromInt("FreeHeap", ESP.getFreeHeap());
   jsonData += jsonLineFromInt("HeapSize", ESP.getHeapSize());
   jsonData += jsonLineFromInt("FreeSketchSpace", ESP.getFreeSketchSpace());
@@ -278,12 +319,18 @@ void handle_SaveAPRSCfg() {
     preferences.putInt(PREF_LORA_TX_POWER, server.arg(PREF_LORA_TX_POWER).toInt());
   }
   preferences.putBool(PREF_LORA_AUTOMATIC_CR_ADAPTION_PRESET, server.hasArg(PREF_LORA_AUTOMATIC_CR_ADAPTION_PRESET));
-  preferences.putBool(PREF_LORA_ADD_SNR_RSSI_TO_PATH_PRESET, server.hasArg(PREF_LORA_ADD_SNR_RSSI_TO_PATH_PRESET));
+  if (server.hasArg(PREF_LORA_ADD_SNR_RSSI_TO_PATH_PRESET)){
+    preferences.putInt(PREF_LORA_ADD_SNR_RSSI_TO_PATH_PRESET, server.arg(PREF_LORA_ADD_SNR_RSSI_TO_PATH_PRESET).toInt());
+  }
+  preferences.putBool(PREF_LORA_ADD_SNR_RSSI_TO_PATH_END_AT_KISS_PRESET, server.hasArg(PREF_LORA_ADD_SNR_RSSI_TO_PATH_END_AT_KISS_PRESET));
   if (server.hasArg(PREF_APRS_DIGIPEATING_MODE_PRESET)){
     preferences.putInt(PREF_APRS_DIGIPEATING_MODE_PRESET, server.arg(PREF_APRS_DIGIPEATING_MODE_PRESET).toInt());
   }
   if (server.hasArg(PREF_APRS_CROSS_DIGIPEATING_MODE_PRESET)){
     preferences.putInt(PREF_APRS_CROSS_DIGIPEATING_MODE_PRESET, server.arg(PREF_APRS_CROSS_DIGIPEATING_MODE_PRESET).toInt());
+  }
+  if (server.hasArg(PREF_LORA_TX_BEACON_AND_KISS_ON_FREQUENCIES_PRESET)) {
+    preferences.putInt(PREF_LORA_TX_BEACON_AND_KISS_ON_FREQUENCIES_PRESET, server.arg(PREF_LORA_TX_BEACON_AND_KISS_ON_FREQUENCIES_PRESET).toInt());
   }
   if (server.hasArg(PREF_LORA_FREQ_CROSSDIGI_PRESET)){
     preferences.putDouble(PREF_LORA_FREQ_CROSSDIGI_PRESET, server.arg(PREF_LORA_FREQ_CROSSDIGI_PRESET).toDouble());
@@ -291,6 +338,12 @@ void handle_SaveAPRSCfg() {
   }
   if (server.hasArg(PREF_LORA_SPEED_CROSSDIGI_PRESET)){
     preferences.putInt(PREF_LORA_SPEED_CROSSDIGI_PRESET, server.arg(PREF_LORA_SPEED_CROSSDIGI_PRESET).toInt());
+  }
+  if (server.hasArg(PREF_LORA_TX_POWER_CROSSDIGI_PRESET)) {
+    preferences.putInt(PREF_LORA_TX_POWER_CROSSDIGI_PRESET, server.arg(PREF_LORA_TX_POWER_CROSSDIGI_PRESET).toInt());
+  }
+  if (server.hasArg(PREF_LORA_RX_ON_FREQUENCIES_PRESET)) {
+    preferences.putInt(PREF_LORA_RX_ON_FREQUENCIES_PRESET, server.arg(PREF_LORA_RX_ON_FREQUENCIES_PRESET).toInt());
   }
   // APRS station settings
   if (server.hasArg(PREF_APRS_CALLSIGN) && !server.arg(PREF_APRS_CALLSIGN).isEmpty()){
@@ -355,6 +408,25 @@ void handle_SaveAPRSCfg() {
   if (server.hasArg(PREF_APRS_SB_TURN_TIME_PRESET)){
     preferences.putInt(PREF_APRS_SB_TURN_TIME_PRESET, server.arg(PREF_APRS_SB_TURN_TIME_PRESET).toInt());
   }
+ 
+  preferences.putBool(PREF_APRSIS_EN, server.hasArg(PREF_APRSIS_EN));
+  if (server.hasArg(PREF_APRSIS_SERVER_NAME)){
+    preferences.putString(PREF_APRSIS_SERVER_NAME, server.arg(PREF_APRSIS_SERVER_NAME));
+  }
+  if (server.hasArg(PREF_APRSIS_SERVER_PORT)){
+    preferences.putInt(PREF_APRSIS_SERVER_PORT, server.arg(PREF_APRSIS_SERVER_PORT).toInt());
+  }
+  if (server.hasArg(PREF_APRSIS_FILTER)){
+    preferences.putString(PREF_APRSIS_FILTER, server.arg(PREF_APRSIS_FILTER));
+  }
+  if (server.hasArg(PREF_APRSIS_CALLSIGN)){
+    preferences.putString(PREF_APRSIS_CALLSIGN, server.arg(PREF_APRSIS_CALLSIGN));
+  }
+  if (server.hasArg(PREF_APRSIS_PASSWORD)){
+    preferences.putString(PREF_APRSIS_PASSWORD, server.arg(PREF_APRSIS_PASSWORD));
+  }
+  preferences.putBool(PREF_APRSIS_ALLOW_INET_TO_RF, server.hasArg(PREF_APRSIS_ALLOW_INET_TO_RF));
+  
 
   preferences.putBool(PREF_APRS_SHOW_BATTERY, server.hasArg(PREF_APRS_SHOW_BATTERY));
   preferences.putBool(PREF_ENABLE_TNC_SELF_TELEMETRY, server.hasArg(PREF_ENABLE_TNC_SELF_TELEMETRY));
@@ -537,6 +609,36 @@ void handle_saveDeviceCfg(){
 
   tReceivedPacketData *receivedPacketData = nullptr;
 
+  WiFiClient aprs_is_client;
+  uint32_t t_connect_apprsis_again = 0L;
+  String aprs_callsign = webServerCfg->callsign;
+  aprsis_host.trim();
+  aprsis_filter.trim();
+  aprsis_password.trim();
+  if (aprsis_callsign.length() < 3 || aprsis_callsign.length() > 9)
+    aprsis_callsign = "";
+  if (aprsis_callsign.isEmpty()) aprsis_callsign = aprs_callsign;
+  if (aprsis_callsign.length() < 3 || aprsis_callsign.length() > 9)
+    aprsis_callsign = "";
+  aprsis_callsign.toUpperCase(); aprsis_callsign.trim();
+
+  // sanity check
+  if (aprsis_enabled) {
+    if (aprsis_callsign.isEmpty() || aprsis_host.isEmpty() || aprsis_port == 0) {
+      aprsis_enabled = false;
+   } else {
+      const char *p = aprsis_callsign.c_str();
+      for (; *p && aprsis_enabled; p++) {
+        if (*p == '-') {
+          int len = strlen(p+1);
+          if (len < 1 || len > 2)
+            aprsis_enabled = false;
+        } else if ( !((*p >= 'A' && *p <= 'Z') || (*p >= '0' && *p <= '9')) )
+            aprsis_enabled = false;
+      }
+    }
+  }
+
   while (true){
     server.handleClient();
     if (xQueueReceive(webListReceivedQueue, &receivedPacketData, (1 / portTICK_PERIOD_MS)) == pdPASS) {
@@ -557,6 +659,137 @@ void handle_saveDeviceCfg(){
       delete receivedPacketData;
     }
 
+
+    if (aprsis_enabled) {
+      boolean err = true;
+      if (WiFi.getMode() == 1) {
+        if (WiFi.status() != WL_CONNECTED) { aprsis_status = "Error: no internet"; goto on_err; } else { if (aprsis_status == "Error: no internet") aprsis_status = "Internet available"; }
+        if (!aprs_is_client.connected() && t_connect_apprsis_again < millis()) {
+          aprsis_status = "Connecting";
+          aprs_is_client.connect(aprsis_host.c_str(), aprsis_port);
+          if (!aprs_is_client.connected()) { aprsis_status = "Error: connect failed"; goto on_err; }
+          aprsis_status = "Connected. Waiting for greeting.";
+          uint32_t t_start = millis();
+          while (!aprs_is_client.available() && (millis()-t_start) < 25000) delay(100);
+          if (aprs_is_client.available()) {
+	    // check 
+	    String s = aprs_is_client.readStringUntil('\n');
+	    if (s.isEmpty() || !s.startsWith("#")) { aprsis_status = "Error: unexpected greeting"; goto on_err; }
+	  } else { aprsis_status = "Error: No response"; goto on_err; }
+          aprsis_status = "Login";
+	  char buffer[1024];
+	  sprintf(buffer, "user %s pass %s TTGO-T-Beam-LoRa-APRS 0.1%s%s\r\n", aprsis_callsign.c_str(), aprsis_password.c_str(), aprsis_filter.isEmpty() ? " filter " : "", aprsis_filter.isEmpty() ? aprsis_filter.c_str() : "");
+          aprs_is_client.print(String(buffer));
+          t_start = millis();
+          while (!aprs_is_client.available() && (millis()-t_start) < 25000) delay(100);
+          aprsis_status = "Logged in";
+          if (aprs_is_client.available()) {
+	    // check 
+	    String s = aprs_is_client.readStringUntil('\n');
+	    if (s.isEmpty() || !s.startsWith("#")) { aprsis_status = "Error: unexpected reponse on login"; goto on_err; }
+	    if (s.indexOf(" verified") == -1) { aprsis_status = "Error: Login denied: " + s; aprsis_status.trim(); goto on_err; }
+	  } else { aprsis_status = "Error: No response"; goto on_err; }
+        }
+        if (!aprs_is_client.connected())
+          goto on_err;
+        //aprsis_status = "OK";
+        if (aprs_is_client.available()) {
+          //aprsis_status = "OK, reading";
+          String s = aprs_is_client.readStringUntil('\n');
+          if (!s) goto on_err;
+          //aprsis_status = "OK";
+          s.trim();
+          if (s.isEmpty()) goto on_err;
+          if (*(s.c_str()) != '#') {
+	    // generate third party packet. Use aprs_callsign (deriving from webServerCfg->callsign), because aprsis_callsign may have a non-aprs (but only aprsis-compatible) ssid like '-L4'
+            String third_party_packet = generate_third_party_packet(aprs_callsign, s);
+            if (!third_party_packet.isEmpty()) {
+#ifdef KISS_PROTOCOL
+              sendToTNC(third_party_packet);
+#endif
+              if (lora_tx_enabled && aprsis_data_allow_inet_to_rf) {
+                // if not our own frame coming back.
+		// or: not query or aprs-message addressed to our call (check both, aprs_callsign and aprsis_callsign).
+		//     ^This is quite complex. Format: "..::DL9SAU-15:..."
+		boolean do_not_send = false;
+                if (s.startsWith(aprs_callsign + '>') || s.startsWith(aprsis_callsign + '>')) {
+		  do_not_send = true;
+		} else {
+		  char *q = strchr(s.c_str(), ':');
+		  if (q) {
+		    q++;
+		    if (*q == ':' && strlen(q) > 10 && q[10] == ':' &&
+                        ((!strncmp(q+1, aprs_callsign.c_str(), aprs_callsign.length()) && (aprs_callsign.length() == 9 || q[9] == ' ')) ||
+                         (!strncmp(q+1, aprsis_callsign.c_str(), aprsis_callsign.length()) && (aprsis_callsign.length() == 9 || q[9] == ' ')) ))
+		      do_not_send = true;
+		  }
+		}
+                if (!do_not_send)
+                  loraSend(txPower, lora_freq, lora_speed, third_party_packet);
+              }
+            }
+          }
+        }
+        if (to_aprsis_data) {
+	  // copy(). We are threaded..
+	  String data = String(to_aprsis_data);
+	  // clear queue
+          to_aprsis_data = "";
+          data.trim();
+          char *p = strchr(data.c_str(), '>');
+          char *q;
+          // some plausibility checks.
+          if (p && p > data.c_str() && (q = strchr(p+1, ':'))) {
+            // Due to http://www.aprs-is.net/IGateDetails.aspx , never gate third-party traffic contining TCPIP or TCPXX
+            // IGATECALL>APRS,GATEPATH:}FROMCALL>TOCALL,TCPIP,IGATECALL*:original packet data
+            char *r; char *s;
+            if (!(q[1] == '}' && (r = strchr(q+2, '>')) && ((s = strstr(r+1, ",TCPIP,")) || (s = strstr(r+1, ",TCPXX,"))) && strstr(s+6, "*:"))) {
+	      char buf[256];
+	      int len = (q-data.c_str());
+	      if (len > 0 && len < sizeof(buf)) {
+	        strncpy(buf, data.c_str(), len);
+                buf[len] = 0;
+		String s_data = String(buf) + (lora_tx_enabled ? ",qAR," : ",qAO,") + aprsis_callsign + q + "\r\n";
+                aprsis_status = "OK, sending: " + s_data; aprsis_status.trim();
+                aprs_is_client.print(s_data);
+	      }
+            }
+          }
+          //aprsis_status = "OK";
+        }
+        err = false;
+
+        if (err) {
+on_err:
+	  aprs_is_client.stop();
+	  if (!aprsis_status.startsWith("Error: "))
+            aprsis_status = "Disconnected";
+	  if (t_connect_apprsis_again <=  millis())
+	    t_connect_apprsis_again = millis() + 60000;
+          to_aprsis_data = "";
+        }
+      }
+    }
+
     vTaskDelay(5/portTICK_PERIOD_MS);
   }
+}
+
+
+String generate_third_party_packet(String callsign, String packet_in)
+{
+  String packet_out = "";
+  const char *s = packet_in.c_str();
+  char *p = strchr(s, '>');
+  char *q = strchr(s, ',');
+  char *r = strchr(s, ':');
+  char fromtodest[20]; // room for max (due to spec) 'DL9SAU-15>APRSXX-NN' + \0
+  if (p > s && p < q && q < r && (q-s) < sizeof(fromtodest)) {
+    r++;
+    strncpy(fromtodest, s, q-s);
+    fromtodest[(q-s)] = 0;
+    packet_out = callsign + ">APRS:}" + fromtodest + ",TCPIP," + callsign + "*:" + r;
+                             // ^ 3rd party traffic should be addressed directly (-> not to WIDE2-1 or so)
+  }
+  return packet_out;
 }

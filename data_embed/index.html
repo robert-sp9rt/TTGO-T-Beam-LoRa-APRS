@@ -39,15 +39,15 @@
                 </div>
                 <div class="grid-container full">
                     <input class="button-primary" type="submit" value="Save">
-                </div>
+		</div>
             </form>
         </article>
     </section>
     <section>
-        <div class="grid-container full">
-            <h2 class="u-full-width">APRS Settings</h2>
-        </div>
         <article>
+          <div class="grid-container full">
+            <h2 class="u-full-width">APRS Settings</h2>
+          </div>
             <form action="/save_aprs_cfg" method="post">
                 <div class="grid-container full">
                     <h5 class="u-full-width">Transmission Settings</h5>
@@ -73,17 +73,31 @@
                         <input name="lora_tx_en" id="lora_tx_en" type="checkbox" value="1" title="Allow TX on LoRa. Disable this if you like to prevent TX under all circumstances (i.e. if your tracker is behind an rx-amplifier)">
 		    </div>
                     <div>
-                        <label for="txPower">dBm</label>
+                        <label for="txPower">TX power [dBm]</label>
                         <input name="txPower" id="txPower" type="number" min="0" max="23" title="LoRa TX Power. Range 0 to 23dBm">
                     </div>
 		    <div>
-		        <label for="lora_cradapt">Automatic CodeRate adaption</label>
-                        <input name="lora_cradapt" id="lora_cradapt" type="checkbox" value="1" title="Enable automatic CR adaption. Still testing, if it behaves good to our network. Currently works only for SF12 modes, because for SF 10 and lower the code for programming CR+SF+BW-combination has not been written yet">
-
+		        <label for="lora_cradapt">Automatic CodeRate adaption on TX</label>
+                        <input name="lora_cradapt" id="lora_cradapt" type="checkbox" value="1" title="Enable automatic CR adaption. Use this only if you are not a WIDE1 or WIDE2 digi. Still testing, if it behaves good to our network. Currently works only for SF12 modes, because for SF 10 and lower the code for programming CR+SF+BW-combination has not been written yet">
 		    </div>
+                </div>
+                <div class="grid-container halves">
 		    <div>
 		        <label for="lora_rssi2p">Add SNR and RSSI to path</label>
-                        <input name="lora_rssi2p" id="lora_rssi2p" type="checkbox" value="1" title="If enabled, add SNR and RSSI in path on receiption, prefixed with 'Q'. Example: SNR 23 and RSSI -73 will become Q2373*. SNR -03 RSSI -104: QA3K4*. SNR -13 RSSI -114: QB3L4*. .. Still testing, if it behaves good to our network.">
+			<select id="lora_rssi2p" name="lora_rssi2p">
+			  <option value="0">off</option>
+			  <option value="1">To RF during digipeating</option>
+			  <option value="2">To KISS</option>
+			  <option value="4">To APRSIS</option>
+			  <option value="3">To RF and KISS</option>
+			  <option value="5">To RF and APRSIS</option>
+			  <option value="6">To KISS and APRSIS</option>
+			  <option value="7">To RF and KISS and APRSIS</option>
+			</select>
+		    </div>
+		    <div>
+		        <label for="snraprsis">SNR/RSSI-encoding on kiss: compatible to APRS-IS?</label>
+			<input name="snraprsis" id="snraprsis" type="checkbox" value=1 title="Add snr+rssi at last digipeater, without digipeated flag. Use this for APRSIS connections. If you have connected a digipeater software to kiss, this option has to be switched off">
 		    </div>
                 </div>
                 <div class="grid-container full">
@@ -92,7 +106,7 @@
                 <div class="grid-container quarters">
                     <div>
                         <label for="aprs_callsign">Callsign and SSID</label>
-                        <input class="u-full-width" type="text" minlength="3" name="aprs_callsign" placeholder="NOCALL-1" id="aprs_callsign" title="your callsign with SSID">
+                        <input class="u-full-width" type="text" minlength="3" maxlength="9" name="aprs_callsign" placeholder="NOCALL-1" id="aprs_callsign" title="your callsign with SSID">
                     </div>
                     <div>
                         <label for="aprs_relay_path">Relay Path</label>
@@ -184,6 +198,8 @@
                         <label for="sb_max_interv">Max interval [s]</label>
                         <input name="sb_max_interv" id="sb_max_interv" type="number" min="120" title="Maximal time for Smart Beaconing">
                     </div>
+                </div>
+                <div class="grid-container quarters">
                     <div>
                         <label for="sb_min_speed">Min speed [km/h]</label>
                         <input name="sb_min_speed" id="sb_min_speed" type="number" min="0" title="Minimal speed for Smart Beaconing">
@@ -192,6 +208,8 @@
                         <label for="sb_max_speed">Max speed [km/h]</label>
                         <input name="sb_max_speed" id="sb_max_speed" type="number" min="1" title="Maximal speed for Smart Beaconing">
                     </div>
+                </div>
+                <div class="grid-container quarters">
                     <div>
                         <label for="sb_angle">Course change [degrees]</label>
                         <input name="sb_angle" id="sb_angle" type="number" min="5" max="360" title="Angle of course change to speed up beacon transmission. Recommended value: 28">
@@ -220,37 +238,24 @@
                     </div>
                 </div>
                 <div class="grid-container full">
-                    <h6 class="u-full-width">Only for mode repater: additional settings <br/>EXPERIMANTAL - USE WITH CARE!</h6>
+                    <h6 class="u-full-width">Additional settings for secondary frequency:<br/>EXPERIMANTAL - USE WITH CARE!</h6>
                 </div>
                 <div class="grid-container halves">
                     <div>
-                        <label for="lora_dig_mode">LoRa Repater Mode</label>
-                        <select id="lora_dig_mode" name="lora_dig_mode">
-                            <option value="0">off (default). This device does not do any repeating decision.</option>
-                            <option value="1">Repeat if own call is addressed (recommended for normal users)</option>
-                            <option value="2">Act as WIDE1 (fill-in) digi</option>
-                            <option value="3">Act as a simple WIDE2 digi (consider to instead attach a real aprs-digipeater software via KISS)</option>
-                        </select>
-                    </div>
-		    <br/>
-                    <div>
-                        <label for="lora_dig_x_m">If repeater mode enbabled: repeat on which frequency</label>
-                        <select id="lora_dig_x_m" name="lora_dig_x_m">
-                            <option value="0">Repeat only to main frequency (default)</option>
-                            <option value="1">Repeat to both frequencies</option>
-                            <option value="2">Repeat only to cross-digi frequency</option>
-                        </select>
-                    </div>
-		    <br/>
-                    <div>
-                        <label for="lora_freq_x">Frequency for cross-repeating [MHz]</label>
+                        <label for="lora_freq_x">Secondary Frequency [MHz]</label>
+			(for cross-repeating or listening transmissions from igates)</label>
                         <input name="lora_freq_x" id="lora_freq_x" type="number" min="0.000" max="928.000" step="0.001" title="LoRa center frequency - must be different from main frequency and between 433.001 and 928.000 or 0 if not needed. I.e. 433.900">
                     </div>
-		    <br/>
                     <div>
-                        <label for="lora_speed_x">Speed on cross digi frequency</label>
+                        <label for="txPower_x">TX power on secondary frequency [dBm]</label>
+                        <input name="txPower_x" id="txPower_x" type="number" min="0" max="23" title="LoRa TX Power on secondary frequency. Range 0 to 23dBm">
+                    </div>
+                </div>
+                <div class="grid-container halves">
+                    <div>
+                        <label for="lora_speed_x">Speed on secondary frequency</label>
                         <select id="lora_speed_x" name="lora_speed_x">
-                            <option value="1200">BW 125khz CR 4:7 SF 9 (Fast Standard. default; use high speeds on the cross digi frequency)</option>
+                            <option value="1200">BW 125khz CR 4:7 SF 9 (Fast Standard. default; use high speeds on the secondary frequency)</option>
                             <option value="610">BW 125khz CR 4:8 SF 10 (610bps)</option>
                             <option value="300">BW 125khz CR 4:5 SF 12 (300bps)</option>
                             <option value="240">BW 125khz CR 4:6 SF 12 (244bps)</option>
@@ -259,6 +264,92 @@
                         </select>
                     </div>
                 </div>
+                <div class="grid-container halves">
+                    <div>
+                        <label for="rx_qrg">RX on frequencies</label>
+			(Only honored, if we are NOT configured as WIDE1 or WIDE2 digi. If set to both frequencies: Ratio depends on how many packets are received on each qrg in a 10min window; we stay 20s on one qrg.)
+		        <select id="rx_qrg" name="rx_qrg">
+		          <option value="1">RX on main frequency</option>
+		          <option value="2">RX on secondary frequency</option>
+		          <option value="3">RX on both frequencies</option>
+		        </select>
+		    </div>
+                    <div>
+		        <label for="lora_freq_rx_curr">Current RX Frequency:</label>
+		        <input name="lora_freq_rx_curr" id="lora_freq_rx_curr" type="number" min="0.000" title="Nothing to enter here"</input>
+                    </div>
+                </div>
+                <div class="grid-container full">
+                    <h6 class="u-full-width">Additional settings for mode repater:<br/>EXPERIMANTAL - USE WITH CARE!</h6>
+                </div>
+                <div class="grid-container halves">
+                    <div>
+                        <label for="lora_dig_mode">LoRa Repater Mode</label>
+                        <select id="lora_dig_mode" name="lora_dig_mode">
+                            <option value="0">off. This device does not do any repeating decision.</option>
+                            <option value="1">Repeat if own call is addressed (recommended for normal users). default.</option>
+                            <option value="2">Act as WIDE1 (fill-in) digi</option>
+                            <option value="3">Act as a simple WIDE2 digi (consider to instead attach a real aprs-digipeater software via KISS)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="grid-container halves">
+                    <div>
+                        <label for="lora_dig_x_m">Digipeat heard stations on which frequencies</label>
+			(If LoRa Repeater Mode has not been set to off)
+                        <select id="lora_dig_x_m" name="lora_dig_x_m">
+                            <option value="0">Repeat only to main frequency (default)</option>
+                            <option value="1">Repeat to both frequencies</option>
+                            <option value="2">Repeat only to cross-digi frequency</option>
+                        </select>
+                    </div>
+                    <div>
+                      <label for="tx_qrg_bc">TX beacon or from-kiss on frequencies</label>
+		      (Only honored, if we are configured as WIDE1 or WIDE2 digi)
+		      <select id="tx_qrg_bc" name="tx_qrg_bc">
+		        <option value="1">TX on main frequency</option>
+		        <option value="2">TX on secondary frequency</option>
+		        <option value="3">TX on both frequencies</option>
+		      </select>
+                    </div>
+		</div>
+                <div class="grid-container full">
+                    <h5 class="u-full-width">APRS-IS settings</h5>
+                </div>
+                <div class="grid-container halves">
+		  <div>
+		    <label for="aprsis_en">Enable APRS-IS connection</label>
+                    <input name="aprsis_en" id="aprsis_en" type="checkbox" value="1" title="If we are configured as WIFI client, connet to the APRS-IS net">
+                  </div>
+		  <div>
+		    <label for="aprsis_srv_h">Server Name</label>
+                    <input type="text" name="aprsis_srv_h" id="aprsis_srv_h" title="Server name or IP Address. I.e. euro.aprs2.net">
+                  </div>
+		  <div>
+		    <label for="aprsis_srv_p">TCP Port</label>
+                    <input type="number" name="aprsis_srv_p" id="aprsis_srv_p" min="1" max="65535" title="TCP Port, i.e. 14580">
+                  </div>
+		  <div>
+		    <label for="aprsis_fltr">Filter (optional)</label>
+                    <input type="text" name="aprsis_fltr" id="aprsis_fltr" title="Request server-site filter (may be left empty). See http://www.aprs-is.net/javAPRSFilter.aspx" placeholder="may be left blank">
+                  </div>
+		  <div>
+		    <label for="aprsis_call">Callsign (optional)</label>
+                      <input type="text" name="aprsis_call" id="aprsis_call" minlength="3" maxlength="9" title="Use this callsign for the APRS-IS connection. If not configured, your default callsign is used." placeholder="may be left blank">
+                  </div>
+		  <div>
+		    <label for="aprsis_pw">Password (required)</label>
+                    <input type="password" name="aprsis_pw" id="aprsis_pw" title="Your password for the APRS-IS connection.">
+                  </div>
+		  <div>
+		    <label for="aprsis_2rf">Allow traffic from inet to rf</label>
+                    <input name="aprsis_2rf" id="aprsis_2rf" type="checkbox" value="1" title="Gate APRS-IS traffic to rf (will be encoded in 3rd-party format)">
+                    </div>
+                  <div>
+		    <label for"aprsis_status">Connection status</label>
+                    <input type="text" name="aprsis_status" id="aprsis_status" title="Connection status. Nothing to enter here">
+                  </div>
+		</div>
                 <div class="grid-container full">
                     <div>
                         <input class="button-primary u-full-width" type="submit" value="Save" title="save settings, remember reboot tracker after save">

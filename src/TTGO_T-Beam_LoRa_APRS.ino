@@ -110,6 +110,20 @@
 ulong lora_speed_cross_digi = 1200;
 double lora_freq_cross_digi = 433.900;
 
+double lora_freq_rx_curr = lora_freq;
+ulong lora_speed_rx_curr = lora_speed;
+
+// Variables for WIFI APRS-IS connection. Requires ENABLE_WIFI
+#ifdef ENABLE_WIFI
+boolean aprsis_enabled = false;
+String aprsis_host = "euro.aprs2.net";
+uint16_t aprsis_port = 14580;
+String aprsis_filter = "";
+String aprsis_callsign = "";
+String aprsis_password = "-1";
+boolean aprsis_data_allow_inet_to_rf = true;
+#endif
+
 // Variables for APRS packaging
 String Tcall;                       //your Call Sign for normal position reports
 String aprsSymbolTable = APRS_SYMBOL_TABLE;
@@ -261,30 +275,39 @@ float avg_c_y, avg_c_x;
 #ifdef TXDISABLE		// define TXDISABLE if you like to ensure that we never TX (i.e. if we are behind an rx-amplifier)
 boolean lora_tx_enabled = false;
 uint8_t txPower = 0;
+uint8_t txPower_cross_digi = 0;
 #else
 boolean lora_tx_enabled = true;
 #ifdef TXdbmW
 uint8_t txPower = TXdbmW;
+uint8_t txPower_cross_digi = TXdbmW;
 #else
 uint8_t txPower = 23;
+uint8_t txPower_cross_digi = 23;
 #endif
 #endif
 
 
 // may be configured
 boolean rate_limit_message_text = true;		// ratelimit adding messate text (-> saves airtime)
-boolean lora_automatic_cr_adaption = false;	// automatic CR adaption (should be configurable in Web-Interface).
+boolean lora_automatic_cr_adaption = false;	// automatic CR adaption
 						// We'll count users (except own digipeated packets), and if we're alone, CR4/8 doesn't disturb anyone.
 						// If we have a high load on the channel, we'll decrease up to CR4/5.
 						// You may set this to off if you are a fixed station / repeater / gateway
 						// This may become set to true by default, after it proves it behaves good to our network
 uint8_t lora_digipeating_mode = 1;		// Digipeating: 0: disabled (recommended if the device should not do repeating decisions, and even more, if you have attached a normal aprs digipeating software via kiss). 1: if own call addressed (recommended for users) 2: act as WIDE1 fill-in digi (recommended for standalone fill-in-digi). 3: act as a simple stupid WIDE2 digi
 uint8_t lora_cross_digipeating_mode = 0;	// 0: disable cross freq digipeating. 1: send on both frequencies. 2: send only on cross frequency
-boolean lora_add_snr_rssi_to_path = true;	// Add snr+rssi to path. May become default, after it proves it behaves good to our network
+#define FLAG_ADD_SNR_RSSI_FOR_RF     1
+#define FLAG_ADD_SNR_RSSI_FOR_KISS   2
+#define FLAG_ADD_SNR_RSSI_FOR_APRSIS 4
+uint8_t lora_add_snr_rssi_to_path = (FLAG_ADD_SNR_RSSI_FOR_RF | FLAG_ADD_SNR_RSSI_FOR_KISS | FLAG_ADD_SNR_RSSI_FOR_APRSIS);	// Add snr+rssi to path. May become default, after it proves it behaves good to our network
+boolean kiss_add_snr_rssi_to_path_at_position_without_digippeated_flag = 1; // Add snr+rssi at last digipeater, without digipeated flag, at last position in path. Set to 1, if you pass data to aprs-is. Set to 0 if you pass data to your favourite digipeater software. We need this hack because our rssi-encoded data should not be interpreted as "(last ==) direct heard station" in the aprs-is net.
+int tx_beacon_and_fromKiss_on_frequencies = 1;	// TX beacon or from-kiss on following frequencies. Only if lora_digipeating_mode > 1 (we are a WIDE1 or WIDE2 digi). 1: main freq. 2: cross_digi_freq. 3: both frequencies
+int rx_on_frequencies = 1;			// RX freq. Only if lora_digipeating_mode < 2 (we are a user) 1: main freq. 2: cross_digi_freq. 3: both frequencies
 
 #ifdef KISS_PROTOCOL
-bool acceptOwnPositionReportsViaKiss = true;		// may be a web-configurable variable true: Switches off local beacons as long as a kiss device is sending positions with our local callsign. false: filters out position packets with own callsign coming from kiss (-> do not send to LoRa).
-boolean gps_allow_sleep_while_kiss = true;		// may be a web-configurable variable. If user has a kiss device attached via kiss which sends positions with own call, we don't need our gps to be turned on -> We pause sending positions by ourself (neither fixed nor smart beaconing). Except: user has a display attached to this tracker, he'll will be able to see his position because our gps does not go to sleep (-> set this to false). Why sleep? Energy saving
+bool acceptOwnPositionReportsViaKiss = true;		// true: Switches off local beacons as long as a kiss device is sending positions with our local callsign. false: filters out position packets with own callsign coming from kiss (-> do not send to LoRa).
+boolean gps_allow_sleep_while_kiss = true;		// user has a kiss device attached via kiss which sends positions with own call, we don't need our gps to be turned on -> We pause sending positions by ourself (neither fixed nor smart beaconing). Except: user has a display attached to this tracker, he'll will be able to see his position because our gps does not go to sleep (-> set this to false). Why sleep? Energy saving
 
 // do not configure
 uint32_t time_last_own_position_via_kiss_received = 0L;	// kiss client sends position report with our call+ssid. Remember when.
@@ -295,15 +318,18 @@ boolean kiss_client_came_via_bluetooth = false;
 // do not configure
 boolean dont_send_own_position_packets = false;		// dynamicaly set if kiss device sends position. Maybe there are other usecases (-> kiss-independent)
 boolean gps_state_before_autochange = false;		// remember gps state before autochange
-uint32_t time_last_lora_frame_received = 0L;
+uint32_t time_last_lora_frame_received_on_main_freq = 0L;
 uint32_t time_last_own_text_message_via_kiss_received = 0L;
 uint32_t time_lora_automaic_cr_adoption_rx_measurement_window = 0L;
 uint16_t lora_automaic_cr_adoption_rf_transmissions_heard_in_timeslot = 0;
+uint16_t lora_packets_received_in_timeslot_on_main_freq = 0;
+uint16_t lora_packets_received_in_timeslot_on_secondary_freq = 0;
 char lora_TXBUFF_for_digipeating[BG_RF95_MAX_MESSAGE_LEN+1] = "";		// buffer for digipeating
 time_t time_lora_TXBUFF_for_digipeating_was_filled = 0L;
 
 #ifdef ENABLE_WIFI
   tWebServerCfg webServerCfg;
+  String to_aprsis_data = "";
 #endif
 
 static const adc_atten_t atten = ADC_ATTEN_DB_6;
@@ -453,33 +479,8 @@ void buzzer(int* melody, int array_size){
 }
 #endif
 
-void sendpacket(){
-  #ifdef BUZZER
-    int melody[] = {1000, 50, 800, 100};
-    buzzer(melody, sizeof(melody)/sizeof(int));
-  #endif
-  batt_read();
-  prepareAPRSFrame();
-  loraSend(txPower, lora_freq, outString);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
-}
 
-/**
- * Send message as APRS LoRa packet
- * @param lora_LTXPower
- * @param lora_FREQ
- * @param message
- */
-// Feauture request: add param lora_speed. Currently, we need a variable for storing the old speed, and affer loraSend(), we have to revert :(
-void loraSend(byte lora_LTXPower, float lora_FREQ, const String &message) {
-  if (!lora_tx_enabled)
-    return;
-  #ifdef ENABLE_LED_SIGNALING
-    digitalWrite(TXLED, LOW);
-  #endif
-  lastTX = millis();
-
-  int messageSize = min(message.length(), sizeof(lora_TXBUFF) - 1);
-  message.toCharArray((char*)lora_TXBUFF, messageSize + 1, 0);
+void lora_set_speed(ulong lora_speed) {
   if(lora_speed==1200){
     rf95.setModemConfig(BG_RF95::Bw125Cr47Sf512);
   }
@@ -498,6 +499,52 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, const String &message) {
   else {
     rf95.setModemConfig(BG_RF95::Bw125Cr45Sf4096);
   }
+}
+
+#if defined(ENABLE_WIFI)
+void send_to_aprsis(String s)
+{
+  to_aprsis_data = s;
+  return;
+}
+#endif
+
+void sendpacket(){
+  #ifdef BUZZER
+    int melody[] = {1000, 50, 800, 100};
+    buzzer(melody, sizeof(melody)/sizeof(int));
+  #endif
+  batt_read();
+  prepareAPRSFrame();
+  if (lora_tx_enabled) {
+    if (tx_beacon_and_fromKiss_on_frequencies % 2)
+      loraSend(txPower, lora_freq, lora_speed, outString);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
+    if (tx_beacon_and_fromKiss_on_frequencies > 1 && lora_digipeating_mode > 1)
+      loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, outString);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
+  }
+#if defined(ENABLE_WIFI)
+   send_to_aprsis(outString);
+#endif
+}
+
+/**
+ * Send message as APRS LoRa packet
+ * @param lora_LTXPower
+ * @param lora_FREQ
+ * @param lora_SPEED
+ * @param message
+ */
+void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, const String &message) {
+  if (!lora_tx_enabled)
+    return;
+  #ifdef ENABLE_LED_SIGNALING
+    digitalWrite(TXLED, LOW);
+  #endif
+  lastTX = millis();
+
+  int messageSize = min(message.length(), sizeof(lora_TXBUFF) - 1);
+  message.toCharArray((char*)lora_TXBUFF, messageSize + 1, 0);
+  lora_set_speed(lora_SPEED);
   rf95.setFrequency(lora_FREQ);
   rf95.setTxPower(lora_LTXPower);
   rf95.sendAPRS(lora_TXBUFF, messageSize);
@@ -506,8 +553,10 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, const String &message) {
     digitalWrite(TXLED, HIGH);
   #endif
   // cross-digipeating may have altered our RX-frequency. Revert frequency change needed for this transmission.
-  if (lora_FREQ != lora_freq)
-    rf95.setFrequency(lora_freq);
+  if (lora_FREQ != lora_freq_rx_curr)
+    rf95.setFrequency(lora_freq_rx_curr);
+  if (lora_SPEED != lora_speed_rx_curr)
+    lora_set_speed(lora_speed_rx_curr);
 }
 
 void batt_read(){
@@ -717,6 +766,7 @@ String prepareCallsign(const String& callsign){
   }
 #endif
 
+
 // + SETUP --------------------------------------------------------------+//
 void setup(){
 #ifdef T_BEAM_V0_7 /*
@@ -780,7 +830,7 @@ void setup(){
     }
     lora_tx_enabled = preferences.getBool(PREF_LORA_TX_ENABLE);
 
-    if (!preferences.getInt(PREF_LORA_TX_POWER_INIT)){
+    if (!preferences.getBool(PREF_LORA_TX_POWER_INIT)){
       preferences.putBool(PREF_LORA_TX_POWER_INIT, true);
       preferences.putInt(PREF_LORA_TX_POWER, txPower);
     }
@@ -794,9 +844,15 @@ void setup(){
 
     if (!preferences.getBool(PREF_LORA_ADD_SNR_RSSI_TO_PATH_PRESET_INIT)){
       preferences.putBool(PREF_LORA_ADD_SNR_RSSI_TO_PATH_PRESET_INIT, true);
-      preferences.putBool(PREF_LORA_ADD_SNR_RSSI_TO_PATH_PRESET, lora_add_snr_rssi_to_path);
+      preferences.putInt(PREF_LORA_ADD_SNR_RSSI_TO_PATH_PRESET, lora_add_snr_rssi_to_path);
     }
-    lora_add_snr_rssi_to_path = preferences.getBool(PREF_LORA_ADD_SNR_RSSI_TO_PATH_PRESET);
+    lora_add_snr_rssi_to_path = preferences.getInt(PREF_LORA_ADD_SNR_RSSI_TO_PATH_PRESET);
+
+    if (!preferences.getBool(PREF_LORA_ADD_SNR_RSSI_TO_PATH_END_AT_KISS_PRESET_INIT)){
+      preferences.putBool(PREF_LORA_ADD_SNR_RSSI_TO_PATH_END_AT_KISS_PRESET_INIT, true);
+      preferences.putBool(PREF_LORA_ADD_SNR_RSSI_TO_PATH_END_AT_KISS_PRESET, kiss_add_snr_rssi_to_path_at_position_without_digippeated_flag);
+    }
+    kiss_add_snr_rssi_to_path_at_position_without_digippeated_flag = preferences.getBool(PREF_LORA_ADD_SNR_RSSI_TO_PATH_END_AT_KISS_PRESET);
 
     if (!preferences.getBool(PREF_APRS_DIGIPEATING_MODE_PRESET_INIT)){
       preferences.putBool(PREF_APRS_DIGIPEATING_MODE_PRESET_INIT, true);
@@ -810,18 +866,35 @@ void setup(){
     }
     lora_cross_digipeating_mode = preferences.getInt(PREF_APRS_CROSS_DIGIPEATING_MODE_PRESET);
 
+    if (!preferences.getBool(PREF_LORA_TX_BEACON_AND_KISS_ON_FREQUENCIES_PRESET_INIT)){
+      preferences.putBool(PREF_LORA_TX_BEACON_AND_KISS_ON_FREQUENCIES_PRESET_INIT, true);
+      preferences.putInt(PREF_LORA_TX_BEACON_AND_KISS_ON_FREQUENCIES_PRESET, tx_beacon_and_fromKiss_on_frequencies);
+    }
+    tx_beacon_and_fromKiss_on_frequencies = preferences.getInt(PREF_LORA_TX_BEACON_AND_KISS_ON_FREQUENCIES_PRESET);
+
     if (!preferences.getBool(PREF_LORA_FREQ_CROSSDIGI_PRESET_INIT)){
       preferences.putBool(PREF_LORA_FREQ_CROSSDIGI_PRESET_INIT, true);
       preferences.putDouble(PREF_LORA_FREQ_CROSSDIGI_PRESET, lora_freq_cross_digi);
     }
     lora_freq_cross_digi = preferences.getDouble(PREF_LORA_FREQ_CROSSDIGI_PRESET);
     
-
     if (!preferences.getBool(PREF_LORA_SPEED_CROSSDIGI_PRESET_INIT)){
       preferences.putBool(PREF_LORA_SPEED_CROSSDIGI_PRESET_INIT, true);
       preferences.putInt(PREF_LORA_SPEED_CROSSDIGI_PRESET, lora_speed_cross_digi);
     }
     lora_speed_cross_digi = preferences.getInt(PREF_LORA_SPEED_CROSSDIGI_PRESET);
+
+    if (!preferences.getBool(PREF_LORA_TX_POWER_CROSSDIGI_PRESET_INIT)){
+      preferences.putBool(PREF_LORA_TX_POWER_CROSSDIGI_PRESET_INIT, true);
+      preferences.putInt(PREF_LORA_TX_POWER_CROSSDIGI_PRESET, txPower_cross_digi);
+    }
+    txPower_cross_digi = lora_tx_enabled ? preferences.getInt(PREF_LORA_TX_POWER_CROSSDIGI_PRESET) : 0;
+
+    if (!preferences.getBool(PREF_LORA_RX_ON_FREQUENCIES_PRESET_INIT)){
+      preferences.putBool(PREF_LORA_RX_ON_FREQUENCIES_PRESET_INIT, true);
+      preferences.putInt(PREF_LORA_RX_ON_FREQUENCIES_PRESET, rx_on_frequencies);
+    }
+    rx_on_frequencies = preferences.getInt(PREF_LORA_RX_ON_FREQUENCIES_PRESET);
 
     // APRS station settings
 
@@ -1009,13 +1082,6 @@ void setup(){
     }
     shutdown_active = preferences.getBool(PREF_DEV_AUTO_SHUT);          
 
-    if (clear_preferences){
-      delay(1000);
-      if(digitalRead(BUTTON)==LOW){
-        clear_preferences = 2;
-      }
-    }
-
     if (!preferences.getBool(PREF_APRS_SHOW_CMT_INIT)){
       preferences.putBool(PREF_APRS_SHOW_CMT_INIT, true);
       preferences.putBool(PREF_APRS_SHOW_CMT, show_cmt);
@@ -1040,17 +1106,71 @@ void setup(){
       preferences.putBool(PREF_DEV_OL_EN,enabled_oled);
     }
     enabled_oled  = preferences.getBool(PREF_DEV_OL_EN); 
+
+
+// APRSIS settings
+#ifdef ENABLE_WIFI
+    if (!preferences.getBool(PREF_APRSIS_EN_INIT)){
+      preferences.putBool(PREF_APRSIS_EN_INIT, true);
+      preferences.putBool(PREF_APRSIS_EN, aprsis_enabled);
+    }
+    aprsis_enabled = preferences.getBool(PREF_APRSIS_EN);
+
+    if (!preferences.getBool(PREF_APRSIS_SERVER_NAME_INIT)){
+      preferences.putBool(PREF_APRSIS_SERVER_NAME_INIT, true);
+      preferences.putString(PREF_APRSIS_SERVER_NAME, aprsis_host);
+    }
+    aprsis_host = preferences.getString(PREF_APRSIS_SERVER_NAME);
+
+    if (!preferences.getBool(PREF_APRSIS_SERVER_PORT_INIT)){
+      preferences.putBool(PREF_APRSIS_SERVER_PORT_INIT, true);
+      preferences.putInt(PREF_APRSIS_SERVER_PORT, aprsis_port);
+    }
+    aprsis_port = preferences.getInt(PREF_APRSIS_SERVER_PORT);
+
+    if (!preferences.getBool(PREF_APRSIS_FILTER_INIT)){
+      preferences.putBool(PREF_APRSIS_FILTER_INIT, true);
+      preferences.putString(PREF_APRSIS_FILTER, aprsis_filter);
+    }
+    aprsis_filter = preferences.getString(PREF_APRSIS_FILTER);
+
+    if (!preferences.getBool(PREF_APRSIS_CALLSIGN_INIT)){
+      preferences.putBool(PREF_APRSIS_CALLSIGN_INIT, true);
+      preferences.putString(PREF_APRSIS_CALLSIGN, aprsis_callsign);
+    }
+    aprsis_callsign = preferences.getString(PREF_APRSIS_CALLSIGN);
+
+    if (!preferences.getBool(PREF_APRSIS_PASSWORD_INIT)){
+      preferences.putBool(PREF_APRSIS_PASSWORD_INIT, true);
+      preferences.putString(PREF_APRSIS_PASSWORD, aprsis_password);
+    }
+    aprsis_password = preferences.getString(PREF_APRSIS_PASSWORD);
+
+    if (!preferences.getBool(PREF_APRSIS_ALLOW_INET_TO_RF_INIT)){
+      preferences.putBool(PREF_APRSIS_ALLOW_INET_TO_RF_INIT, true);
+      preferences.putBool(PREF_APRSIS_ALLOW_INET_TO_RF, aprsis_data_allow_inet_to_rf);
+    }
+    aprsis_data_allow_inet_to_rf = preferences.getBool(PREF_APRSIS_ALLOW_INET_TO_RF);
+#endif
+
+    if (clear_preferences){
+      delay(1000);
+      if(digitalRead(BUTTON)==LOW){
+        clear_preferences = 2;
+      }
+    }
+
   #endif
 
-// enforce valid transmissions even on wrong configurations
-if (aprsSymbolTable.length() != 1)
-  aprsSymbolTable = String("/");
-if (aprsSymbol.length() != 1)
-  aprsSymbol = String("[");
-if (aprsLatPreset.length() != 8 || !(aprsLatPreset.endsWith("N") || aprsLatPreset.endsWith("S")) || aprsLatPreset.c_str()[4] != '.')
-  aprsLatPreset = String("0000.00N");
-if (aprsLonPreset.length() != 9 || !(aprsLonPreset.endsWith("E") || aprsLonPreset.endsWith("W")) || aprsLonPreset.c_str()[5] != '.')
-  aprsLonPreset = String("00000.00E");
+  // enforce valid transmissions even on wrong configurations
+  if (aprsSymbolTable.length() != 1)
+    aprsSymbolTable = String("/");
+  if (aprsSymbol.length() != 1)
+    aprsSymbol = String("[");
+  if (aprsLatPreset.length() != 8 || !(aprsLatPreset.endsWith("N") || aprsLatPreset.endsWith("S")) || aprsLatPreset.c_str()[4] != '.')
+    aprsLatPreset = String("0000.00N");
+  if (aprsLonPreset.length() != 9 || !(aprsLonPreset.endsWith("E") || aprsLonPreset.endsWith("W")) || aprsLonPreset.c_str()[5] != '.')
+    aprsLonPreset = String("00000.00E");
 
   for (int i=0;i<ANGLE_AVGS;i++) {                                        // set average_course to "0"
     average_course[i]=0;
@@ -1141,30 +1261,14 @@ if (aprsLonPreset.length() != 9 || !(aprsLonPreset.endsWith("E") || aprsLonPrese
   batt_read();
   writedisplaytext("LoRa-APRS","","Init:","ADC OK!","BAT: "+String(BattVolts,2),"");
   
-  if(lora_speed==1200){
-    rf95.setModemConfig(BG_RF95::Bw125Cr47Sf512);
-  }
-  else if(lora_speed==610){
-    rf95.setModemConfig(BG_RF95::Bw125Cr48Sf1024);
-  }
-  else if(lora_speed==180){
-    rf95.setModemConfig(BG_RF95::Bw125Cr48Sf4096);
-  }
-  else if(lora_speed==210){
-    rf95.setModemConfig(BG_RF95::Bw125Cr47Sf4096);
-  }
-  else if(lora_speed==240){
-    rf95.setModemConfig(BG_RF95::Bw125Cr46Sf4096);
-  }
-  else {
-    rf95.setModemConfig(BG_RF95::Bw125Cr45Sf4096);
-  }
+  lora_speed_rx_curr = ((rx_on_frequencies != 2 || lora_digipeating_mode < 2) ? lora_speed : lora_speed_cross_digi);
+  lora_set_speed(lora_speed_rx_curr);
 
-  Serial.printf("LoRa Speed:\t%lu\n", lora_speed);
+  Serial.printf("LoRa Speed:\t%lu\n", lora_speed_rx_curr);
   
-  rf95.setFrequency(lora_freq);
+  rf95.setFrequency((rx_on_frequencies != 2 || lora_digipeating_mode < 2) ? lora_freq : lora_freq_cross_digi);
   Serial.printf("LoRa FREQ:\t%f\n", lora_freq);
-  rf95.setTxPower(txPower);
+  rf95.setTxPower((rx_on_frequencies != 2 || lora_digipeating_mode < 2) ? txPower : txPower_cross_digi);
   delay(250);
   #ifdef KISS_PROTOCOL
     xTaskCreatePinnedToCore(taskTNC, "taskTNC", 10000, nullptr, 1, nullptr, xPortGetCoreID());
@@ -1279,7 +1383,7 @@ char *encode_snr_rssi_in_path()
 char *add_element_to_path(const char *data, const char *element)
 {
   static char buf[BG_RF95_MAX_MESSAGE_LEN+1];
-  if (strlen(data) + 1 /* ',' */ + strlen(element) > sizeof(buf)-1)
+  if (strlen(data) + 1 /* ',' */ + strlen(element) + 1 /* '*' */ > sizeof(buf)-1)
     return 0;
   char *p = strchr(data, '>');
   char *header_end = strchr(data, ':');
@@ -1321,6 +1425,26 @@ char *add_element_to_path(const char *data, const char *element)
   } // else: Something like DL9SAU>APRS:... (no via path)
   snprintf(buf, pos-data +1, "%s", data);
   sprintf(buf + strlen(buf), ",%s*%s", element, pos + (*pos == '*' ? 1 : 0));
+  return buf;
+}
+
+// append element to path, regardless if it will exceep max digipeaters. It's for snr encoding for aprs-is. We don't us
+// add_element_to_path, because we will append at the last position, and do not change digipeated bit.
+char *append_element_to_path(const char *data, const char *element) {
+  static char buf[BG_RF95_MAX_MESSAGE_LEN+10+1];
+  if (strlen(data) + 1 /* ',' */ + strlen(element) > sizeof(buf)-1)
+    return 0;
+  char *p = strchr(data, '>');
+  char *header_end = strchr(data, ':');
+  if (header_end <= p)
+    return 0;
+  char *q = strchr(data, ',');
+  if (q > header_end)
+    q = 0;
+  if (q && q < p)
+    return 0;
+  snprintf(buf, header_end-data +1, "%s", data);
+  sprintf(buf + strlen(buf), ",%s%s", element, header_end);
   return buf;
 }
 
@@ -1433,6 +1557,11 @@ void handle_lora_frame_for_lora_digipeating(const char *received_frame, char *sn
 
   // no room left for adding our call in path during repeating
   if (frame->n_digis > AX_DIGIS_MAX)
+    return;
+
+  // aprs-message / query addressed to us? Format: ":DL9SAU-15:..."
+  if (frame->data[0] == ':' && strlen(frame->data) > 10 && frame->data[10] == ':' &&
+       !strncmp((frame->data)+1, Tcall.c_str(), Tcall.length()) && (Tcall.length() == 9 || frame->data[9] == ' '))
     return;
 
   // '>' and ':' found. Always in header. Sanity check: if ',' present, it must be > p. If r exists, must be > q. And header_end must be > than the others and always a message-body *(header_end + 1) != 0.
@@ -1764,6 +1893,18 @@ void loop() {
       if (xQueueReceive(tncToSendQueue, &TNC2DataFrame, (1 / portTICK_PERIOD_MS)) == pdPASS) {
         time_last_frame_via_kiss_received = millis();
         const char *data = TNC2DataFrame->c_str();
+
+#if defined(ENABLE_WIFI)
+	// No word "NOGATE" or "RFONLY" in header? -> may be sent to aprs-is
+	char *q = strstr(data, ",NOGATE");
+	if (!q || q > strchr(data, ':')) {
+	  q = strstr(data, ",RFONLY");
+	  if (!q || q > strchr(data, ':')) {
+	    send_to_aprsis(*TNC2DataFrame);
+	  }
+	}
+#endif
+
 	// Frame comes from same call as ours and is a position report?
         if (!strncmp(data, Tcall.c_str(), Tcall.length()) && data[Tcall.length()] == '>') {
 	  char *p = strchr(data, ':');
@@ -1845,11 +1986,15 @@ void loop() {
 	  }
 	}
 	if (lora_tx_enabled) {
-          loraSend(txPower, lora_freq, String(data));
+          if (tx_beacon_and_fromKiss_on_frequencies % 2)
+            loraSend(txPower, lora_freq, lora_speed, String(data));  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
+          if (tx_beacon_and_fromKiss_on_frequencies > 1 && lora_digipeating_mode > 1)
+            loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, String(data));  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
           enableOled(); // enable OLED
           writedisplaytext("((KISSTX))","","","","","");
           time_to_refresh = millis() + showRXTime;
 	}
+
 out:
         delete TNC2DataFrame;
       }
@@ -1877,6 +2022,7 @@ out:
         }
 	const char *received_frame = loraReceivedFrameString.c_str();
 	// CR adaption: because only for SF12 different CR levels have been defined, we unfortunately cannot deal with SF < 12.
+	// In most cases, only useful for normal users, not for WIDE1 or WIDE2 digis. But there may exist good reasons; thus we don't enforce.
 	if (lora_automatic_cr_adaption && lora_speed <= 300L) {
 	  // not our own digipeated call?
 	  if (! (strncmp(received_frame, Tcall.c_str(), Tcall.length()) == 0 && received_frame[Tcall.length()] == '>')) {
@@ -1889,7 +2035,27 @@ out:
 	      lora_automaic_cr_adoption_rf_transmissions_heard_in_timeslot++;
 	    }
 	}
-	time_last_lora_frame_received = millis();
+	if (lora_freq_rx_curr == lora_freq) {
+	  time_last_lora_frame_received_on_main_freq = millis();
+	  lora_packets_received_in_timeslot_on_main_freq++;
+	} else {
+	  lora_packets_received_in_timeslot_on_secondary_freq++;
+	}
+
+#if defined(ENABLE_WIFI)
+	// No word "NOGATE" or "RFONLY" in header? -> may be sent to aprs-is
+	char *q = strstr(received_frame, ",NOGATE");
+	if (!q || q > strchr(received_frame, ':')) {
+	  q = strstr(received_frame, ",RFONLY");
+	  if (!q || q > strchr(received_frame, ':')) {
+	    char *s = 0;
+	    if (lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_APRSIS)
+	      s = append_element_to_path(received_frame, encode_snr_rssi_in_path());
+	    send_to_aprsis(s ? String(s) : loraReceivedFrameString);
+	  }
+	}
+#endif
+
     #ifdef SHOW_RX_PACKET                                                 // only show RX packets when activitated in config
         writedisplaytext("  ((RX))", "", loraReceivedFrameString, "", "", "");
         #ifdef ENABLE_WIFI
@@ -1899,24 +2065,24 @@ out:
     #endif
         #ifdef KISS_PROTOCOL
 	char *s = 0;
-	if (lora_add_snr_rssi_to_path)
-	  s = add_element_to_path(received_frame, encode_snr_rssi_in_path());
+	if (lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_KISS) {
+	  s = kiss_add_snr_rssi_to_path_at_position_without_digippeated_flag ? append_element_to_path(received_frame, encode_snr_rssi_in_path()) : add_element_to_path(received_frame, encode_snr_rssi_in_path());
+	}
 	sendToTNC(s ? String(s) : loraReceivedFrameString);
         #endif
 
 	// Are we configured as lora digi?
 	if (lora_digipeating_mode > 0 && lora_tx_enabled) {
 	  uint32_t time_lora_TXBUFF_for_digipeating_was_filled_prev = time_lora_TXBUFF_for_digipeating_was_filled;
-          handle_lora_frame_for_lora_digipeating(received_frame, encode_snr_rssi_in_path());
+	  char *snrrssi = encode_snr_rssi_in_path();
+	  if (!(lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_RF)) *snrrssi = 0;
+          handle_lora_frame_for_lora_digipeating(received_frame, snrrssi);
 	  // new frame in digipeating queue? cross-digi freq enabled and freq set? Send without delay.
           if (*lora_TXBUFF_for_digipeating && lora_cross_digipeating_mode > 0 && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq && time_lora_TXBUFF_for_digipeating_was_filled > time_lora_TXBUFF_for_digipeating_was_filled_prev) {
-	    // word NOGATE part of the header? Don't gate it
+	    // word 'NOGATE' part of the header? Don't gate it
 	    char *q = strstr(lora_TXBUFF_for_digipeating, ",NOGATE");
 	    if (!q || q > strchr(lora_TXBUFF_for_digipeating, ':')) {
-              ulong lora_speed_prev = lora_speed;
-              lora_speed = lora_speed_cross_digi;
-              loraSend(txPower, lora_freq_cross_digi, String(lora_TXBUFF_for_digipeating));  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
-              lora_speed = lora_speed_prev;  // we really need an argument for speed in loraSend()
+              loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, String(lora_TXBUFF_for_digipeating));  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
               writedisplaytext("  ((TX cross-digi))", "", String(lora_TXBUFF_for_digipeating), "", "", "");
 #ifdef KISS_PROTOCOL
 	      char *s = add_element_to_path(lora_TXBUFF_for_digipeating, "GATE");
@@ -1932,6 +2098,59 @@ out:
       #endif
     #endif
   }
+  if (rx_on_frequencies == 3 && lora_digipeating_mode < 2) {
+    static uint8_t slot_table[9][10] = {
+      { 0, 1, 1, 1, 1, 1, 1, 1, 1, 1 }, // 1:9
+      { 0, 1, 1, 1, 1, 0, 1, 1, 1, 1 }, // 2:8
+      { 0, 1, 1, 0, 1, 1, 1, 0, 1, 1 }, // 3:7
+      { 0, 1, 0, 1, 1, 0, 1, 0, 1, 1 }, // 4:6
+      { 0, 1, 0, 1, 0, 1, 0, 1, 0, 1 }, // 5:5
+      { 0, 1, 0, 0, 1, 0, 1, 0, 0, 1 }, // 6:4. From here it's inverse to 4:6, but time-slots left-shifted by one, so first position is alwas the main frequency
+      { 0, 0, 1, 0, 0, 0, 1, 0, 0, 1 }, // 7:3
+      { 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 }, // 8:2
+      { 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 }  // 9:1
+    };
+    static uint8_t *curr_slot_table = slot_table[4];
+    static uint8_t *p_curr_slot_table = curr_slot_table;
+    static uint32_t next_slot = millis() + 20*1000L;
+    static uint32_t recompute_rx_freq_window = millis() + 10*60*1000L;
+    if (millis() > recompute_rx_freq_window) {
+      // recompute_rx_freq_window and align to n.000 seconds
+      recompute_rx_freq_window = (millis() / 1000 + 10*60L) * 1000L;
+
+      // reduce high rx counts because if ratio is < 1:10 or > 10:1 we still like to listen on at least one timeslot for packets
+      if (lora_packets_received_in_timeslot_on_main_freq > 100) lora_packets_received_in_timeslot_on_main_freq = 100;
+      if (lora_packets_received_in_timeslot_on_secondary_freq > 100) lora_packets_received_in_timeslot_on_secondary_freq = 100;
+      // avoid division by zero
+      uint8_t lora_packets_received_in_timeslot_on_both_freq = lora_packets_received_in_timeslot_on_main_freq + lora_packets_received_in_timeslot_on_secondary_freq;
+      uint8_t ratio = (lora_packets_received_in_timeslot_on_both_freq ? (lora_packets_received_in_timeslot_on_main_freq * 10 / lora_packets_received_in_timeslot_on_both_freq) : 5);
+      if (ratio > 9) ratio = 9;
+      if (ratio < 1) ratio = 1;
+      // choose slot table
+      curr_slot_table = slot_table[ratio-1];
+      p_curr_slot_table = curr_slot_table;
+      next_slot = 0;
+
+      lora_packets_received_in_timeslot_on_main_freq = lora_packets_received_in_timeslot_on_main_freq / 5;
+      lora_packets_received_in_timeslot_on_secondary_freq = lora_packets_received_in_timeslot_on_secondary_freq / 5;
+    }
+    if (millis() > next_slot) {
+      // next timeslot is in 20s (aligned to n.000s). If we'd do qsy more often (esp. in a 5:5 situation), chances increase that we loose too much packets due to qsy during receiption. 30 may be too long. 15 too short. 20s also alings good to our 10min window with 10 slots (20/60.0 * 10 * 3 aligns exactly to the 10min window)
+      next_slot = (millis() / 1000 + 20L) * 1000L;
+      // avoid calling rf95.setFrequency() and lora_set_speed() if previos *p_curr_slot_table was the same freq/speed
+      if (*p_curr_slot_table != ((p_curr_slot_table > curr_slot_table) ? p_curr_slot_table[-1] : curr_slot_table[9])) {
+        lora_freq_rx_curr = (*p_curr_slot_table) ? lora_freq_cross_digi : lora_freq;
+        rf95.setFrequency(lora_freq_rx_curr);
+        lora_speed_rx_curr = (*p_curr_slot_table) ? lora_speed_cross_digi : lora_speed;
+        lora_set_speed(lora_speed_rx_curr);
+      }
+      // restart from beginning of current row?
+      if ((p_curr_slot_table - curr_slot_table) >= 9)
+        p_curr_slot_table = curr_slot_table;
+      else
+        p_curr_slot_table++;
+    }
+  }
 
   if (lora_automatic_cr_adaption && lora_speed <= 300L && millis() > (5*60*1000L) && (time_lora_automaic_cr_adoption_rx_measurement_window + 5*60*1000L) < millis()) {
     // recalculate automatic adapted CR
@@ -1939,7 +2158,7 @@ out:
     // Approx seconds between frames: if transmission takes with CR4/5 3s and sleeps 3x so long, we see every 25s a transmission in a 5s window.
     // With CR4/6 we have 300 / (3*4) * 300.0/240.0 = 31s; wih CR4/7 we have 35s, and with 41s.
     // Slowly, step by step, incrase CR after frequency becomes quet
-    uint32_t t_diff = millis() - time_last_lora_frame_received;
+    uint32_t t_diff = millis() - time_last_lora_frame_received_on_main_freq;
     if (t_diff > (300*1000L / (3*4) * 300.0/180.0) && lora_speed <= 210)
       lora_speed = 180;
     else if (t_diff > (300*1000L / (3*4) * 300.0/210.0) && lora_speed <= 240)
@@ -2103,12 +2322,8 @@ behind_position_tx:
     // 5s grace time (plus up to 250ms random) for digipeating. 10s if we are a fill-in digi
     if ((time_lora_TXBUFF_for_digipeating_was_filled + 5*lora_digipeating_mode*1000L + (millis() % 250)) < millis()) {
       if (lora_cross_digipeating_mode < 2 && (time_lora_TXBUFF_for_digipeating_was_filled + 2* 5*lora_digipeating_mode*1000L) > millis()) {
-        ulong lora_speed_prev = lora_speed;
-        // if SF12: we degipeat in fastest mode CR4/5.
-        if (lora_speed < 300)
-          lora_speed = 300;
-        loraSend(txPower, lora_freq, String(lora_TXBUFF_for_digipeating));  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
-        lora_speed = lora_speed_prev;
+        // if SF12: we degipeat in fastest mode CR4/5. -> if lora_speed < 300 tx in lora_speed_300.
+        loraSend(txPower, lora_freq, (lora_speed < 300) ? 300 : lora_speed, String(lora_TXBUFF_for_digipeating));  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
         writedisplaytext("  ((TX digi))", "", String(lora_TXBUFF_for_digipeating), "", "", "");
 #ifdef KISS_PROTOCOL
         sendToTNC(String(lora_TXBUFF_for_digipeating));
