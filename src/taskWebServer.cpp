@@ -610,6 +610,7 @@ void handle_saveDeviceCfg(){
   tReceivedPacketData *receivedPacketData = nullptr;
 
   WiFiClient aprs_is_client;
+
   uint32_t t_connect_apprsis_again = 0L;
   String aprs_callsign = webServerCfg->callsign;
   aprsis_host.trim();
@@ -700,56 +701,62 @@ void handle_saveDeviceCfg(){
           //aprsis_status = "OK";
           s.trim();
           if (s.isEmpty()) goto on_err;
+	  if (*(s.c_str()) == '#' || !isalnum(*(s.c_str()))) goto do_not_send;
 	  char *header_end = strchr(s.c_str(), ':');
-          if (*(s.c_str()) != '#' && header_end) {
-	    boolean do_not_send = false;
-	    char *q;
-	    // do not interprete packets coming back from aprs-is net (either our source call, or if we have repeated it with one of our calls
-            if (s.startsWith(aprs_callsign + '>') || s.startsWith(aprsis_callsign + '>')) {
-	      // sender is our call
-	      do_not_send = true;
-	    } else {
-	      // packet has our call in i.E. ...,qAR,OURCALL:...
-	      q = strstr(s.c_str(), (',' + aprsis_callsign + ':').c_str());
-	      if (q && q < header_end)
-	        do_not_send = true;
-	    }
-	    if (!do_not_send) {
-	      for (int i = 0; i < 2; i++) {
-	        String call = (i == 0 ? aprs_callsign : aprsis_callsign);
+	  if (!header_end) goto do_not_send;
+	  char *src_call_end = strchr(s.c_str(), '>');
+	  if (!src_call_end) goto do_not_send;
+	  if (src_call_end > header_end-2) goto do_not_send;
+	  char *q = strchr(s.c_str(), '-');
+	  if (q && q < src_call_end) {
+	    // len callsign > 6?
+	    if (q-s.c_str() > 6) goto do_not_send;
+	    // SSID optional, only 0..15
+	    if (q[2] == '>') {
+	      if (q[1] < '0' || q[1] > '9') goto do_not_send;
+	    } else if (q[3] == '>') {
+	      if (q[1] != '1' || q[2] < '0' || q[2] > '5') goto do_not_send;
+	    } else goto do_not_send;
+	  } else {
+	    if (src_call_end-s.c_str() > 6) goto do_not_send;
+	  }
+
+	  // do not interprete packets coming back from aprs-is net (either our source call, or if we have repeated it with one of our calls
+	  // sender is our call?
+          if (s.startsWith(aprs_callsign + '>') || s.startsWith(aprsis_callsign + '>')) goto do_not_send;
+
+	  // packet has our call in i.E. ...,qAR,OURCALL:...
+	  q = strstr(s.c_str(), (',' + aprsis_callsign + ':').c_str());
+	  if (q && q < header_end) goto do_not_send;
+	  for (int i = 0; i < 2; i++) {
+	    String call = (i == 0 ? aprs_callsign : aprsis_callsign);
 		// digipeated frames look like "..,DL9SAU,DL1AAA,DL1BBB*,...", or "..,DL9SAU*,DL1AAA,DL1BBB,.."
-	        if (((q = strstr(s.c_str(), (',' + call + '*').c_str())) || (q = strstr(s.c_str(), (',' + call + ',').c_str()))) && q < header_end) {
-                  char *digipeatedflag = strchr(q, '*');
-	          if (digipeatedflag && digipeatedflag < header_end && digipeatedflag > q)
-	            do_not_send = true;
-	        }
-	      }
+	    if (((q = strstr(s.c_str(), (',' + call + '*').c_str())) || (q = strstr(s.c_str(), (',' + call + ',').c_str()))) && q < header_end) {
+              char *digipeatedflag = strchr(q, '*');
+	      if (digipeatedflag && digipeatedflag < header_end && digipeatedflag > q)
+	        goto do_not_send;
 	    }
-	    if (!do_not_send) {
-	      // generate third party packet. Use aprs_callsign (deriving from webServerCfg->callsign), because aprsis_callsign may have a non-aprs (but only aprsis-compatible) ssid like '-L4'
-              String third_party_packet = generate_third_party_packet(aprs_callsign, s);
-              if (!third_party_packet.isEmpty()) {
+	  }
+	  // generate third party packet. Use aprs_callsign (deriving from webServerCfg->callsign), because aprsis_callsign may have a non-aprs (but only aprsis-compatible) ssid like '-L4'
+          String third_party_packet = generate_third_party_packet(aprs_callsign, s);
+          if (!third_party_packet.isEmpty()) {
 #ifdef KISS_PROTOCOL
-                sendToTNC(third_party_packet);
+            sendToTNC(third_party_packet);
 #endif
-                if (lora_tx_enabled && aprsis_data_allow_inet_to_rf) {
-		  // not query or aprs-message addressed to our call (check both, aprs_callsign and aprsis_callsign)=
-	          // Format: "..::DL9SAU-15:..."
-		  // check is here, because we may like to see those packets via kiss (sent above)
-		  if (!do_not_send) {
-		    q = header_end + 1;
-		    if (*q == ':' && strlen(q) > 10 && q[10] == ':' &&
-                         ((!strncmp(q+1, aprs_callsign.c_str(), aprs_callsign.length()) && (aprs_callsign.length() == 9 || q[9] == ' ')) ||
-                         (!strncmp(q+1, aprsis_callsign.c_str(), aprsis_callsign.length()) && (aprsis_callsign.length() == 9 || q[9] == ' ')) ))
-		        do_not_send = true;
-		  }
-                  if (!do_not_send)
-                    loraSend(txPower, lora_freq, lora_speed, third_party_packet);
-	        }
-              }
+            if (lora_tx_enabled && aprsis_data_allow_inet_to_rf) {
+	      // not query or aprs-message addressed to our call (check both, aprs_callsign and aprsis_callsign)=
+	      // Format: "..::DL9SAU-15:..."
+	      // check is in this code part, because we may like to see those packets via kiss (sent above)
+	      q = header_end + 1;
+	      if (*q == ':' && strlen(q) > 10 && q[10] == ':' &&
+                  ((!strncmp(q+1, aprs_callsign.c_str(), aprs_callsign.length()) && (aprs_callsign.length() == 9 || q[9] == ' ')) ||
+                  (!strncmp(q+1, aprsis_callsign.c_str(), aprsis_callsign.length()) && (aprsis_callsign.length() == 9 || q[9] == ' ')) ))
+	        goto do_not_send;
+              loraSend(txPower, lora_freq, lora_speed, third_party_packet);
             }
           }
         }
+do_not_send:
         if (to_aprsis_data) {
 	  // copy(). We are threaded..
 	  String data = String(to_aprsis_data);
