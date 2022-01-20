@@ -2013,6 +2013,7 @@ out:
     #endif
       loraReceivedLength = sizeof(lora_RXBUFF);                           // reset max length before receiving!
       if (rf95.recvAPRS(lora_RXBUFF, &loraReceivedLength)) {
+        char *s;
         loraReceivedFrameString = "";
         //int rssi = rf95.lastSNR();
         //Serial.println(rssi);
@@ -2021,17 +2022,30 @@ out:
           loraReceivedFrameString += (char) lora_RXBUFF[i];
         }
 	const char *received_frame = loraReceivedFrameString.c_str();
+
+        uint8_t our_packet = 0; // 1: from us. 2: digipeated by us
+	// not our own digipeated call?
+	if (loraReceivedFrameString.startsWith(Tcall + '>'))
+	  our_packet = 1;
+	char *header_end = strchr(received_frame, ':');
+	if (((s = strstr(received_frame, (',' + Tcall + '*').c_str())) || (s = strstr(received_frame, (',' + Tcall + ',').c_str()))) && s < header_end) {
+	  // in path: exact call match and digipeated flag present and we have repeated it (pos behind start of our call?
+	  char *digipeatedflag = strchr(s, '*');
+	  if (digipeatedflag && digipeatedflag < header_end && digipeatedflag > s)
+	    our_packet |= 2;
+	}
+
 	// CR adaption: because only for SF12 different CR levels have been defined, we unfortunately cannot deal with SF < 12.
 	// In most cases, only useful for normal users, not for WIDE1 or WIDE2 digis. But there may exist good reasons; thus we don't enforce.
 	if (lora_automatic_cr_adaption && lora_speed <= 300L) {
 	  // not our own digipeated call?
-	  if (! (strncmp(received_frame, Tcall.c_str(), Tcall.length()) == 0 && received_frame[Tcall.length()] == '>')) {
+	  if (! (our_packet | 1)) {
 	    lora_automaic_cr_adoption_rf_transmissions_heard_in_timeslot++;
 	    // was digipeated? -> there was another rf transmission
 	    char *p = strchr(received_frame, '>');
 	    char *q = strchr(received_frame, ',');
 	    char *r = strchr(received_frame, '*');
-	    if (p && q && r && q > p && r > q && strchr(r, ':') > r)
+	    if (!((our_packet | 2)) && p && q && r && q > p && r > q && header_end > r)
 	      lora_automaic_cr_adoption_rf_transmissions_heard_in_timeslot++;
 	    }
 	}
@@ -2043,15 +2057,16 @@ out:
 	}
 
 #if defined(ENABLE_WIFI)
-	// No word "NOGATE" or "RFONLY" in header? -> may be sent to aprs-is
-	char *q = strstr(received_frame, ",NOGATE");
-	if (!q || q > strchr(received_frame, ':')) {
-	  q = strstr(received_frame, ",RFONLY");
-	  if (!q || q > strchr(received_frame, ':')) {
-	    char *s = 0;
-	    if (lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_APRSIS)
-	      s = append_element_to_path(received_frame, encode_snr_rssi_in_path());
-	    send_to_aprsis(s ? String(s) : loraReceivedFrameString);
+        if (aprsis_enabled && !our_packet) {
+	  // No word "NOGATE" or "RFONLY" in header? -> may be sent to aprs-is
+	  char *q = strstr(received_frame, ",NOGATE");
+	  if (!q || q > header_end) {
+	    q = strstr(received_frame, ",RFONLY");
+	    if (!q || q > header_end) {
+	      if (lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_APRSIS)
+	        s = append_element_to_path(received_frame, encode_snr_rssi_in_path());
+	      send_to_aprsis(s ? String(s) : loraReceivedFrameString);
+	    }
 	  }
 	}
 #endif
@@ -2064,7 +2079,6 @@ out:
         syslog_log(LOG_INFO, String("Received LoRa: '") + loraReceivedFrameString + "', RSSI:" + bg_rf95rssi_to_rssi(rf95.lastRssi()) + ", SNR: " + bg_rf95snr_to_snr(rf95.lastSNR()));
     #endif
         #ifdef KISS_PROTOCOL
-	char *s = 0;
 	if (lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_KISS) {
 	  s = kiss_add_snr_rssi_to_path_at_position_without_digippeated_flag ? append_element_to_path(received_frame, encode_snr_rssi_in_path()) : add_element_to_path(received_frame, encode_snr_rssi_in_path());
 	}
@@ -2072,7 +2086,7 @@ out:
         #endif
 
 	// Are we configured as lora digi?
-	if (lora_digipeating_mode > 0 && lora_tx_enabled) {
+	if (lora_tx_enabled && lora_digipeating_mode > 0 && !our_packet) {
 	  uint32_t time_lora_TXBUFF_for_digipeating_was_filled_prev = time_lora_TXBUFF_for_digipeating_was_filled;
 	  char *snrrssi = encode_snr_rssi_in_path();
 	  if (!(lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_RF)) *snrrssi = 0;
@@ -2143,6 +2157,7 @@ out:
         rf95.setFrequency(lora_freq_rx_curr);
         lora_speed_rx_curr = (*p_curr_slot_table) ? lora_speed_cross_digi : lora_speed;
         lora_set_speed(lora_speed_rx_curr);
+{ char buf[512]; sprintf(buf, "DL9SAU-12>DL9SAU-12:>debug RX Freq lora_freq_rx_curr %s. packets f1:%u f2:%u", (lora_freq_rx_curr == lora_freq) ? "main" : "secondary", lora_packets_received_in_timeslot_on_main_freq, lora_packets_received_in_timeslot_on_secondary_freq); sendToTNC(String(buf)); }
       }
       // restart from beginning of current row?
       if ((p_curr_slot_table - curr_slot_table) >= 9)
