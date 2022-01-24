@@ -2157,7 +2157,6 @@ out:
         rf95.setFrequency(lora_freq_rx_curr);
         lora_speed_rx_curr = (*p_curr_slot_table) ? lora_speed_cross_digi : lora_speed;
         lora_set_speed(lora_speed_rx_curr);
-{ char buf[512]; sprintf(buf, "DL9SAU-12>DL9SAU-12:>debug RX Freq lora_freq_rx_curr %s. packets f1:%u f2:%u", (lora_freq_rx_curr == lora_freq) ? "main" : "secondary", lora_packets_received_in_timeslot_on_main_freq, lora_packets_received_in_timeslot_on_secondary_freq); sendToTNC(String(buf)); }
       }
       // restart from beginning of current row?
       if ((p_curr_slot_table - curr_slot_table) >= 9)
