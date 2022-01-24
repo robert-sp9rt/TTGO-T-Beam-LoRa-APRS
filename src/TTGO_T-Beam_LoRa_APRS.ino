@@ -1266,7 +1266,8 @@ void setup(){
 
   Serial.printf("LoRa Speed:\t%lu\n", lora_speed_rx_curr);
   
-  rf95.setFrequency((rx_on_frequencies != 2 || lora_digipeating_mode < 2) ? lora_freq : lora_freq_cross_digi);
+  lora_freq_rx_curr = (rx_on_frequencies != 2 || lora_digipeating_mode < 2) ? lora_freq : lora_freq_cross_digi;
+  rf95.setFrequency(lora_freq_rx_curr);
   Serial.printf("LoRa FREQ:\t%f\n", lora_freq);
   rf95.setTxPower((rx_on_frequencies != 2 || lora_digipeating_mode < 2) ? txPower : txPower_cross_digi);
   delay(250);
