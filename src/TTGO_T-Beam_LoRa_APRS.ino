@@ -1261,14 +1261,14 @@ void setup(){
   batt_read();
   writedisplaytext("LoRa-APRS","","Init:","ADC OK!","BAT: "+String(BattVolts,2),"");
   
-  lora_speed_rx_curr = ((rx_on_frequencies != 2 || lora_digipeating_mode < 2) ? lora_speed : lora_speed_cross_digi);
+  lora_speed_rx_curr = lora_speed;
   lora_set_speed(lora_speed_rx_curr);
-
   Serial.printf("LoRa Speed:\t%lu\n", lora_speed_rx_curr);
   
-  lora_freq_rx_curr = (rx_on_frequencies != 2 || lora_digipeating_mode < 2) ? lora_freq : lora_freq_cross_digi;
+  lora_freq_rx_curr = lora_freq;
   rf95.setFrequency(lora_freq_rx_curr);
-  Serial.printf("LoRa FREQ:\t%f\n", lora_freq);
+  Serial.printf("LoRa FREQ:\t%f\n", lora_freq_rx_curr);
+
   rf95.setTxPower((rx_on_frequencies != 2 || lora_digipeating_mode < 2) ? txPower : txPower_cross_digi);
   delay(250);
   #ifdef KISS_PROTOCOL
