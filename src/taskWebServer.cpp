@@ -104,13 +104,16 @@ String jsonLineFromPreferenceInt(const char *preferenceName, bool last=false){
   return String("\"") + preferenceName + "\":" + (preferences.getInt(preferenceName)) + (last ?  + R"()" :  + R"(,)");
 }
 String jsonLineFromPreferenceDouble(const char *preferenceName, bool last=false){
-    return String("\"") + preferenceName + "\":" + String(preferences.getDouble(preferenceName),3) + (last ?  + R"()" :  + R"(,)");
+    return String("\"") + preferenceName + "\":" + String(preferences.getDouble(preferenceName),4) + (last ?  + R"()" :  + R"(,)");
 }
 String jsonLineFromString(const char *name, const char *value, bool last=false){
   return String("\"") + name + "\":\"" + jsonEscape(value) + "\"" + (last ?  + R"()" :  + R"(,)");
 }
 String jsonLineFromInt(const char *name, const int value, bool last=false){
   return String("\"") + name + "\":" + String(value) + (last ?  + R"()" :  + R"(,)");
+}
+String jsonLineFromDouble(const char *name, const double value, bool last=false){
+  return String("\"") + name + "\":" + String(value, 4) + (last ?  + R"()" :  + R"(,)");
 }
 
 void handle_NotFound(){
@@ -274,8 +277,7 @@ void handle_Cfg() {
   jsonData += jsonLineFromPreferenceString(PREF_APRSIS_CALLSIGN);
   jsonData += jsonLineFromPreferenceString(PREF_APRSIS_PASSWORD);
   jsonData += jsonLineFromPreferenceBool(PREF_APRSIS_ALLOW_INET_TO_RF);
-  jsonData += jsonLineFromInt("lora_freq_rx_curr", (unsigned long ) (lora_freq_rx_curr*1000L));
-  //jsonData += jsonLineFromPreferenceDouble("lora_freq_rx_curr", lora_freq_rx_curr);
+  jsonData += jsonLineFromDouble("lora_freq_rx_curr", lora_freq_rx_curr);
   jsonData += jsonLineFromString("aprsis_status", aprsis_status.c_str());
   jsonData += jsonLineFromInt("FreeHeap", ESP.getFreeHeap());
   jsonData += jsonLineFromInt("HeapSize", ESP.getHeapSize());
