@@ -690,7 +690,8 @@ void handle_saveDeviceCfg(){
 	    // check 
 	    String s = aprs_is_client.readStringUntil('\n');
 	    if (s.isEmpty() || !s.startsWith("#")) { aprsis_status = "Error: unexpected reponse on login"; goto on_err; }
-	    if (s.indexOf(" verified") == -1) { aprsis_status = "Error: Login denied: " + s; aprsis_status.trim(); goto on_err; }
+	    if (s.indexOf(" logresp") == -1) { aprsis_status = "Error: Login denied: " + s; aprsis_status.trim(); goto on_err; }
+	    if (s.indexOf(" verified") == -1) { aprsis_status = "Notice: server responsed not verified: " + s; aprsis_status.trim(); }
 	  } else { aprsis_status = "Error: No response"; goto on_err; }
         }
         if (!aprs_is_client.connected())
