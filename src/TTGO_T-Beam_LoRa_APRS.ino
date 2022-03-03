@@ -272,6 +272,12 @@ String infoApAddr = "";
 float average_course[ANGLE_AVGS];
 float avg_c_y, avg_c_x;
 
+#ifdef RXDISABLE		// define RXDISABLE if you don't like to receive packets. Saves power consumption
+boolean lora_rx_enabled = false;
+#else
+boolean lora_rx_enabled = true;
+#endif
+
 #ifdef TXDISABLE		// define TXDISABLE if you like to ensure that we never TX (i.e. if we are behind an rx-amplifier)
 boolean lora_tx_enabled = false;
 uint8_t txPower = 0;
@@ -300,7 +306,10 @@ uint8_t lora_cross_digipeating_mode = 0;	// 0: disable cross freq digipeating. 1
 #define FLAG_ADD_SNR_RSSI_FOR_RF     1
 #define FLAG_ADD_SNR_RSSI_FOR_KISS   2
 #define FLAG_ADD_SNR_RSSI_FOR_APRSIS 4
-uint8_t lora_add_snr_rssi_to_path = (FLAG_ADD_SNR_RSSI_FOR_RF | FLAG_ADD_SNR_RSSI_FOR_KISS | FLAG_ADD_SNR_RSSI_FOR_APRSIS);	// Add snr+rssi to path. May become default, after it proves it behaves good to our network
+#define FLAG_ADD_SNR_RSSI_FOR_RF__ONLY_IF_HEARD_DIRECT     8
+#define FLAG_ADD_SNR_RSSI_FOR_KISS__ONLY_IF_HEARD_DIRECT   16
+#define FLAG_ADD_SNR_RSSI_FOR_APRSIS__ONLY_IF_HEARD_DIRECT 32
+uint8_t lora_add_snr_rssi_to_path = (FLAG_ADD_SNR_RSSI_FOR_KISS | FLAG_ADD_SNR_RSSI_FOR_APRSIS__ONLY_IF_HEARD_DIRECT);	// Add snr+rssi to path. May become default, after it proves it behaves good to our network
 boolean kiss_add_snr_rssi_to_path_at_position_without_digippeated_flag = 1; // Add snr+rssi at last digipeater, without digipeated flag, at last position in path. Set to 1, if you pass data to aprs-is. Set to 0 if you pass data to your favourite digipeater software. We need this hack because our rssi-encoded data should not be interpreted as "(last ==) direct heard station" in the aprs-is net.
 int tx_beacon_and_fromKiss_on_frequencies = 1;	// TX beacon or from-kiss on following frequencies. Only if lora_digipeating_mode > 1 (we are a WIDE1 or WIDE2 digi). 1: main freq. 2: cross_digi_freq. 3: both frequencies
 int rx_on_frequencies = 1;			// RX freq. Only if lora_digipeating_mode < 2 (we are a user) 1: main freq. 2: cross_digi_freq. 3: both frequencies
@@ -327,6 +336,8 @@ uint16_t lora_packets_received_in_timeslot_on_secondary_freq = 0;
 char lora_TXBUFF_for_digipeating[BG_RF95_MAX_MESSAGE_LEN+1] = "";		// buffer for digipeating
 time_t time_lora_TXBUFF_for_digipeating_was_filled = 0L;
 
+String MY_APRS_DEST_IDENTIFYER = "APLOX1";
+
 #ifdef ENABLE_WIFI
   tWebServerCfg webServerCfg;
   String to_aprsis_data = "";
@@ -343,6 +354,9 @@ uint8_t loraReceivedLength = sizeof(lora_RXBUFF);
 
 // Singleton instance of the radio driver
 BG_RF95 rf95(18, 26);        // TTGO T-Beam has NSS @ Pin 18 and Interrupt IO @ Pin26
+
+
+char src_call_blacklist[256] = "";
 
 // initialize OLED display
 #define OLED_RESET 16         // not used
@@ -382,7 +396,8 @@ void prepareAPRSFrame(){
   outString = "";
   outString += Tcall;
 
-  outString += ">APLOX1";
+  outString += ">";
+  outString + MY_APRS_DEST_IDENTIFYER;
   if (!relay_path.isEmpty()){
     if (relay_path.length() < 3) {
       int ssid = relay_path.toInt();
@@ -739,7 +754,7 @@ String prepareCallsign(const String& callsign){
         String telemetryEquations = String(":") + Tcall_message + ":EQNS.0,5.1,3000,0,10,0,0,10,0,0,28,3000,0,10,0";
         String telemetryData = String("T#") + tel_sequence_str + "," + String(b_volt) + "," + String(b_in_c) + "," + String(b_out_c) + "," + String(ac_volt) + "," + String(ac_c) + ",00000000";
         String telemetryBase = "";
-        telemetryBase += Tcall + ">APLOX1" + tel_path_str + ":";
+        telemetryBase += Tcall + ">" + MY_APRS_DEST_IDENTIFYER + tel_path_str + ":";
         Serial.print(telemetryBase);
         sendToTNC(telemetryBase + telemetryParamsNames);
         sendToTNC(telemetryBase + telemetryUnitNames);
@@ -823,6 +838,12 @@ void setup(){
       preferences.putInt(PREF_LORA_SPEED_PRESET, lora_speed);
     }
     lora_speed = preferences.getInt(PREF_LORA_SPEED_PRESET);
+
+    if (!preferences.getBool(PREF_LORA_RX_ENABLE_INIT)){
+      preferences.putBool(PREF_LORA_RX_ENABLE_INIT, true);
+      preferences.putBool(PREF_LORA_RX_ENABLE, lora_rx_enabled);
+    }
+    lora_rx_enabled = preferences.getBool(PREF_LORA_RX_ENABLE);
 
     if (!preferences.getBool(PREF_LORA_TX_ENABLE_INIT)){
       preferences.putBool(PREF_LORA_TX_ENABLE_INIT, true);
@@ -995,6 +1016,21 @@ void setup(){
     }
     aprsLonPreset = preferences.getString(PREF_APRS_LONGITUDE_PRESET);
 
+    if (!preferences.getBool(PREF_APRS_SENDER_BLACKLIST_INIT)){
+      preferences.putBool(PREF_APRS_SENDER_BLACKLIST_INIT, true);
+      preferences.putString(PREF_APRS_SENDER_BLACKLIST, "");
+    }
+    { String s = preferences.getString(PREF_APRS_SENDER_BLACKLIST);
+      s.toUpperCase(); s.trim(); s.replace(" ", ","); s.replace(",,", ",");
+      if (!s.isEmpty() && s != "," && s.length() < sizeof(src_call_blacklist)-3) {
+        *src_call_blacklist = ',';
+        strcpy(src_call_blacklist+1, s.c_str());
+        strcat(src_call_blacklist, ",");
+      } else {
+        *src_call_blacklist = 0;
+      }
+    }
+
     if (!preferences.getBool(PREF_APRS_FIXED_BEACON_PRESET_INIT)){
       preferences.putBool(PREF_APRS_FIXED_BEACON_PRESET_INIT, true);
       preferences.putBool(PREF_APRS_FIXED_BEACON_PRESET, fixed_beacon_enabled);
@@ -1162,6 +1198,25 @@ void setup(){
 
   #endif
 
+  // We have stored the manual position strring in a higher precision (in case resolution more precise than 18.52m is required; i.e. for base-91 location encoding, or DAO extenstion).
+  // Furthermore, 53-32.1234N is more readable in the Web-interface than 5232.1234N
+  aprsLatPreset.toUpperCase(); aprsLatPreset.replace(",", "."); aprsLatPreset.trim();
+  if (aprsLatPreset.length() == 11 && aprsLatPreset.indexOf('-') == 2 && aprsLatPreset.indexOf(' ') == -1 && (aprsLatPreset.endsWith("N") || aprsLatPreset.endsWith("S"))) {
+    char buf[9];
+    const char *p = aprsLatPreset.c_str();
+    sprintf(buf, "%.2s%.5s%c", p, p+3, p[10]);
+    aprsLatPreset = String(buf);
+  }
+
+  // 001-20.5000E is more readable in the Web-interface than 00120.5000E, and could not be mis-interpreted as 120.5 degrees east  (== 120 deg 30' 0" E)
+  aprsLonPreset.toUpperCase(); aprsLonPreset.replace(",", "."); aprsLonPreset.trim();
+  if (aprsLonPreset.length() == 12 && aprsLonPreset.indexOf('-') == 3 && aprsLonPreset.indexOf(' ') == -1 && (aprsLonPreset.endsWith("E") || aprsLonPreset.endsWith("W"))) {
+    char buf[10];
+    const char *p = aprsLonPreset.c_str();
+    sprintf(buf, "%.3s%.5s%c", p, p+4, p[11]);
+    aprsLonPreset = String(buf);
+  }
+
   // enforce valid transmissions even on wrong configurations
   if (aprsSymbolTable.length() != 1)
     aprsSymbolTable = String("/");
@@ -1309,6 +1364,142 @@ void enableOled() {
   oled_timer = millis() + oled_timeout;
 }
 
+int packet_is_valid (const char *frame_start) {
+  const char *p = frame_start;
+  if (!*p || !((*p >= 'A' && *p <= 'Z') || (*p >= '0' && *p <= '9')))
+    return 0;
+  for (p++; *p && *p != ':'; p++) {
+    if (! ((*p >= 'A' && *p <= 'Z') || (*p >= '0' && *p <= '9') || *p == '-' || *p == '*' || *p == ',' || *p == '>') )
+      return 0;
+  }
+  if (!*p || *p != ':')
+    return 0;
+  // do it again. Now we know the header is ok, which makes it parseable more easy, without race conditions (no need to check p[1] == 0 or so..)
+  boolean src_call_end = 0;
+  boolean to_call_end = 0;
+  for (p = frame_start; *p && *p != ':'; p++) {
+    if (*p == '>') { if (src_call_end || !isalnum(*(p-1))) return 0; src_call_end = true; } // '>' twice?
+    else if (*p == ',') { if (!src_call_end || (to_call_end ? (!(isalnum(*(p-1)) || *(p-1) == '*')) : !(isalnum(*(p-1))))  || !isalnum(p[1])) return 0; to_call_end = true; } // -,call or ,- is not valid
+    else if (*p == '-') {
+      // not call-1-2 or call-- or -call or ..>-1 or ,-1 or --15
+      if (!isalnum(*(p-1)) || !isdigit(p[1])) return 0;
+      char c_after_ssid = p[2];
+      if (isdigit(c_after_ssid)) {
+        if (p[1] != '1' || c_after_ssid > '5') return 0; // max "-15".
+        c_after_ssid = p[3];
+      }
+      if (!(c_after_ssid == '>' || c_after_ssid == '*' || c_after_ssid == ',' || c_after_ssid == ':')) return 0; // After ssid (pos 3) only '>', '*', ',', ':', are allowed.
+    }
+  }
+  if (!to_call_end && isalnum(*(p-1)))
+    to_call_end = true;
+  if (!src_call_end || !to_call_end) return 0;
+  return 1;
+}
+
+
+int is_call_blacklisted(const char *frame_start) {
+  // src-call_validation
+  const char *p_call = frame_start;
+  int i = 0;
+  if (!p_call || !*p_call) return 1;
+  if (isdigit(p_call[1]) && isalpha(p_call[2])) {
+    // left-shift g1abc -> _g1abc
+    i = 1;
+    p_call--; // warning, beyond start of pointer
+  }
+  for (; i <= 7; i++) {
+    if (i == 7) return 1;
+    else if (!p_call[i] || p_call[i] == '>' || p_call[i] == '-') {
+      if (i < 4) return 1;
+      break;
+    } else if (i < 2 && !isalnum(p_call[i])) return 1;
+    else if (i == 2 && !isdigit(p_call[i])) return 1;
+    else if (i > 2 && !isalpha(p_call[i])) return 1;
+  }
+
+  // list empty? we may leave here
+  if (!*src_call_blacklist || !strcmp(src_call_blacklist, ",,"))
+    return 0;
+
+  boolean ssid_present = false;
+  char buf[12]; // room for ",DL1AAA-15," + \0
+  char *p = buf;
+  *p++ = ',';
+  for (i = 0; i < 9; i++) {
+    if (!frame_start[i] || /* frame_start[i] == '>' || */ ! (frame_start[i] == '-' || isalnum(frame_start[i]))) {
+      break;
+    }
+    if (frame_start[i] == '-')
+      ssid_present = true;
+    // callvalidation above prevents calls (excl. ssid) with len > 6.
+    // this loop goes over all positions in DL1AAA-15 (9). But if someone modifies the assurance above, we'll have
+    // a race condition here. If user input is DL1AAAAAA (9 bytes; no ssid present), and we add '-0' afterwards,
+    // the result will be ",DL1AAAAAA-00," -> 13, plus \0. But buf is len 12.
+    // If we are here at position i==6 (behind "DL1AAA"), that means at '-', and we did not found the ssid,
+    // well' enforce a break here.
+    if (i == 6 && !ssid_present)
+      break;
+    *p++ = frame_start[i];
+  }
+  if (!ssid_present) {
+    // for being able to filter out DL1AAA but not DL1AAA-1. -> DL1AAA is DL1AAA-0 by AX.25 definition. Blacklist lists DL1AAA-0. DL1AAA means: filter all variants.:w
+    *p++ = '-'; *p++ = '0';
+  }
+  *p++ = ',';
+  *p = 0;
+
+  // exact match?
+  if (strstr(src_call_blacklist, buf))
+    return 2;
+  // filter call completely?
+  if ((p = strchr(buf, '-'))) {
+    *p++ = ','; *p++ = 0;
+    if (strstr(src_call_blacklist, buf))
+      return 3;
+  }
+
+  char *header_end = strchr(frame_start, ':');
+  // check for blacklisted digi in path
+  if (header_end && (p = strchr(frame_start, ','))) {
+    for (;;) {
+      char *q = strchr(p+1, ',');
+      if (!q || q > header_end)
+        q = header_end;
+      // copy ",DL1AAA,.." to buf as ",DL1AAA"
+      // but before: length check. len ",DL1AAA-15*," is 12; sizeof(buf) is 12 (due to \0); we copy until trailing ','.
+      if ((q-p) > sizeof(buf)-1)
+        break;
+      strncpy(buf, p, q-p);
+      buf[q-p] = 0;
+      char *r = strchr(buf, '*');
+      if (r)
+        *r = 0;
+      // our ssid filter construct: -0 means search for call with ssid 0 zero.
+      if (!(r = strchr(buf, '-')))
+        strcat(buf, "-0");
+      // after modifications above, is len(buf) still < 10 (space for ',' and \0)?
+      if (strlen(buf) > 10)
+        return 0;
+      strcat(buf, ",");
+      // exact match?
+      if (strstr(src_call_blacklist, buf))
+        return 4;
+      // filter call completely?
+      if ((r = strchr(buf, '-'))) {
+        *r++ = ','; *r++ = 0;
+        if (strstr(src_call_blacklist, buf))
+          return 5;
+      }
+      if (q == header_end)
+        break;
+      p = q;
+    }
+  }
+  
+  return 0;
+}
+
 
 // rf95.lastSNR() returns unsigned 8bit value, which we get as input
 int bg_rf95snr_to_snr(uint8_t snr)
@@ -1332,7 +1523,7 @@ int bg_rf95rssi_to_rssi(int rssi)
   int _lastSNR = bg_rf95snr_to_snr(rf95.lastSNR());
   boolean _usingHFport = (lora_freq >= 779.0);
 
-  // bg_rf95 library: _lastRssi = spiRead(BG_RF95_REG_1A_PKT_RSSI_VALUE) - 137. First, undo -137 ooperation
+  // bg_rf95 library: _lastRssi = spiRead(BG_RF95_REG_1A_PKT_RSSI_VALUE) - 137. First, undo -137 operation
   int _lastRssi = rf95.lastRssi() + 137;
 
   if (_lastSNR < 0)
@@ -1351,32 +1542,31 @@ char *encode_snr_rssi_in_path()
 {
   static char buf[7]; // length for "Q2373X" == 6 + 1 (\0) == 7
   *buf = 0;
-  if (lora_add_snr_rssi_to_path) {
-    // SNR values reported by rf95.lastSNR() are not plausible. See those two projects:
-    // https://github.com/Lora-net/LoRaMac-node/issues/275
-    // https://github.com/mayeranalytics/pySX127x/blob/master/SX127x/LoRa.py
-    // rf95snr_to_snr returns values in range -32 to 31. The lowest two bits are RFU
-    int snr = bg_rf95snr_to_snr(rf95.lastSNR());
-    int rssi = bg_rf95rssi_to_rssi(rf95.lastRssi());
-    if (snr > 99) snr = 99;			// snr will not go upper 31
-    else if (snr < -99) snr = -99;		// snr will not go below -32
-    if (rssi > 0) rssi = 0;			// rssi is always negative
-    else if (rssi < -259) rssi = -259;		// rssi will not be below -174 anyway ;)
-    // Make SNR >= 0 human readable:
-    //   First position: SNR < 0: replace -1 by A1, -10 by B0, ...
-    //   This way, we reduce "-10" to two letters: B0.
-    // Make RSSI  > -100 RSSI human readable.
-    //   First position: rssi < -99 -> 0. We'll use 91 for rssi -91 instead of J1 for better readibility.
-    //   K means -10x, L means -11x, M means -12x, N means -13x, ...   (everone knows, 'N' is #13 in alphabet out of 26 chars ;)
-    //   => With this, we reduce "-110" to two letters: L0.
-    // Last position of call (6) is left empty for future use. As well as SSID 1-15. Could be used for BER, RX antenna gain, EIRP, ..
-    // => This is a good compromise between efficiency and being able to quickly interprete snr and rssi
-    sprintf(buf, "Q%c%01d%c%01d",
-      ((snr >= 0 ? snr : -snr) / 10) + (snr >= 0 ? '0' : 'A'),
-      (snr >= 0 ? snr : -snr) % 10,
-      (-rssi / 10) + (rssi > -100 ? '0' : 'A'),
-      (-rssi) % 10);
-  }
+  // SNR values reported by rf95.lastSNR() are not plausible. See those two projects:
+  // https://github.com/Lora-net/LoRaMac-node/issues/275
+  // https://github.com/mayeranalytics/pySX127x/blob/master/SX127x/LoRa.py
+  // rf95snr_to_snr returns values in range -32 to 31. The lowest two bits are RFU
+  int snr = bg_rf95snr_to_snr(rf95.lastSNR());
+  int rssi = bg_rf95rssi_to_rssi(rf95.lastRssi());
+  if (snr > 99) snr = 99;			// snr will not go upper 31
+  else if (snr < -99) snr = -99;		// snr will not go below -32
+  if (rssi > 0) rssi = 0;			// rssi is always negative
+  else if (rssi < -259) rssi = -259;		// rssi will not be below -174 anyway ;)
+  // Make SNR >= 0 human readable:
+  //   First position: SNR < 0: replace -1 by A1, -10 by B0, ...
+  //   This way, we reduce "-10" to two letters: B0.
+  // Make RSSI  > -100 RSSI human readable.
+  //   First position: rssi < -99 -> 0. We'll use 91 for rssi -91 instead of J1 for better readibility.
+  //   K means -10x, L means -11x, M means -12x, N means -13x, ...   (everone knows, 'N' is #13 in alphabet out of 26 chars ;)
+  //   => With this, we reduce "-110" to two letters: L0.
+  // Last position of call (6) is left empty for future use. As well as SSID 1-15. Could be used for BER, RX antenna gain, EIRP, ..
+  // => This is a good compromise between efficiency and being able to quickly interprete snr and rssi
+  sprintf(buf, "Q%c%01d%c%01d",
+    ((snr >= 0 ? snr : -snr) / 10) + (snr >= 0 ? '0' : 'A'),
+    (snr >= 0 ? snr : -snr) % 10,
+    (-rssi / 10) + (rssi > -100 ? '0' : 'A'),
+    (-rssi) % 10);
+ 
   return buf;
 }
 
@@ -1429,7 +1619,7 @@ char *add_element_to_path(const char *data, const char *element)
   return buf;
 }
 
-// append element to path, regardless if it will exceep max digipeaters. It's for snr encoding for aprs-is. We don't us
+// append element to path, regardless if it will exceed max digipeaters. It's for snr encoding for aprs-is. We don't use
 // add_element_to_path, because we will append at the last position, and do not change digipeated bit.
 char *append_element_to_path(const char *data, const char *element) {
   static char buf[BG_RF95_MAX_MESSAGE_LEN+10+1];
@@ -1548,8 +1738,11 @@ struct ax25_frame *tnc_format_to_ax25_frame(const char *s)
 }
 
 
-void handle_lora_frame_for_lora_digipeating(const char *received_frame, char *snr_rssi)
+void handle_lora_frame_for_lora_digipeating(const char *received_frame, const char *snr_rssi)
 {
+
+  if (snr_rssi && !*snr_rssi)
+    snr_rssi = 0;
 
   struct ax25_frame* frame = tnc_format_to_ax25_frame(received_frame);
 
@@ -1581,9 +1774,11 @@ void handle_lora_frame_for_lora_digipeating(const char *received_frame, char *sn
       *lora_TXBUFF_for_digipeating = 0;
   }
 
-  // src-call_validation
-  char *p_call = frame->src.addr;
   int i = 0;
+#ifdef notdef
+  // src-call_validation
+  // not here anymore; now in is_call_blacklisted()
+  char *p_call = frame->src.addr;
   if (isdigit(p_call[1]) && isalpha(p_call[2])) {
     // left-shift g1abc -> _g1abc
     i = 1;
@@ -1598,6 +1793,7 @@ void handle_lora_frame_for_lora_digipeating(const char *received_frame, char *sn
     else if (i == 2 && !isdigit(p_call[i])) return;
     else if (i > 2 && !isalpha(p_call[i])) return;
   }
+#endif
 
   // If DST-call-ssid-digipeating: rewrite before adding path, because WIDE in path and DST-SSID-digipeating are mutual exclusive
   char *q;
@@ -1646,8 +1842,8 @@ void handle_lora_frame_for_lora_digipeating(const char *received_frame, char *sn
   int insert_our_data_before = -1;
   if (!strcmp(frame->digis[curr_not_repeated].addr, Tcall.c_str())) {
     // digi path too long for adding snr_rssi? skip adding snr_rssi
-    if (*snr_rssi && frame->n_digis == AX_DIGIS_MAX)
-      *snr_rssi = 0;
+    if (snr_rssi && frame->n_digis == AX_DIGIS_MAX)
+      snr_rssi = 0;
     frame->digis[curr_not_repeated].repeated = true;
     add_our_call = false;
     insert_our_data_before = curr_not_repeated;
@@ -1659,8 +1855,8 @@ void handle_lora_frame_for_lora_digipeating(const char *received_frame, char *sn
   if (frame->n_digis == AX_DIGIS_MAX)
     return;
   // digi path too long for adding snr_rssi and our call? skip adding snr_rssi
-  if (frame->n_digis +1 == AX_DIGIS_MAX)
-    *snr_rssi = 0;
+  if (snr_rssi && frame->n_digis +1 == AX_DIGIS_MAX)
+    snr_rssi = 0;
 
   if (!strcmp(frame->digis[curr_not_repeated].addr, "WIDE1-1")) {
     frame->digis[curr_not_repeated].addr[5] = 0;
@@ -1708,7 +1904,7 @@ add_our_data:
   for (i = 0; i < insert_our_data_before; i++)
     sprintf(buf + strlen(buf), ",%s", frame->digis[i].addr);
 
-  if (*snr_rssi)
+  if (snr_rssi)
     sprintf(buf + strlen(buf), ",%s", snr_rssi);
 
   if (add_our_call)
@@ -2012,27 +2208,57 @@ out:
       int melody[] = {300, 50, 500, 100};
       buzzer(melody, sizeof(melody)/sizeof(int));
     #endif
-      loraReceivedLength = sizeof(lora_RXBUFF);                           // reset max length before receiving!
-      if (rf95.recvAPRS(lora_RXBUFF, &loraReceivedLength)) {
-        char *s;
+
+    // we need to read the received packt, even if rx is set to disable. else rf95.waitAvailableTimeout(100) will always show, data is available
+    loraReceivedLength = sizeof(lora_RXBUFF);                           // reset max length before receiving!
+    boolean lora_rx_data_available = rf95.recvAPRS(lora_RXBUFF, &loraReceivedLength);
+    const char *rssi_for_path = encode_snr_rssi_in_path();
+
+    // always needed (even if rx is disabled)
+    if (lora_freq_rx_curr == lora_freq) {
+      time_last_lora_frame_received_on_main_freq = millis();
+      lora_packets_received_in_timeslot_on_main_freq++;
+    } else {
+      lora_packets_received_in_timeslot_on_secondary_freq++;
+    }
+
+    if (lora_rx_enabled && lora_rx_data_available) {
+       if(lora_rx_data_available) {
+        char *s = 0;
         loraReceivedFrameString = "";
-        //int rssi = rf95.lastSNR();
-        //Serial.println(rssi);
-        enableOled(); // enable OLED
         for (int i=0 ; i < loraReceivedLength ; i++) {
           loraReceivedFrameString += (char) lora_RXBUFF[i];
         }
 	const char *received_frame = loraReceivedFrameString.c_str();
 
+	// valid packet?
+	if (!packet_is_valid(received_frame)) {
+	  goto invalid_packet;
+	}
+
+        int blacklisted = is_call_blacklisted(received_frame);
+	// don't even automaticaly adapt CR for spammers
+	if (blacklisted) {
+	  goto call_invalid_or_blacklisted;
+	}
+
+        //int rssi = rf95.lastSNR();
+        //Serial.println(rssi);
+        enableOled(); // enable OLED
+
+	char *header_end = strchr(received_frame, ':');
+	char *digipeatedflag = strchr(received_frame, '*');
+	if (digipeatedflag && digipeatedflag > header_end)
+	  digipeatedflag = 0;
+	char *q;
+
         uint8_t our_packet = 0; // 1: from us. 2: digipeated by us
 	// not our own digipeated call?
 	if (loraReceivedFrameString.startsWith(Tcall + '>'))
 	  our_packet = 1;
-	char *header_end = strchr(received_frame, ':');
 	if (((s = strstr(received_frame, (',' + Tcall + '*').c_str())) || (s = strstr(received_frame, (',' + Tcall + ',').c_str()))) && s < header_end) {
 	  // in path: exact call match and digipeated flag present and we have repeated it (pos behind start of our call?
-	  char *digipeatedflag = strchr(s, '*');
-	  if (digipeatedflag && digipeatedflag < header_end && digipeatedflag > s)
+	  if (digipeatedflag && digipeatedflag > s)
 	    our_packet |= 2;
 	}
 
@@ -2040,32 +2266,31 @@ out:
 	// In most cases, only useful for normal users, not for WIDE1 or WIDE2 digis. But there may exist good reasons; thus we don't enforce.
 	if (lora_automatic_cr_adaption && lora_speed <= 300L) {
 	  // not our own digipeated call?
-	  if (! (our_packet | 1)) {
+	  if (! (our_packet & 1)) {
 	    lora_automaic_cr_adoption_rf_transmissions_heard_in_timeslot++;
 	    // was digipeated? -> there was another rf transmission
-	    char *p = strchr(received_frame, '>');
-	    char *q = strchr(received_frame, ',');
-	    char *r = strchr(received_frame, '*');
-	    if (!((our_packet | 2)) && p && q && r && q > p && r > q && header_end > r)
+	    if (digipeatedflag && !(our_packet & 2))
 	      lora_automaic_cr_adoption_rf_transmissions_heard_in_timeslot++;
-	    }
-	}
-	if (lora_freq_rx_curr == lora_freq) {
-	  time_last_lora_frame_received_on_main_freq = millis();
-	  lora_packets_received_in_timeslot_on_main_freq++;
-	} else {
-	  lora_packets_received_in_timeslot_on_secondary_freq++;
+	  }
 	}
 
+	// User sends ",Q" in path? He likes at the first digi to add snr/rssi to path
+	uint8_t user_demands_trace = ( ((q = strstr(received_frame, ",Q,")) || (q = strstr(received_frame, ",Q:"))) && q < header_end) ? 1 : 0;
+	// User sends ",QQ"' in path? He likes all digis to add snr/rssi to path
+	if (((q = strstr(received_frame, ",QQ,")) || (q = strstr(received_frame, ",QQ:"))) && q < header_end)
+	  user_demands_trace = 2;
+
 #if defined(ENABLE_WIFI)
-        if (aprsis_enabled && !our_packet) {
+        if (aprsis_enabled && !our_packet && !blacklisted) {
 	  // No word "NOGATE" or "RFONLY" in header? -> may be sent to aprs-is
-	  char *q = strstr(received_frame, ",NOGATE");
+	  q = strstr(received_frame, ",NOGATE");
 	  if (!q || q > header_end) {
 	    q = strstr(received_frame, ",RFONLY");
 	    if (!q || q > header_end) {
-	      if (lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_APRSIS)
-	        s = append_element_to_path(received_frame, encode_snr_rssi_in_path());
+	      s = 0;
+	      if (((lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_APRSIS) || user_demands_trace > 1) ||
+	          (!digipeatedflag && ((lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_APRSIS__ONLY_IF_HEARD_DIRECT) || user_demands_trace == 1)) )
+	        s = append_element_to_path(received_frame, rssi_for_path);
 	      send_to_aprsis(s ? String(s) : loraReceivedFrameString);
 	    }
 	  }
@@ -2080,40 +2305,52 @@ out:
         syslog_log(LOG_INFO, String("Received LoRa: '") + loraReceivedFrameString + "', RSSI:" + bg_rf95rssi_to_rssi(rf95.lastRssi()) + ", SNR: " + bg_rf95snr_to_snr(rf95.lastSNR()));
     #endif
         #ifdef KISS_PROTOCOL
-	if (lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_KISS) {
-	  s = kiss_add_snr_rssi_to_path_at_position_without_digippeated_flag ? append_element_to_path(received_frame, encode_snr_rssi_in_path()) : add_element_to_path(received_frame, encode_snr_rssi_in_path());
-	}
+	s = 0;
+	if (((lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_KISS) || user_demands_trace > 1) ||
+	    (!digipeatedflag && ((lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_KISS__ONLY_IF_HEARD_DIRECT) || user_demands_trace == 1)) )
+
+	  s = kiss_add_snr_rssi_to_path_at_position_without_digippeated_flag ? append_element_to_path(received_frame, rssi_for_path) : add_element_to_path(received_frame, rssi_for_path);
 	sendToTNC(s ? String(s) : loraReceivedFrameString);
         #endif
 
 	// Are we configured as lora digi?
-	if (lora_tx_enabled && lora_digipeating_mode > 0 && !our_packet) {
+	if (lora_tx_enabled && lora_digipeating_mode > 0 && !our_packet && !blacklisted) {
 	  uint32_t time_lora_TXBUFF_for_digipeating_was_filled_prev = time_lora_TXBUFF_for_digipeating_was_filled;
-	  char *snrrssi = encode_snr_rssi_in_path();
-	  if (!(lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_RF)) *snrrssi = 0;
-          handle_lora_frame_for_lora_digipeating(received_frame, snrrssi);
+	  if (((lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_RF) || user_demands_trace > 1) ||
+	         (!digipeatedflag && ((lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_RF__ONLY_IF_HEARD_DIRECT) || user_demands_trace == 1)) )
+            handle_lora_frame_for_lora_digipeating(received_frame, rssi_for_path);
+	  else
+            handle_lora_frame_for_lora_digipeating(received_frame, NULL);
 	  // new frame in digipeating queue? cross-digi freq enabled and freq set? Send without delay.
           if (*lora_TXBUFF_for_digipeating && lora_cross_digipeating_mode > 0 && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq && time_lora_TXBUFF_for_digipeating_was_filled > time_lora_TXBUFF_for_digipeating_was_filled_prev) {
 	    // word 'NOGATE' part of the header? Don't gate it
-	    char *q = strstr(lora_TXBUFF_for_digipeating, ",NOGATE");
+	    q = strstr(lora_TXBUFF_for_digipeating, ",NOGATE");
 	    if (!q || q > strchr(lora_TXBUFF_for_digipeating, ':')) {
               loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, String(lora_TXBUFF_for_digipeating));  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
               writedisplaytext("  ((TX cross-digi))", "", String(lora_TXBUFF_for_digipeating), "", "", "");
 #ifdef KISS_PROTOCOL
-	      char *s = add_element_to_path(lora_TXBUFF_for_digipeating, "GATE");
+	      s = add_element_to_path(lora_TXBUFF_for_digipeating, "GATE");
 	      sendToTNC(s ? String(s) : lora_TXBUFF_for_digipeating);
 #endif
 	    }
 	  }
 	}
       }
+    } else {
+      // rx disabled. guess blind
+     lora_automaic_cr_adoption_rf_transmissions_heard_in_timeslot++;
+    }
+call_invalid_or_blacklisted:
+invalid_packet:
     #ifdef T_BEAM_V1_0
       #ifdef ENABLE_LED_SIGNALING
         axp.setChgLEDMode(AXP20X_LED_OFF);
       #endif
+    #else
+      ; // make compiler happy
     #endif
   }
-  if (rx_on_frequencies == 3 && lora_digipeating_mode < 2) {
+  if (lora_rx_enabled && rx_on_frequencies == 3 && lora_digipeating_mode < 2) {
     static uint8_t slot_table[9][10] = {
       { 0, 1, 1, 1, 1, 1, 1, 1, 1, 1 }, // 1:9
       { 0, 1, 1, 1, 1, 0, 1, 1, 1, 1 }, // 2:8
@@ -2201,7 +2438,7 @@ out:
   average_speed_final = (average_speed[0]+average_speed[1]+average_speed[2]+average_speed[3]+average_speed[4])/5;
   average_course[point_avg_course] = gps.course.deg();   // calculate smart beaconing course
   ++point_avg_course;
-  
+
   if (point_avg_course>(ANGLE_AVGS-1)) {
     point_avg_course=0;
     avg_c_y = 0;
@@ -2333,7 +2570,7 @@ behind_position_tx:
 
 
   // Data for digipeating in queue?
-  if (lora_digipeating_mode && *lora_TXBUFF_for_digipeating && lora_tx_enabled) {
+  if (lora_tx_enabled && lora_rx_enabled && lora_digipeating_mode && *lora_TXBUFF_for_digipeating) {
     // 5s grace time (plus up to 250ms random) for digipeating. 10s if we are a fill-in digi
     if ((time_lora_TXBUFF_for_digipeating_was_filled + 5*lora_digipeating_mode*1000L + (millis() % 250)) < millis()) {
       if (lora_cross_digipeating_mode < 2 && (time_lora_TXBUFF_for_digipeating_was_filled + 2* 5*lora_digipeating_mode*1000L) > millis()) {

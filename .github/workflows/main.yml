@@ -68,7 +68,7 @@ jobs:
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./.pio/build/ttgo-t-beam-v1.0/firmware.bin
-          asset_name: ttgo-t-beam-v1.0-${{ steps.date.outputs.date }}.bin
+          asset_name: ttgo-t-beam-v1.0-${{ steps.date.outputs.date }}.raw
           asset_content_type: application/octet-stream
 
       - name: Upload ttgo-t-beam-v0.7.bin
@@ -79,7 +79,7 @@ jobs:
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./.pio/build/ttgo-t-beam-v0.7/firmware.bin
-          asset_name: ttgo-t-beam-v0.7-${{ steps.date.outputs.date }}.bin
+          asset_name: ttgo-t-beam-v0.7-${{ steps.date.outputs.date }}.raw
           asset_content_type: application/octet-stream
 
       - name: Upload ttgo-lora32-v2.1.bin
@@ -90,7 +90,7 @@ jobs:
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./.pio/build/ttgo-lora32-v2.1/firmware.bin
-          asset_name: ttgo-lora32-v2.1-${{ steps.date.outputs.date }}.bin
+          asset_name: ttgo-lora32-v2.1-${{ steps.date.outputs.date }}.raw
           asset_content_type: application/octet-stream
 
       - name: Upload ttgo-lora32-v2.bin
@@ -101,7 +101,7 @@ jobs:
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./.pio/build/ttgo-lora32-v2/firmware.bin
-          asset_name: ttgo-lora32-v2-${{ steps.date.outputs.date }}.bin
+          asset_name: ttgo-lora32-v2-${{ steps.date.outputs.date }}.raw
           asset_content_type: application/octet-stream
 
       - name: Upload ttgo-lora32-v1.bin
@@ -112,7 +112,7 @@ jobs:
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./.pio/build/ttgo-lora32-v1/firmware.bin
-          asset_name: ttgo-lora32-v1-${{ steps.date.outputs.date }}.bin
+          asset_name: ttgo-lora32-v1-${{ steps.date.outputs.date }}.raw
           asset_content_type: application/octet-stream
 
       - name: Upload Heltec-WiFi-v1.bin
@@ -123,7 +123,7 @@ jobs:
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./.pio/build/Heltec-WiFi-v1/firmware.bin
-          asset_name: Heltec-WiFi-v1-${{ steps.date.outputs.date }}.bin
+          asset_name: Heltec-WiFi-v1-${{ steps.date.outputs.date }}.raw
           asset_content_type: application/octet-stream
 
       - name: Upload Heltec-WiFi-v2.bin
@@ -134,6 +134,6 @@ jobs:
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./.pio/build/Heltec-WiFi-v2/firmware.bin
-          asset_name: Heltec-WiFi-v2-${{ steps.date.outputs.date }}.bin
+          asset_name: Heltec-WiFi-v2-${{ steps.date.outputs.date }}.raw
           asset_content_type: application/octet-stream
 

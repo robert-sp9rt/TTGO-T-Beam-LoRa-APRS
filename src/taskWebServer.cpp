@@ -35,10 +35,12 @@ extern String aprsis_filter;
 extern String aprsis_callsign;
 extern String aprsis_password;
 extern boolean aprsis_data_allow_inet_to_rf;
+extern String MY_APRS_DEST_IDENTIFYER;
 
 extern double lora_freq_rx_curr;
 extern boolean lora_tx_enabled;
 
+extern char src_call_blacklist;
 
 QueueHandle_t webListReceivedQueue = nullptr;
 std::list <tReceivedPacketData*> receivedPackets;
@@ -225,6 +227,7 @@ void handle_Cfg() {
   jsonData += jsonLineFromPreferenceString(PREF_WIFI_SSID);
   jsonData += jsonLineFromPreferenceDouble(PREF_LORA_FREQ_PRESET);
   jsonData += jsonLineFromPreferenceInt(PREF_LORA_SPEED_PRESET);
+  jsonData += jsonLineFromPreferenceBool(PREF_LORA_RX_ENABLE);
   jsonData += jsonLineFromPreferenceBool(PREF_LORA_TX_ENABLE);
   jsonData += jsonLineFromPreferenceInt(PREF_LORA_TX_POWER);
   jsonData += jsonLineFromPreferenceBool(PREF_LORA_AUTOMATIC_CR_ADAPTION_PRESET);
@@ -244,6 +247,7 @@ void handle_Cfg() {
   jsonData += jsonLineFromPreferenceString(PREF_APRS_COMMENT);
   jsonData += jsonLineFromPreferenceString(PREF_APRS_LATITUDE_PRESET);
   jsonData += jsonLineFromPreferenceString(PREF_APRS_LONGITUDE_PRESET);
+  jsonData += jsonLineFromPreferenceString(PREF_APRS_SENDER_BLACKLIST);
   jsonData += jsonLineFromPreferenceInt(PREF_APRS_FIXED_BEACON_INTERVAL_PRESET);
   jsonData += jsonLineFromPreferenceInt(PREF_APRS_SB_MIN_INTERVAL_PRESET);
   jsonData += jsonLineFromPreferenceInt(PREF_APRS_SB_MAX_INTERVAL_PRESET);
@@ -307,6 +311,232 @@ void handle_ReceivedList() {
   server.send(200,"application/json", doc.as<String>());
 }
 
+
+void store_lat_long(float f_lat, float f_long) {
+  char buf[13];
+
+  int i_deg = (int ) (f_lat < 0 ? (f_lat*-1) : f_lat);
+  float f_min = ((f_lat < 0 ? f_lat*-1 : f_lat) -((int ) i_deg))*60.0;
+  if (f_min > 59.99995) { f_min = 0.0; i_deg++; };
+  if (i_deg >= 180) { i_deg = 179; f_min = 59.9999; };
+  sprintf(buf, "%2.2d-%07.4f%c", i_deg, f_min, f_lat < 0 ? 'S' :  'N');
+  preferences.putString(PREF_APRS_LATITUDE_PRESET, String(buf));
+
+  i_deg = (int ) (f_long < 0 ? (f_long*-1) : f_long);
+  f_min = ((f_long < 0 ? f_long*-1 : f_long) -((int ) i_deg))*60.0;
+  if (f_min > 59.99995) { f_min = 0.0; i_deg++; };
+  if (i_deg >= 90) { i_deg = 89; f_min = 59.9999; };
+  sprintf(buf, "%3.3d-%07.4f%c", i_deg, f_min, f_long < 0 ? 'W' :  'E');
+  preferences.putString(PREF_APRS_LONGITUDE_PRESET, String(buf));
+}
+
+
+boolean is_locator(String s) {
+  int i = s.length();
+  if ((i % 2) || i < 6)
+    return false;
+  const char *p = s.c_str();
+  if (*p < 'A' || p[1] > 'R')
+    return false;
+  p += 2;
+  while (*p) {
+    if (*p < '0' || p[1] > '9')
+      return false;
+    p += 2;
+    if (*p < 'A' || p[1] > 'X')
+      return false;
+    p += 2;
+  }
+  return true;
+}
+
+
+void compute_locator(String s)
+{
+  float f_long, f_lat;
+  const char *p = s.c_str();
+  int s_len = s.length();
+  f_long = (-9 + p[0]-'A') * 10 + p[2]-'0';
+  p = p+4;
+  uint32_t divisor = 1;
+  while (p-s.c_str() < s_len) {
+    if (*p >= 'A' && *p <= 'Z') {
+      divisor *= 24;
+      f_long = f_long + (*p-'A')/(float ) divisor;
+    } else {
+      divisor *= 10;
+      f_long = f_long + (p[0]-'0')/(float ) divisor;
+    }
+    p = p+2;
+  }
+  f_long = f_long *2.0;
+
+  p = s.c_str() + 1;
+  f_lat = (-9 + p[0]-'A') * 10 + p[2]-'0';
+  p = p+4;
+  divisor = 1;
+  while (p-s.c_str() < s_len) {
+    if (*p >= 'A' && *p <= 'Z') {
+      divisor *= 24;
+      f_lat = f_lat + (*p-'A')/(float ) divisor;
+    } else {
+      divisor *= 10;
+      f_lat = f_lat + (*p-'0')/(float ) divisor;
+    }
+    p = p+2;
+  }
+  store_lat_long(f_lat, f_long);
+}
+
+
+void set_lat_long(String s_lat, String s_long) {
+  /*  Valid notations:
+    53 14 59 N
+    53 14 59.1 N
+   -53 14 59
+    53 15
+    53 14.983
+    53-14.983
+    53-14.983 N
+    53-14,983 N
+    53° 14.983
+    53° 14.983'
+    53° 14' 59"
+    53° 14' 59.999"
+    53.2500
+    5314.98 // aprs notation. pos value 2-3 < 60.
+    JO62QN10
+
+    Invalid notations:
+    -53 14 59 N
+    5375 // -> No, not 53° 45".
+    53 -14.0 N
+    53.25.01 N
+    53,25.01 N
+    91 N
+    537 N (-> is it 53° 7min or 5° 37min ?)
+    1301 E (deg in aprs notation is always len 3 (and 0<=x<180))
+    3194.98 // deg*60 + minutes == (53 *60 + 14.983)
+    5399.99 N
+    185 E (instead of writing 175 W)
+    11h55min ;)
+  */
+
+  float f_lat = 0.0f;
+  float f_long = 0.0f;
+  int curr_long = 0;
+
+  // If notation min ' sec "" is used, then sec has to follow min
+  if (s_lat.indexOf("\"") > -1 && (s_lat.indexOf("\"") == -1 || s_lat.indexOf("\"") < s_lat.indexOf("'"))) goto out;
+  if (s_long.indexOf("\"") > -1 && (s_long.indexOf("\"") == -1 || s_long.indexOf("\"") < s_long.indexOf("'"))) goto out;
+  s_lat.toUpperCase(); s_lat.trim(); s_lat.replace("DEG", "-"); s_lat.replace("'", ""); s_lat.replace("\"", "");
+  s_long.toUpperCase(); s_long.trim(); s_long.replace("DEG", "-"); s_long.replace("'", ""); s_long.replace("\"", "");
+
+  if (s_long.isEmpty()) {
+    if (s_lat.isEmpty())
+      goto out;
+    if (is_locator(s_lat)) {
+      compute_locator(s_lat);
+      return;
+    }
+  } else {
+    if (is_locator(s_long)) {
+      compute_locator(s_long);
+      return;
+    }
+  }
+
+  char buf[64];
+  for (curr_long = 0; curr_long < 2; curr_long++) {
+    float f_degree = 0.0f;
+    boolean is_negative = false;
+    strncpy(buf, (curr_long == 0) ? s_lat.c_str() : s_long.c_str(), sizeof(buf)-1);
+    buf[sizeof(buf)-1] = 0;
+    char *p = buf;
+    char c = p[strlen(p)-1];
+    char *q;
+
+    if (c >= '0' && c <= '9') {
+      if (*p == '-') {
+        is_negative = 1;
+        p = p+1;
+        while (*p && *p == ' ') p++;
+      }
+    } else if ((curr_long == 0 && (c == 'N' || c == 'S')) || (curr_long == 1 && (c == 'E' || c == 'W'))) {
+      if (c == 'S' || c == 'W')
+        is_negative = 1;
+      buf[strlen(buf)-1] = 0;
+      q = buf + strlen(buf)-1;
+      while(q > p && *q == ' ')
+        q--;
+    } else goto out;
+
+    if (!*p) goto out;
+    // Notations like position 53-02.13 N
+    if ((q = strchr(p, '-')))
+      *q = ' ';
+
+    if (!isdigit(*p))
+      goto out;
+
+    if ((q = strchr(p, '.')) || (q = strchr(p, ','))) {
+      *q++ = '.';
+      while (*q && isdigit(*q))
+        q++;
+      *q = 0;
+    }
+
+    if ((q = strchr(p, ' '))) {
+      float f_minute = 0.0f;
+      while (*q && *q == ' ')
+        *q++ = 0;
+      char *r = strchr(q, ' ');
+      if (r) {
+        while (*r && *r == ' ')
+          *r++ = 0;
+        if (*r) {
+          char *s = strchr(r, ' ');
+          if (s) *s = 0;
+          float f_seconds = atof(r);
+          if (f_seconds < 0 || f_seconds >= 60)
+            goto out;
+          f_minute = f_seconds / 60.0;
+        }
+      }
+      f_minute = atof(q) + f_minute;
+      if (f_minute > 60.0)
+        goto out;
+      f_degree = f_minute / 60.0;
+    } else {
+      // dd.nnnn, or aprs notation ddmm.nn (latt) / dddmm.nn (long)
+      if (strlen(p) == (curr_long ? 8 : 7)) {
+        q = p + (curr_long ? 3 : 2);
+        if (q[2] == '.') {
+          // atof of mm.nn. dd part comes later
+          f_degree = atof(q) / 60.0;
+          if (f_degree >= 1.0)
+            goto out;
+          // cut after dd
+          *q = 0;
+        }
+      }
+    }
+    f_degree = atof(p) + f_degree;
+
+    if (f_degree < 0 || f_degree > (curr_long == 1 ? 180 : 90))
+      goto out;
+
+    if (is_negative) f_degree *= -1;
+    if (curr_long == 0)
+      f_lat = f_degree;
+    else
+      f_long = f_degree;
+  }
+
+out:
+  store_lat_long(f_lat, f_long);
+}
+
 void handle_SaveAPRSCfg() {
   // LoRa settings
   if (server.hasArg(PREF_LORA_FREQ_PRESET)){
@@ -316,6 +546,7 @@ void handle_SaveAPRSCfg() {
   if (server.hasArg(PREF_LORA_SPEED_PRESET)){
     preferences.putInt(PREF_LORA_SPEED_PRESET, server.arg(PREF_LORA_SPEED_PRESET).toInt());
   }
+  preferences.putBool(PREF_LORA_RX_ENABLE, server.hasArg(PREF_LORA_RX_ENABLE));
   preferences.putBool(PREF_LORA_TX_ENABLE, server.hasArg(PREF_LORA_TX_ENABLE));
   if (server.hasArg(PREF_LORA_TX_POWER)) {
     preferences.putInt(PREF_LORA_TX_POWER, server.arg(PREF_LORA_TX_POWER).toInt());
@@ -349,7 +580,8 @@ void handle_SaveAPRSCfg() {
   }
   // APRS station settings
   if (server.hasArg(PREF_APRS_CALLSIGN) && !server.arg(PREF_APRS_CALLSIGN).isEmpty()){
-    preferences.putString(PREF_APRS_CALLSIGN, server.arg(PREF_APRS_CALLSIGN));
+    String s = server.arg(PREF_APRS_CALLSIGN); s.trim();
+    preferences.putString(PREF_APRS_CALLSIGN, s);
   }
   if (server.hasArg(PREF_APRS_SYMBOL_TABLE) && !server.arg(PREF_APRS_SYMBOL_TABLE).isEmpty()){
     preferences.putString(PREF_APRS_SYMBOL_TABLE, server.arg(PREF_APRS_SYMBOL_TABLE));
@@ -358,16 +590,35 @@ void handle_SaveAPRSCfg() {
     preferences.putString(PREF_APRS_SYMBOL, server.arg(PREF_APRS_SYMBOL));
   }
   if (server.hasArg(PREF_APRS_RELAY_PATH)){
-    preferences.putString(PREF_APRS_RELAY_PATH, server.arg(PREF_APRS_RELAY_PATH));
+    String s = server.arg(PREF_APRS_RELAY_PATH);
+    s.toUpperCase(); s.trim(); s.replace(" ", ","); s.replace(",,", ",");
+    if (s.endsWith("WIDE1") || s.endsWith("WIDE2")) s = s + "-1";
+    if (s.indexOf("WIDE1,") > -1) s.replace("WIDE1,", "WIDE1-1,");
+    if (s.indexOf("WIDE2,") > -1) s.replace("WIDE2,", "WIDE2-1,");
+    // Avoid wrong paths like WIDE2-1,WIDE1-1
+    if (! (s.indexOf("WIDE1") > s.indexOf("WIDE")) && !s.startsWith("RFONLY,WIDE") && !s.startsWith("NOGATE,WIDE") && s.indexOf("*") == -1)
+      preferences.putString(PREF_APRS_RELAY_PATH, s);
   }
   if (server.hasArg(PREF_APRS_COMMENT)){
     preferences.putString(PREF_APRS_COMMENT, server.arg(PREF_APRS_COMMENT));
   }
-  if (server.hasArg(PREF_APRS_LATITUDE_PRESET)){
-    preferences.putString(PREF_APRS_LATITUDE_PRESET, server.arg(PREF_APRS_LATITUDE_PRESET));
-  }
-  if (server.hasArg(PREF_APRS_LONGITUDE_PRESET)){
-    preferences.putString(PREF_APRS_LONGITUDE_PRESET, server.arg(PREF_APRS_LONGITUDE_PRESET));
+  set_lat_long(server.hasArg(PREF_APRS_LATITUDE_PRESET) ? server.arg(PREF_APRS_LATITUDE_PRESET) : String(""), server.hasArg(PREF_APRS_LONGITUDE_PRESET) ? server.arg(PREF_APRS_LONGITUDE_PRESET) : String(""));
+  //if (server.hasArg(PREF_APRS_LATITUDE_PRESET)){
+    ////preferences.putString(PREF_APRS_LATITUDE_PRESET, server.arg(PREF_APRS_LATITUDE_PRESET));
+    //String s_lat = latORlon(server.arg(PREF_APRS_LATITUDE_PRESET), 0);
+    //if (s_lat.length() == 8)
+      //preferences.putString(PREF_APRS_LATITUDE_PRESET, s_lat);
+  //}
+  //if (server.hasArg(PREF_APRS_LONGITUDE_PRESET)){
+    ////preferences.putString(PREF_APRS_LONGITUDE_PRESET, server.arg(PREF_APRS_LONGITUDE_PRESET));
+    //String s_lon = latORlon(server.arg(PREF_APRS_LONGITUDE_PRESET), 1);
+    //if (s_lon.length() == 9)
+      //preferences.putString(PREF_APRS_LONGITUDE_PRESET, s_lon);
+  //}
+  if (server.hasArg(PREF_APRS_SENDER_BLACKLIST)){
+    String s = server.arg(PREF_APRS_SENDER_BLACKLIST);
+    s.toUpperCase(); s.trim(); s.replace(" ", ","); s.replace(",,", ",");
+    preferences.putString(PREF_APRS_SENDER_BLACKLIST, (s.isEmpty() || s == ",") ? "" : s);
   }
   if (server.hasArg(PREF_TNC_SELF_TELEMETRY_INTERVAL)){
     preferences.putInt(PREF_TNC_SELF_TELEMETRY_INTERVAL, server.arg(PREF_TNC_SELF_TELEMETRY_INTERVAL).toInt());
@@ -376,7 +627,9 @@ void handle_SaveAPRSCfg() {
     preferences.putInt(PREF_TNC_SELF_TELEMETRY_MIC, server.arg(PREF_TNC_SELF_TELEMETRY_MIC).toInt());
   }
   if (server.hasArg(PREF_TNC_SELF_TELEMETRY_PATH)){
-    preferences.putString(PREF_TNC_SELF_TELEMETRY_PATH, server.arg(PREF_TNC_SELF_TELEMETRY_PATH));
+    String s = server.arg(PREF_TNC_SELF_TELEMETRY_PATH);
+    s.toUpperCase(); s.trim(); s.replace(" ", ","); s.replace(",,", ",");
+    preferences.putString(PREF_TNC_SELF_TELEMETRY_PATH, s);
   }
 
   // Smart Beaconing settings 
@@ -413,19 +666,26 @@ void handle_SaveAPRSCfg() {
  
   preferences.putBool(PREF_APRSIS_EN, server.hasArg(PREF_APRSIS_EN));
   if (server.hasArg(PREF_APRSIS_SERVER_NAME)){
-    preferences.putString(PREF_APRSIS_SERVER_NAME, server.arg(PREF_APRSIS_SERVER_NAME));
+    String s = server.arg(PREF_APRSIS_SERVER_NAME);
+    preferences.putString(PREF_APRSIS_SERVER_NAME, s);
   }
   if (server.hasArg(PREF_APRSIS_SERVER_PORT)){
     preferences.putInt(PREF_APRSIS_SERVER_PORT, server.arg(PREF_APRSIS_SERVER_PORT).toInt());
   }
   if (server.hasArg(PREF_APRSIS_FILTER)){
-    preferences.putString(PREF_APRSIS_FILTER, server.arg(PREF_APRSIS_FILTER));
+    String s = server.arg(PREF_APRSIS_FILTER);
+    s.trim();
+    preferences.putString(PREF_APRSIS_FILTER, s);
   }
   if (server.hasArg(PREF_APRSIS_CALLSIGN)){
-    preferences.putString(PREF_APRSIS_CALLSIGN, server.arg(PREF_APRSIS_CALLSIGN));
+    String s = server.arg(PREF_APRSIS_CALLSIGN);
+    s.toUpperCase(); s.trim();
+    preferences.putString(PREF_APRSIS_CALLSIGN, s);
   }
   if (server.hasArg(PREF_APRSIS_PASSWORD)){
-    preferences.putString(PREF_APRSIS_PASSWORD, server.arg(PREF_APRSIS_PASSWORD));
+    String s = server.arg(PREF_APRSIS_PASSWORD);
+    s.trim();
+    preferences.putString(PREF_APRSIS_PASSWORD, s);
   }
   preferences.putBool(PREF_APRSIS_ALLOW_INET_TO_RF, server.hasArg(PREF_APRSIS_ALLOW_INET_TO_RF));
   
@@ -818,7 +1078,7 @@ String generate_third_party_packet(String callsign, String packet_in)
     r++;
     strncpy(fromtodest, s, q-s);
     fromtodest[(q-s)] = 0;
-    packet_out = callsign + ">APRS:}" + fromtodest + ",TCPIP," + callsign + "*:" + r;
+    packet_out = callsign + ">" + MY_APRS_DEST_IDENTIFYER + ":}" + fromtodest + ",TCPIP," + callsign + "*:" + r;
                              // ^ 3rd party traffic should be addressed directly (-> not to WIDE2-1 or so)
   }
   return packet_out;
