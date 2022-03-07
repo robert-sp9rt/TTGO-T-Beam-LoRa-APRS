@@ -116,13 +116,7 @@
                     </div>
                 </div>
                 <div class="grid-container halves">
-                    Info for SNR/RSSI:<br/>
-                    Still testing, if it behaves good to our network.<br/>
-                    If enabled, add SNR and RSSI in path on receiption, prefixed with 'Q'. Examples:<br/>
-                    SNR  23 RSSI  -73 -> Q2373<br/>
-                    SNR -03 RSSI -104 -> QA3K4<br/>
-                    SNR -13 RSSI -114 -> QB3L4<br/>.
-		    Use with care; resulting longer path consumes a bit more airtime.
+                    More info for SNR/RSSI path encoding see documentation section below
                     <div>
                         <label for="snraprsis">SNR/RSSI-encoding on kiss: compatible to APRS-IS?</label>
                         <input name="snraprsis" id="snraprsis" type="checkbox" value=1 title="Add snr+rssi at last digipeater, without digipeated flag. Use this for APRSIS connections. If you have connected a digipeater software to kiss, this option has to be switched off">
@@ -323,7 +317,7 @@
                 </div>
                 <div class="grid-container halves">
                     <div>
-                        <label for="lora_dig_x_m">Digipeat heard stations on which frequencies</label>
+                        <label for="lora_dig_x_m">Digipeat heard stations from MAIN frequency to which frequencies</label>
                         (If LoRa Repeater Mode has not been set to off)
                         <select id="lora_dig_x_m" name="lora_dig_x_m">
                             <option value="0">Repeat only to main frequency (default)</option>
@@ -501,6 +495,44 @@
             </div>
             <div class="grid-container full">
                 Click <a href="/cfg">here</a> to view your configuration.
+            </div>
+        </article>
+    </section>
+    <section>
+        <div class="grid-container full">
+            <h2 class="u-full-width">Documentation</h2>
+        </div>
+        <article>
+            <div class="grid-container full">
+              <h5 class="u-full-width">Info for SNR/RSSI path encoding</h5>
+            </div>
+            <div>If enabled, add SNR and RSSI in path on receiption, prefixed with 'Q'. Examples:<br/>
+                 SNR  23 RSSI  -73 -> Q2373<br/>
+                 SNR -03 RSSI -104 -> QA3K4<br/>
+                 SNR -13 RSSI -114 -> QB3L4<br/>
+                 Still testing, if it behaves good to our network.<br/>
+                 Use with care; resulting longer path consumes a bit more airtime.
+            </div>
+            <div class="grid-container full">
+              <h5 class="u-full-width">User key functions (hardware buttons):</h5>
+            </div>
+            <div>
+               <h6 class="u-full-width">short press</h6>
+               If OLED is enabled and OLED is OFF:<br/>
+               <ul>
+                 <li>a short press will wake it up and show current data (as "Display Timeout" seconds</li>
+               </ul>
+               If OLED is disabled or OLED is ON:<br>
+               <ul>
+                    <li>with GPS-FIX immediate sending of a frame with the position from the GPS</li>
+                    <li>without GPS-FIX, immediate sending of the frame with the position saved in the configuration</li>
+               </ul>
+               <h6 class="u-full-width">long press</h6>
+               <ul>
+                   <li>toggle on or off GPS power supply</li>
+                   <li>if the "FIXED_BEACON_EN" option is enabled in the configuration, a beacon will be sent every set time interval</li>
+                   <li>while booting: reset to factory default</li>
+                </ul>
             </div>
         </article>
     </section>

@@ -1316,15 +1316,17 @@ void setup(){
   batt_read();
   writedisplaytext("LoRa-APRS","","Init:","ADC OK!","BAT: "+String(BattVolts,2),"");
   
-  lora_speed_rx_curr = lora_speed;
+  // if we are fill-in or wide2 digi, we listen only on configured main frequency
+  lora_speed_rx_curr = (rx_on_frequencies  != 2 || lora_digipeating_mode > 1) ? lora_speed : lora_speed_cross_digi;
   lora_set_speed(lora_speed_rx_curr);
   Serial.printf("LoRa Speed:\t%lu\n", lora_speed_rx_curr);
   
-  lora_freq_rx_curr = lora_freq;
+  lora_freq_rx_curr = (rx_on_frequencies  != 2 || lora_digipeating_mode > 1) ? lora_freq : lora_freq_cross_digi;
   rf95.setFrequency(lora_freq_rx_curr);
   Serial.printf("LoRa FREQ:\t%f\n", lora_freq_rx_curr);
 
-  rf95.setTxPower((rx_on_frequencies != 2 || lora_digipeating_mode < 2) ? txPower : txPower_cross_digi);
+  // we tx on main and/or secondary frequency. For tx, loraSend is called (and always has desired txpower as argument)
+  rf95.setTxPower((lora_digipeating_mode < 2 || lora_cross_digipeating_mode < 1) ? txPower : txPower_cross_digi);
   delay(250);
   #ifdef KISS_PROTOCOL
     xTaskCreatePinnedToCore(taskTNC, "taskTNC", 10000, nullptr, 1, nullptr, xPortGetCoreID());
@@ -2313,8 +2315,8 @@ out:
 	sendToTNC(s ? String(s) : loraReceivedFrameString);
         #endif
 
-	// Are we configured as lora digi?
-	if (lora_tx_enabled && lora_digipeating_mode > 0 && !our_packet && !blacklisted) {
+	// Are we configured as lora digi? Are we listening on the main frequency?
+	if (lora_tx_enabled && lora_digipeating_mode > 0 && !our_packet && !blacklisted && lora_freq_rx_curr == lora_freq) {
 	  uint32_t time_lora_TXBUFF_for_digipeating_was_filled_prev = time_lora_TXBUFF_for_digipeating_was_filled;
 	  if (((lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_RF) || user_demands_trace > 1) ||
 	         (!digipeatedflag && ((lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_RF__ONLY_IF_HEARD_DIRECT) || user_demands_trace == 1)) )
