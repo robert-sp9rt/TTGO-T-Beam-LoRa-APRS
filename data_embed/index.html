@@ -37,6 +37,12 @@
                         <input class="u-full-width" type="password" name="ap_password" id="ap_password" placeholder="AUTO AP Password" title="AUTO AP Password">
                     </div>
                 </div>
+                <div class="grid-container quarters">
+                    <div>
+                        <label for="ntp_server">NTP Server</label>
+                        <input type="text" name="ntp_server" id="ntp_server" placeholder="pool.ntp.org" title="NTP Server or IP Address. I.e. pool.ntp.org. If your igate is in the HAMNET, use ntp.hc.r1.ampr.org">
+                      </div>
+                </div>
                 <div class="grid-container full">
                     <input class="button-primary" type="submit" value="Save">
                 </div>
@@ -348,15 +354,11 @@
                   </div>
                   <div>
                     <label for="aprsis_srv_h">Server Name</label>
-                    <input type="text" name="aprsis_srv_h" id="aprsis_srv_h" title="Server name or IP Address. I.e. euro.aprs2.net">
+                    <input type="text" name="aprsis_srv_h" id="aprsis_srv_h" placeholder="euro.aprs2.net" title="Server name or IP Address. I.e. euro.aprs2.net. If your igate is in the HAMNET, use aprs.hc.r1.ampr.org">
                   </div>
                   <div>
                     <label for="aprsis_srv_p">TCP Port</label>
-                    <input type="number" name="aprsis_srv_p" id="aprsis_srv_p" min="1" max="65535" title="TCP Port, i.e. 14580">
-                  </div>
-                  <div>
-                    <label for="aprsis_fltr">Filter (optional)</label>
-                    <input type="text" name="aprsis_fltr" id="aprsis_fltr" title="Request server-site filter (may be left empty). See http://www.aprs-is.net/javAPRSFilter.aspx" placeholder="may be left blank">
+                    <input type="number" name="aprsis_srv_p" id="aprsis_srv_p" placeholder="14580" min="1" max="65535" title="TCP Port, i.e. 14580">
                   </div>
                   <div>
                     <label for="aprsis_call">Callsign (optional)</label>
@@ -365,6 +367,10 @@
                   <div>
                     <label for="aprsis_pw">Password (required)</label>
                     <input type="password" name="aprsis_pw" id="aprsis_pw" title="Your password for the APRS-IS connection.">
+                  </div>
+                  <div>
+                    <label for="aprsis_fltr">Filter (optional)</label>
+                    <input type="text" name="aprsis_fltr" id="aprsis_fltr" title="Request server-site filter (may be left empty). See http://www.aprs-is.net/javAPRSFilter.aspx" placeholder="may be left blank">
                   </div>
                   <div>
                     <label for="aprsis_2rf">Allow traffic from inet to rf</label>

@@ -184,6 +184,12 @@ void handle_SaveWifiCfg() {
       Serial.println("Updated AP PASS: " + server.arg(PREF_AP_PASSWORD));
     }
   }
+  String s = "";
+  if (server.arg(PREF_NTP_SERVER).length()) {
+    s = server.arg(PREF_NTP_SERVER);
+    s.trim();
+  }
+  preferences.putString(PREF_NTP_SERVER, s);
 
   server.sendHeader("Location", "/");
   server.send(302,"text/html", "");
@@ -225,6 +231,7 @@ void handle_Cfg() {
   jsonData += String("\"") + PREF_WIFI_PASSWORD + "\": \"" + jsonEscape((preferences.getString(PREF_WIFI_PASSWORD).isEmpty() ? String("") : "*")) + R"(",)";
   jsonData += String("\"") + PREF_AP_PASSWORD + "\": \"" + jsonEscape((preferences.getString(PREF_AP_PASSWORD).isEmpty() ? String("") : "*")) + R"(",)";
   jsonData += jsonLineFromPreferenceString(PREF_WIFI_SSID);
+  jsonData += jsonLineFromPreferenceString(PREF_NTP_SERVER);
   jsonData += jsonLineFromPreferenceDouble(PREF_LORA_FREQ_PRESET);
   jsonData += jsonLineFromPreferenceInt(PREF_LORA_SPEED_PRESET);
   jsonData += jsonLineFromPreferenceBool(PREF_LORA_RX_ENABLE);
@@ -842,7 +849,14 @@ void handle_saveDeviceCfg(){
       syslog.defaultPriority(LOG_KERN);
       syslog_log(LOG_INFO, "Connected. IP: " + WiFi.localIP().toString());
     #endif
-    configTime(0, 0, "pool.ntp.org");
+    String ntp_server = preferences.getString(PREF_NTP_SERVER);
+    if (ntp_server.isEmpty()) {
+      if (infoApAddr.startsWith("44."))
+        ntp_server = "ntp.hc.r1.ampr.org";
+      else
+        ntp_server = "pool.ntp.org";
+    }
+    configTime(0, 0, ntp_server.c_str());
     #ifdef ENABLE_SYSLOG
       struct tm timeinfo{};
       if(!getLocalTime(&timeinfo)){
