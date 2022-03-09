@@ -235,7 +235,8 @@ void handle_Cfg() {
   jsonData += jsonLineFromPreferenceBool(PREF_LORA_ADD_SNR_RSSI_TO_PATH_END_AT_KISS_PRESET);
   jsonData += jsonLineFromPreferenceInt(PREF_APRS_DIGIPEATING_MODE_PRESET);
   jsonData += jsonLineFromPreferenceInt(PREF_APRS_CROSS_DIGIPEATING_MODE_PRESET);
-  jsonData += jsonLineFromPreferenceInt(PREF_LORA_TX_BEACON_AND_KISS_ON_FREQUENCIES_PRESET);
+  jsonData += jsonLineFromPreferenceInt(PREF_LORA_TX_BEACON_AND_KISS_TO_FREQUENCIES_PRESET);
+  jsonData += jsonLineFromPreferenceBool(PREF_LORA_TX_BEACON_AND_KISS_TO_APRSIS_PRESET);
   jsonData += jsonLineFromPreferenceDouble(PREF_LORA_FREQ_CROSSDIGI_PRESET);
   jsonData += jsonLineFromPreferenceInt(PREF_LORA_SPEED_CROSSDIGI_PRESET);
   jsonData += jsonLineFromPreferenceInt(PREF_LORA_TX_POWER_CROSSDIGI_PRESET);
@@ -562,9 +563,10 @@ void handle_SaveAPRSCfg() {
   if (server.hasArg(PREF_APRS_CROSS_DIGIPEATING_MODE_PRESET)){
     preferences.putInt(PREF_APRS_CROSS_DIGIPEATING_MODE_PRESET, server.arg(PREF_APRS_CROSS_DIGIPEATING_MODE_PRESET).toInt());
   }
-  if (server.hasArg(PREF_LORA_TX_BEACON_AND_KISS_ON_FREQUENCIES_PRESET)) {
-    preferences.putInt(PREF_LORA_TX_BEACON_AND_KISS_ON_FREQUENCIES_PRESET, server.arg(PREF_LORA_TX_BEACON_AND_KISS_ON_FREQUENCIES_PRESET).toInt());
+  if (server.hasArg(PREF_LORA_TX_BEACON_AND_KISS_TO_FREQUENCIES_PRESET)) {
+    preferences.putInt(PREF_LORA_TX_BEACON_AND_KISS_TO_FREQUENCIES_PRESET, server.arg(PREF_LORA_TX_BEACON_AND_KISS_TO_FREQUENCIES_PRESET).toInt());
   }
+  preferences.putBool(PREF_LORA_TX_BEACON_AND_KISS_TO_APRSIS_PRESET, server.hasArg(PREF_LORA_TX_BEACON_AND_KISS_TO_APRSIS_PRESET));
   if (server.hasArg(PREF_LORA_FREQ_CROSSDIGI_PRESET)){
     preferences.putDouble(PREF_LORA_FREQ_CROSSDIGI_PRESET, server.arg(PREF_LORA_FREQ_CROSSDIGI_PRESET).toDouble());
     Serial.printf("FREQ crossdigi saved:\t%f\n", server.arg(PREF_LORA_FREQ_CROSSDIGI_PRESET).toDouble());

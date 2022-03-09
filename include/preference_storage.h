@@ -28,8 +28,10 @@ static const char *const PREF_LORA_ADD_SNR_RSSI_TO_PATH_END_AT_KISS_PRESET_INIT 
 static const char *const PREF_LORA_ADD_SNR_RSSI_TO_PATH_END_AT_KISS_PRESET = "snraprsis";
 static const char *const PREF_LORA_FREQ_CROSSDIGI_PRESET_INIT = "lora_freq_x_i";
 static const char *const PREF_LORA_FREQ_CROSSDIGI_PRESET = "lora_freq_x";
-static const char *const PREF_LORA_TX_BEACON_AND_KISS_ON_FREQUENCIES_PRESET_INIT = "tx_qrg_bc_i";
-static const char *const PREF_LORA_TX_BEACON_AND_KISS_ON_FREQUENCIES_PRESET = "tx_qrg_bc";
+static const char *const PREF_LORA_TX_BEACON_AND_KISS_TO_FREQUENCIES_PRESET_INIT = "tx_qrg_bc_i";
+static const char *const PREF_LORA_TX_BEACON_AND_KISS_TO_FREQUENCIES_PRESET = "tx_qrg_bc";
+static const char *const PREF_LORA_TX_BEACON_AND_KISS_TO_APRSIS_PRESET_INIT = "tx_aprsis_bc_i";
+static const char *const PREF_LORA_TX_BEACON_AND_KISS_TO_APRSIS_PRESET = "tx_aprsis_bc";
 static const char *const PREF_LORA_SPEED_CROSSDIGI_PRESET_INIT = "lora_speed_x_i";
 static const char *const PREF_LORA_SPEED_CROSSDIGI_PRESET = "lora_speed_x";
 static const char *const PREF_LORA_TX_POWER_CROSSDIGI_PRESET_INIT = "txPower_x_i";

@@ -100,7 +100,7 @@
                           <option value="3">To RF and KISS (~)</option>
                           <option value="5">To RF and APRSIS (~)</option>
                           <option value="6">To KISS and APRSIS (~)</option>
-                          <option value="7">To RF and KISS and APRSIS |~)</option>
+                          <option value="7">To RF and KISS and APRSIS (~)</option>
                           <option value="8">To RF*</option>
                           <option value="16">To KISS*</option>
                           <option value="32">To APRSIS*</option>
@@ -119,7 +119,7 @@
                     More info for SNR/RSSI path encoding see documentation section below
                     <div>
                         <label for="snraprsis">SNR/RSSI-encoding on kiss: compatible to APRS-IS?</label>
-                        <input name="snraprsis" id="snraprsis" type="checkbox" value=1 title="Add snr+rssi at last digipeater, without digipeated flag. Use this for APRSIS connections. If you have connected a digipeater software to kiss, this option has to be switched off">
+                        <input name="snraprsis" id="snraprsis" type="checkbox" value=1 title="Add snr+rssi at last digipeater, without digipeated flag. Use this for APRS-IS connections. If you have connected a digipeater software to kiss, this option has to be switched off">
                     </div>
                 </div>
                 <div class="grid-container full">
@@ -325,13 +325,16 @@
                             <option value="2">Repeat only to cross-digi frequency</option>
                         </select>
                     </div>
+                </div>
+                <div class="grid-container halves">
                     <div>
-                      <label for="tx_qrg_bc">TX beacon or from-kiss on frequencies</label>
+                      <label for="tx_qrg_bc">TX our beacon from this device or from-kiss to frequencies</label>
                       (Only honored, if we are configured as WIDE1 or WIDE2 digi)
                       <select id="tx_qrg_bc" name="tx_qrg_bc">
                         <option value="1">TX on main frequency</option>
                         <option value="2">TX on secondary frequency</option>
                         <option value="3">TX on both frequencies</option>
+                        <option value="0">Don't send our beacon on RF (but only to kiss and to APRS-IS)</option>
                       </select>
                     </div>
                 </div>
@@ -357,7 +360,7 @@
                   </div>
                   <div>
                     <label for="aprsis_call">Callsign (optional)</label>
-                      <input type="text" name="aprsis_call" id="aprsis_call" minlength="3" maxlength="9" title="Use this callsign for the APRS-IS connection. If not configured, your default callsign is used." placeholder="may be left blank">
+                    <input type="text" name="aprsis_call" id="aprsis_call" minlength="3" maxlength="9" title="Use this callsign for the APRS-IS connection. If not configured, your default callsign is used." placeholder="may be left blank">
                   </div>
                   <div>
                     <label for="aprsis_pw">Password (required)</label>
@@ -366,7 +369,11 @@
                   <div>
                     <label for="aprsis_2rf">Allow traffic from inet to rf</label>
                     <input name="aprsis_2rf" id="aprsis_2rf" type="checkbox" value="1" title="Gate APRS-IS traffic to rf (will be encoded in 3rd-party format)">
-                    </div>
+                  </div>
+                  <div>
+                    <label for="tx_aprsis_bc">TX our beacon to APRS-IS</label>
+                    <input name="tx_aprsis_bc" id="tx_aprsis_bc" type="checkbox" value="1" title="TX our beacon from this device or from-kiss to APRS-IS. You may like to disable this i.e. if you are a portable hotspot togehther your mobile, but like others than you yourself gate your own packets to APRS-IS -> you'll see at APRS-IS who heard you.">
+                  </div>
                   <div>
                     <label for"aprsis_status">Connection status</label>
                     <input type="text" name="aprsis_status" id="aprsis_status" readonly title="Connection status. Nothing to enter here">

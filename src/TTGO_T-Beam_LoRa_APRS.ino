@@ -311,7 +311,8 @@ uint8_t lora_cross_digipeating_mode = 0;	// 0: disable cross freq digipeating. 1
 #define FLAG_ADD_SNR_RSSI_FOR_APRSIS__ONLY_IF_HEARD_DIRECT 32
 uint8_t lora_add_snr_rssi_to_path = (FLAG_ADD_SNR_RSSI_FOR_KISS | FLAG_ADD_SNR_RSSI_FOR_APRSIS__ONLY_IF_HEARD_DIRECT);	// Add snr+rssi to path. May become default, after it proves it behaves good to our network
 boolean kiss_add_snr_rssi_to_path_at_position_without_digippeated_flag = 1; // Add snr+rssi at last digipeater, without digipeated flag, at last position in path. Set to 1, if you pass data to aprs-is. Set to 0 if you pass data to your favourite digipeater software. We need this hack because our rssi-encoded data should not be interpreted as "(last ==) direct heard station" in the aprs-is net.
-int tx_beacon_and_fromKiss_on_frequencies = 1;	// TX beacon or from-kiss on following frequencies. Only if lora_digipeating_mode > 1 (we are a WIDE1 or WIDE2 digi). 1: main freq. 2: cross_digi_freq. 3: both frequencies
+int tx_own_beacon_from_this_device_or_fromKiss__to_frequencies = 1;	// TX own beacon generated from this device or our beacon from from-kiss on following frequencies. Only if lora_digipeating_mode > 1 (we are a WIDE1 or WIDE2 digi). 1: main freq. 2: cross_digi_freq. 3: both frequencies
+boolean tx_own_beacon_from_this_device_or_fromKiss__to_aprsis = true;	// TX own beacon generated from this device or our beacon from from-kiss to aprs-is.
 int rx_on_frequencies = 1;			// RX freq. Only if lora_digipeating_mode < 2 (we are a user) 1: main freq. 2: cross_digi_freq. 3: both frequencies
 
 #ifdef KISS_PROTOCOL
@@ -531,14 +532,15 @@ void sendpacket(){
   #endif
   batt_read();
   prepareAPRSFrame();
-  if (lora_tx_enabled) {
-    if (tx_beacon_and_fromKiss_on_frequencies % 2)
+  if (lora_tx_enabled && tx_own_beacon_from_this_device_or_fromKiss__to_frequencies) {
+    if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies % 2)
       loraSend(txPower, lora_freq, lora_speed, outString);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
-    if (tx_beacon_and_fromKiss_on_frequencies > 1 && lora_digipeating_mode > 1)
+    if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies > 1 && lora_digipeating_mode > 1)
       loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, outString);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
   }
 #if defined(ENABLE_WIFI)
-   send_to_aprsis(outString);
+  if (tx_own_beacon_from_this_device_or_fromKiss__to_aprsis)
+    send_to_aprsis(outString);
 #endif
 }
 
@@ -887,11 +889,17 @@ void setup(){
     }
     lora_cross_digipeating_mode = preferences.getInt(PREF_APRS_CROSS_DIGIPEATING_MODE_PRESET);
 
-    if (!preferences.getBool(PREF_LORA_TX_BEACON_AND_KISS_ON_FREQUENCIES_PRESET_INIT)){
-      preferences.putBool(PREF_LORA_TX_BEACON_AND_KISS_ON_FREQUENCIES_PRESET_INIT, true);
-      preferences.putInt(PREF_LORA_TX_BEACON_AND_KISS_ON_FREQUENCIES_PRESET, tx_beacon_and_fromKiss_on_frequencies);
+    if (!preferences.getBool(PREF_LORA_TX_BEACON_AND_KISS_TO_FREQUENCIES_PRESET_INIT)){
+      preferences.putBool(PREF_LORA_TX_BEACON_AND_KISS_TO_FREQUENCIES_PRESET_INIT, true);
+      preferences.putInt(PREF_LORA_TX_BEACON_AND_KISS_TO_FREQUENCIES_PRESET, tx_own_beacon_from_this_device_or_fromKiss__to_frequencies);
     }
-    tx_beacon_and_fromKiss_on_frequencies = preferences.getInt(PREF_LORA_TX_BEACON_AND_KISS_ON_FREQUENCIES_PRESET);
+    tx_own_beacon_from_this_device_or_fromKiss__to_frequencies = preferences.getInt(PREF_LORA_TX_BEACON_AND_KISS_TO_FREQUENCIES_PRESET);
+
+    if (!preferences.getBool(PREF_LORA_TX_BEACON_AND_KISS_TO_APRSIS_PRESET_INIT)){
+      preferences.putBool(PREF_LORA_TX_BEACON_AND_KISS_TO_APRSIS_PRESET_INIT, true);
+      preferences.putBool(PREF_LORA_TX_BEACON_AND_KISS_TO_APRSIS_PRESET, tx_own_beacon_from_this_device_or_fromKiss__to_aprsis);
+    }
+    tx_own_beacon_from_this_device_or_fromKiss__to_aprsis = preferences.getBool(PREF_LORA_TX_BEACON_AND_KISS_TO_APRSIS_PRESET);
 
     if (!preferences.getBool(PREF_LORA_FREQ_CROSSDIGI_PRESET_INIT)){
       preferences.putBool(PREF_LORA_FREQ_CROSSDIGI_PRESET_INIT, true);
@@ -2055,7 +2063,7 @@ void loop() {
     }
 #endif
   }
-  if (fixed_beacon_enabled && !dont_send_own_position_packets && lora_tx_enabled) {
+  if (fixed_beacon_enabled && !dont_send_own_position_packets) {
     if (millis() >= next_fixed_beacon && !gps_state) {
       enableOled(); // enable OLED
       next_fixed_beacon = millis() + fix_beacon_interval;
@@ -2090,19 +2098,9 @@ void loop() {
     String *TNC2DataFrame = nullptr;
     if (tncToSendQueue) {
       if (xQueueReceive(tncToSendQueue, &TNC2DataFrame, (1 / portTICK_PERIOD_MS)) == pdPASS) {
+        boolean was_own_position_packet = false;
         time_last_frame_via_kiss_received = millis();
         const char *data = TNC2DataFrame->c_str();
-
-#if defined(ENABLE_WIFI)
-	// No word "NOGATE" or "RFONLY" in header? -> may be sent to aprs-is
-	char *q = strstr(data, ",NOGATE");
-	if (!q || q > strchr(data, ':')) {
-	  q = strstr(data, ",RFONLY");
-	  if (!q || q > strchr(data, ':')) {
-	    send_to_aprsis(*TNC2DataFrame);
-	  }
-	}
-#endif
 
 	// Frame comes from same call as ours and is a position report?
         if (!strncmp(data, Tcall.c_str(), Tcall.length()) && data[Tcall.length()] == '>') {
@@ -2112,6 +2110,7 @@ void loop() {
             time_last_own_position_via_kiss_received = time_last_frame_via_kiss_received;
 	    if (!acceptOwnPositionReportsViaKiss)
 	      goto out; // throw away this frame.
+	    was_own_position_packet = true;
             if (!dont_send_own_position_packets) {
 	      gps_state_before_autochange = gps_state;
 	      if (gps_allow_sleep_while_kiss) {
@@ -2184,10 +2183,24 @@ void loop() {
 	    }
 	  }
 	}
+
+#if defined(ENABLE_WIFI)
+	if (!was_own_position_packet || tx_own_beacon_from_this_device_or_fromKiss__to_aprsis) {
+	  // No word "NOGATE" or "RFONLY" in header? -> may be sent to aprs-is
+	  char *q = strstr(data, ",NOGATE");
+	  if (!q || q > strchr(data, ':')) {
+	    q = strstr(data, ",RFONLY");
+	    if (!q || q > strchr(data, ':')) {
+	      send_to_aprsis(*TNC2DataFrame);
+	    }
+	  }
+	}
+#endif
+
 	if (lora_tx_enabled) {
-          if (tx_beacon_and_fromKiss_on_frequencies % 2)
+          if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies % 2)
             loraSend(txPower, lora_freq, lora_speed, String(data));  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
-          if (tx_beacon_and_fromKiss_on_frequencies > 1 && lora_digipeating_mode > 1)
+          if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies > 1 && lora_digipeating_mode > 1)
             loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, String(data));  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
           enableOled(); // enable OLED
           writedisplaytext("((KISSTX))","","","","","");
