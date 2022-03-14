@@ -138,7 +138,7 @@
                     </div>
                     <div>
                         <label for="aprs_relay_path">Relay Path</label>
-                        <input class="u-full-width" type="text" minlength="0" name="aprs_relay_path" id="aprs_relay_path" title="APRS path, use the shortest as possible, ECHO, WIDE1-1 or WIDE2-1. If you really need a fill-in-digi, choose WIDE1-1,WIDE2-1. RFONLY or NOGATE must not be set in front of WIDEn-m. WIDE2-1,WIDE1-1 is not valid. The path with value '1' enables dest-path-digi-notation (like DL9SAU>APRS-1:..) instead of Path ..,WIDE1-1:... If you are a transmitting igate, please levepath empth (or set it to Q. See below). About the SNR/RSSI-Path feature: You may request to add SNR/RSSI by adding 'Q' to your path (i.e. 'WIDE1-1,Q'; for transmitting igates, only 'Q' is recommended). Then only the first digi (or igate) adds SNR/RSSI to the path. If you add 'QQ' instead of 'Q' to your path (i.e. 'WIDE1-1,QQ'). Then every digi and igate adds SNR/RSSI to the path (useful for analyzing RF net quality). Use with care; resulting longer path consumes a bit more airtime.">
+                        <input class="u-full-width" type="text" minlength="0" name="aprs_relay_path" id="aprs_relay_path" title="APRS path, use the shortest as possible, ECHO, WIDE1-1 or WIDE2-1. If you really need a fill-in-digi, choose WIDE1-1,WIDE2-1. RFONLY or NOGATE must not be set in front of WIDEn-m. WIDE2-1,WIDE1-1 is not valid. The path with value '1' enables dest-path-digi-notation (like DL9SAU>APRS-1:..) instead of Path ..,WIDE1-1:... If you are a transmitting igate, please leave empty (or set it to Q. See below). About the SNR/RSSI-Path feature: You may request to add SNR/RSSI by adding 'Q' to your path (i.e. 'WIDE1-1,Q'; for transmitting igates, only 'Q' is recommended). Then only the first digi (or igate) adds SNR/RSSI to the path. If you add 'QQ' instead of 'Q' to your path (i.e. 'WIDE1-1,QQ'). Then every digi and igate adds SNR/RSSI to the path (useful for analyzing RF net quality). Use with care; resulting longer path consumes a bit more airtime.">
                     </div>
                     <div>
                         <label for="aprs_s_table">Symbol Table</label>
@@ -179,7 +179,7 @@
                     </div>
                     <div>
                         <label for="tnc_tel_int">Self Telemetry Interval [s]</label>
-                        <input name="tnc_tel_int" id="tnc_tel_int" type="number" min="600" title="time between sending telemetry if Enable Self Telemetry option is selected">
+                        <input name="tnc_tel_int" id="tnc_tel_int" type="number" min="600" title="time between sending telemetry if Enable Self Telemetry option is selected. 3600 is recommended.">
                     </div>
                     <div>
                         <label for="tnc_tel_mic">Self Telemetry Sequence</label>
