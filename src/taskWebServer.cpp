@@ -1019,6 +1019,7 @@ void handle_saveDeviceCfg(){
 	  // generate third party packet. Use aprs_callsign (deriving from webServerCfg->callsign), because aprsis_callsign may have a non-aprs (but only aprsis-compatible) ssid like '-L4'
           String third_party_packet = generate_third_party_packet(aprs_callsign, s);
           if (!third_party_packet.isEmpty()) {
+            aprsis_status = "OK, fromAPRSIS: " + third_party_packet; aprsis_status.trim();
 #ifdef KISS_PROTOCOL
             sendToTNC(third_party_packet);
 #endif
@@ -1056,7 +1057,7 @@ do_not_send:
 	        strncpy(buf, data.c_str(), len);
                 buf[len] = 0;
 		String s_data = String(buf) + (lora_tx_enabled ? ",qAR," : ",qAO,") + aprsis_callsign + q + "\r\n";
-                aprsis_status = "OK, sending: " + s_data; aprsis_status.trim();
+                aprsis_status = "OK, toAPRSIS: " + s_data; aprsis_status.trim();
                 aprs_is_client.print(s_data);
 	      }
             }

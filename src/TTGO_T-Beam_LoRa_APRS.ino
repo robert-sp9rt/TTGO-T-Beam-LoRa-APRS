@@ -398,7 +398,7 @@ void prepareAPRSFrame(){
   outString += Tcall;
 
   outString += ">";
-  outString + MY_APRS_DEST_IDENTIFYER;
+  outString += MY_APRS_DEST_IDENTIFYER;
   if (!relay_path.isEmpty()){
     if (relay_path.length() < 3) {
       int ssid = relay_path.toInt();
