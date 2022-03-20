@@ -172,7 +172,7 @@ String tel_path;
 #else
   int tel_mic = 0; // telemetry as "T#001"
 #endif
-#ifdef ENABLE_BLUETOOTH
+#if defined(ENABLE_BLUETOOTH) && defined(KISS_PROTOCOL)
   boolean enable_bluetooth = true;
 #else
   boolean enable_bluetooth = false;
@@ -315,10 +315,10 @@ int tx_own_beacon_from_this_device_or_fromKiss__to_frequencies = 1;	// TX own be
 boolean tx_own_beacon_from_this_device_or_fromKiss__to_aprsis = true;	// TX own beacon generated from this device or our beacon from from-kiss to aprs-is.
 int rx_on_frequencies = 1;			// RX freq. Only if lora_digipeating_mode < 2 (we are a user) 1: main freq. 2: cross_digi_freq. 3: both frequencies
 
-#ifdef KISS_PROTOCOL
 bool acceptOwnPositionReportsViaKiss = true;		// true: Switches off local beacons as long as a kiss device is sending positions with our local callsign. false: filters out position packets with own callsign coming from kiss (-> do not send to LoRa).
 boolean gps_allow_sleep_while_kiss = true;		// user has a kiss device attached via kiss which sends positions with own call, we don't need our gps to be turned on -> We pause sending positions by ourself (neither fixed nor smart beaconing). Except: user has a display attached to this tracker, he'll will be able to see his position because our gps does not go to sleep (-> set this to false). Why sleep? Energy saving
 
+#ifdef KISS_PROTOCOL
 // do not configure
 uint32_t time_last_own_position_via_kiss_received = 0L;	// kiss client sends position report with our call+ssid. Remember when.
 uint32_t time_last_frame_via_kiss_received = 0L;	// kiss client sends aprs-text-messages with our call+ssid. Remember when.
@@ -414,7 +414,7 @@ void prepareAPRSFrame(){
   outString += ":";
 
   if (
-#ifdef ENABLE_BLUETOOTH
+#if defined(ENABLE_BLUETOOTH) && defined(KISS_PROTOCOL)
        SerialBT.hasClient() ||
 #endif
        ((time_last_own_text_message_via_kiss_received + 24*60*60*1000L) > millis())
@@ -1340,23 +1340,47 @@ void setup(){
     xTaskCreatePinnedToCore(taskTNC, "taskTNC", 10000, nullptr, 1, nullptr, xPortGetCoreID());
   #endif
 
-  #if defined(KISS_PROTOCOL)
+#if defined(KISS_PROTOCOL) && defined(ENABLE_BLUETOOTH)
     if (enable_bluetooth){
-      #ifdef BLUETOOTH_PIN
-        SerialBT.setPin(BLUETOOTH_PIN);
-      #endif
-      #ifdef ENABLE_BLUETOOTH
-        SerialBT.begin(String("TTGO LORA APRS ") + Tcall);
-        writedisplaytext("LoRa-APRS","","Init:","BT OK!","","");
-      #endif
+#ifdef BLUETOOTH_PIN
+      SerialBT.setPin(BLUETOOTH_PIN);
+#endif
+      SerialBT.begin(String("TTGO LORA APRS ") + Tcall);
+      writedisplaytext("LoRa-APRS","","Init:","BT OK!","","");
+#if defined(ENABLE_WIFI) && defined(LORA32_21)
+      writedisplaytext("LoRa-APRS","","Init:","Waiting for BT-client","","");
+      // wait 60s until BT client connects
+      uint32_t t_end = millis() + 60000;
+      while (millis() < t_end) {
+        if (SerialBT.hasClient())
+          break;
+        delay(100);
+      }
+      if (!SerialBT.hasClient()) {
+        writedisplaytext("LoRa-APRS","","Init:","Waiting for BT-client","Disabling BT!","");
+        SerialBT.end();
+      } else {
+        writedisplaytext("LoRa-APRS","","Init:","Waiting for BT-clients","BT-client connected","Will NOT start WiFi!");
+      }
+      delay(1500);
+#endif /* ENABLE_WIFI && LORA32_21 */
     }
-  #endif
+#endif /* KISS_PROTOCOL && ENABLE_BLUETOOTH */
 
-  #ifdef ENABLE_WIFI
-    webServerCfg = {.callsign = Tcall};
-    xTaskCreate(taskWebServer, "taskWebServer", 12000, (void*)(&webServerCfg), 1, nullptr);
-    writedisplaytext("LoRa-APRS","","Init:","WiFi task started","   =:-)   ","");
-  #endif
+#ifdef ENABLE_WIFI
+#if defined(LORA32_21) && defined(ENABLE_BLUETOOTH)
+    if (!SerialBT.hasClient()) {
+#endif
+      webServerCfg = {.callsign = Tcall};
+      xTaskCreate(taskWebServer, "taskWebServer", 12000, (void*)(&webServerCfg), 1, nullptr);
+      writedisplaytext("LoRa-APRS","","Init:","WiFi task started","   =:-)   ","");
+#if defined(LORA32_21) && defined(ENABLE_BLUETOOTH)
+    } else {
+      writedisplaytext("LoRa-APRS","","Init:","WiFi NOT started!","   =:-S   ","");
+    }
+    delay(1500);
+#endif
+#endif /* ENABLE_WIFI */
 
   writedisplaytext("LoRa-APRS","","Init:","FINISHED OK!","   =:-)   ","");
   writedisplaytext("","","","","","");

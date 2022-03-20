@@ -548,6 +548,17 @@
                 </ul>
             </div>
         </article>
+        <article>
+            <div class="grid-container full">
+              <h5 class="u-full-width">Hardware notices</h5>
+            </div>
+            <div>
+               <h6 class="u-full-width">TTGO LoRa32 V2.1 (aka T3 V1.6.1)</h6>
+	       Hardware limitation: if bluetooth is enabled and BT-client is connected, WIFI (-> Web-Server) does not work anymore.<br/>
+	       Hack: firmware compiled with -e ttgo-lora32-v2.1 and bluetooth configuration variable is set to enabled, now listens on boot up to one minute for your bluetooth device to connect.<br/>
+	       If a bluetooth device connects, it does not start the Web-Server. Else, it closes SerialBT port and starts the Web-Server.
+            </div>
+        </article>
     </section>
 </div>
 <footer>
