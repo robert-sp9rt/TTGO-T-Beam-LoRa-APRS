@@ -86,7 +86,7 @@ void handleKISSData(char character, int bufferIndex) {
         }
       }
     #endif
-    #ifdef ENABLE_WIFI
+    #if defined(ENABLE_WIFI) && defined(KISS_PROTOCOL)
       check_for_new_clients(&tncServer, clients, MAX_WIFI_CLIENTS);
 
       iterateWifiClients([](WiFiClient * client, int clientIdx, const String * unused){
