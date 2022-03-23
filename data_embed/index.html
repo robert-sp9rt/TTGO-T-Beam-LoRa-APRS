@@ -373,12 +373,18 @@
                     <input type="text" name="aprsis_fltr" id="aprsis_fltr" title="Request server-site filter (may be left empty). See http://www.aprs-is.net/javAPRSFilter.aspx ; Example: '-e/DB0FRI-10/' -> DB0FRI-10 is an iate. If we are configured as bi-directional igate, we do not like to send the packets DB0FRI-10 sent to APRS-IS (and we receive from APRS-IS) as third-party traffic back to RF." placeholder="may be left blank">
                   </div>
                   <div>
-                    <label for="aprsis_2rf">Allow traffic from inet to rf</label>
-                    <input name="aprsis_2rf" id="aprsis_2rf" type="checkbox" value="1" title="Gate APRS-IS traffic to rf (will be encoded in 3rd-party format)">
-                  </div>
-                  <div>
                     <label for="tx_aprsis_bc">TX our beacon to APRS-IS</label>
                     <input name="tx_aprsis_bc" id="tx_aprsis_bc" type="checkbox" value="1" title="TX our beacon from this device or from-kiss to APRS-IS. You may like to disable this i.e. if you are a portable hotspot togehther your mobile, but like others than you yourself gate your own packets to APRS-IS -> you'll see at APRS-IS who heard you.">
+                  </div>
+                  <div>
+                    <label for="aprsis_2rf">Gate APRS-IS traffic to frequencies</label>
+                    (Will be '3rd-party encoded'. Be careful - do not flood our slow main frequency! Use filters..)
+                    <select id="aprsis_2rf" name="aprsis_2rf">
+                      <option value="0">Don't gate APRS-IS to RF (default)</option>
+                      <option value="1">Gate to main frequency</option>
+                      <option value="2">Gate to secondary frequency</option>
+                      <option value="3">Gate to both frequencies</option>
+                    </select>
                   </div>
                   <div>
                     <label for"aprsis_status">Connection status</label>

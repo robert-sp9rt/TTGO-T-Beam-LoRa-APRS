@@ -121,7 +121,7 @@ uint16_t aprsis_port = 14580;
 String aprsis_filter = "";
 String aprsis_callsign = "";
 String aprsis_password = "-1";
-boolean aprsis_data_allow_inet_to_rf = true;
+uint8_t aprsis_data_allow_inet_to_rf = 2;  // 0: disable. 1: gate to main qrg. 2: gate to secondary qrg. 3: gate to both frequencies
 #endif
 
 // Variables for APRS packaging
@@ -540,7 +540,7 @@ void sendpacket(){
   if (lora_tx_enabled && tx_own_beacon_from_this_device_or_fromKiss__to_frequencies) {
     if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies % 2)
       loraSend(txPower, lora_freq, lora_speed, outString);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
-    if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies > 1 && lora_digipeating_mode > 1)
+    if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies > 1 && lora_digipeating_mode > 1 && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq)
       loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, outString);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
   }
 #if defined(ENABLE_WIFI)
@@ -1197,9 +1197,9 @@ void setup(){
 
     if (!preferences.getBool(PREF_APRSIS_ALLOW_INET_TO_RF_INIT)){
       preferences.putBool(PREF_APRSIS_ALLOW_INET_TO_RF_INIT, true);
-      preferences.putBool(PREF_APRSIS_ALLOW_INET_TO_RF, aprsis_data_allow_inet_to_rf);
+      preferences.putInt(PREF_APRSIS_ALLOW_INET_TO_RF, aprsis_data_allow_inet_to_rf);
     }
-    aprsis_data_allow_inet_to_rf = preferences.getBool(PREF_APRSIS_ALLOW_INET_TO_RF);
+    aprsis_data_allow_inet_to_rf = preferences.getInt(PREF_APRSIS_ALLOW_INET_TO_RF);
 #endif
 
     if (clear_preferences){
@@ -2232,7 +2232,7 @@ void loop() {
 	if (lora_tx_enabled) {
           if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies % 2)
             loraSend(txPower, lora_freq, lora_speed, String(data));  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
-          if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies > 1 && lora_digipeating_mode > 1)
+          if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies > 1 && lora_digipeating_mode > 1 && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq)
             loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, String(data));  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
           enableOled(); // enable OLED
           writedisplaytext("((KISSTX))","","","","","");

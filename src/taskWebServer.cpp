@@ -34,7 +34,7 @@ extern uint16_t aprsis_port;
 extern String aprsis_filter;
 extern String aprsis_callsign;
 extern String aprsis_password;
-extern boolean aprsis_data_allow_inet_to_rf;
+extern uint8_t aprsis_data_allow_inet_to_rf;
 extern String MY_APRS_DEST_IDENTIFYER;
 
 extern double lora_freq_rx_curr;
@@ -60,6 +60,9 @@ extern void sendToTNC(const String &);
 extern uint8_t txPower;
 extern double lora_freq;
 extern ulong lora_speed;
+extern uint8_t txPower_cross_digi;
+extern ulong lora_speed_cross_digi;
+extern double lora_freq_cross_digi;
 extern void loraSend(byte, float, ulong, const String &);
 
 
@@ -288,7 +291,7 @@ void handle_Cfg() {
   jsonData += jsonLineFromPreferenceString(PREF_APRSIS_FILTER);
   jsonData += jsonLineFromPreferenceString(PREF_APRSIS_CALLSIGN);
   jsonData += jsonLineFromPreferenceString(PREF_APRSIS_PASSWORD);
-  jsonData += jsonLineFromPreferenceBool(PREF_APRSIS_ALLOW_INET_TO_RF);
+  jsonData += jsonLineFromPreferenceInt(PREF_APRSIS_ALLOW_INET_TO_RF);
   jsonData += jsonLineFromDouble("lora_freq_rx_curr", lora_freq_rx_curr);
   jsonData += jsonLineFromString("aprsis_status", aprsis_status.c_str());
   jsonData += jsonLineFromInt("FreeHeap", ESP.getFreeHeap());
@@ -697,8 +700,9 @@ void handle_SaveAPRSCfg() {
     s.trim();
     preferences.putString(PREF_APRSIS_PASSWORD, s);
   }
-  preferences.putBool(PREF_APRSIS_ALLOW_INET_TO_RF, server.hasArg(PREF_APRSIS_ALLOW_INET_TO_RF));
-  
+  if (server.hasArg(PREF_APRSIS_ALLOW_INET_TO_RF)){
+    preferences.putInt(PREF_APRSIS_ALLOW_INET_TO_RF, server.arg(PREF_APRSIS_ALLOW_INET_TO_RF).toInt());
+  }
 
   preferences.putBool(PREF_APRS_SHOW_BATTERY, server.hasArg(PREF_APRS_SHOW_BATTERY));
   preferences.putBool(PREF_ENABLE_TNC_SELF_TELEMETRY, server.hasArg(PREF_ENABLE_TNC_SELF_TELEMETRY));
@@ -1020,7 +1024,7 @@ void handle_saveDeviceCfg(){
 	  // generate third party packet. Use aprs_callsign (deriving from webServerCfg->callsign), because aprsis_callsign may have a non-aprs (but only aprsis-compatible) ssid like '-L4'
           String third_party_packet = generate_third_party_packet(aprs_callsign, s);
           if (!third_party_packet.isEmpty()) {
-            aprsis_status = "OK, fromAPRSIS: " + third_party_packet; aprsis_status.trim();
+            aprsis_status = "OK, fromAPRSIS: " + s + " => " + third_party_packet; aprsis_status.trim();
 #ifdef KISS_PROTOCOL
             sendToTNC(third_party_packet);
 #endif
@@ -1033,7 +1037,10 @@ void handle_saveDeviceCfg(){
                   ((!strncmp(q+1, aprs_callsign.c_str(), aprs_callsign.length()) && (aprs_callsign.length() == 9 || q[9] == ' ')) ||
                   (!strncmp(q+1, aprsis_callsign.c_str(), aprsis_callsign.length()) && (aprsis_callsign.length() == 9 || q[9] == ' ')) ))
 	        goto do_not_send;
-              loraSend(txPower, lora_freq, lora_speed, third_party_packet);
+              if (aprsis_data_allow_inet_to_rf % 2)
+                loraSend(txPower, lora_freq, lora_speed, third_party_packet);
+              if (aprsis_data_allow_inet_to_rf > 1 && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq)
+                loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, third_party_packet);
             }
           }
         }
