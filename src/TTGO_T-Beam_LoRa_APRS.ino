@@ -399,18 +399,23 @@ void prepareAPRSFrame(){
 
   outString += ">";
   outString += MY_APRS_DEST_IDENTIFYER;
-  if (!relay_path.isEmpty()){
+  if (!relay_path.isEmpty()) {
     if (relay_path.length() < 3) {
       int ssid = relay_path.toInt();
-      if (ssid > 0 && ssid <= /* 15 // no, max hop 3 */ 3) {
-        char buf[4];
-        sprintf(buf, "-%d", ssid);
-        outString += buf;
-      }
-    } else {
-      outString = outString + "," + relay_path;
+      if (ssid < 0 || ssid > /* 15 // no, max hop 3 */ 3 || relay_path == "0")
+        goto out_relay_path;
+      if (ssid > 0) {
+        if (ssid <= /* 15 // no, max hop 3 */ 3) {
+          char buf[4];
+          sprintf(buf, "-%d", ssid);
+          outString += buf;
+          goto out_relay_path;
+        }
+      } // else: relay_path.toInt("Q") or relay_path.toInt("QQ") is 0 (not -1 - wwtf ;) . Q and QQ is valid; fall through
     }
   }
+  outString = outString + "," + relay_path;
+out_relay_path:
   outString += ":";
 
   if (
@@ -1885,6 +1890,9 @@ void handle_lora_frame_for_lora_digipeating(const char *received_frame, const ch
     goto add_our_data;
   }
 
+  if (lora_digipeating_mode < 2)
+    return;
+
   // digi path too long for adding our call skip adding snr_rssi
   if (frame->n_digis == AX_DIGIS_MAX)
     return;
@@ -2088,7 +2096,7 @@ void loop() {
 #endif
   }
   if (fixed_beacon_enabled && !dont_send_own_position_packets) {
-    if (millis() >= next_fixed_beacon && !gps_state) {
+    if (millis() >= next_fixed_beacon && (!gps_state || !gps.location.isValid())) {
       enableOled(); // enable OLED
       next_fixed_beacon = millis() + fix_beacon_interval;
       writedisplaytext("((AUT TX))", "", "", "", "", "");
@@ -2620,7 +2628,7 @@ behind_position_tx:
         sendToTNC(String(lora_TXBUFF_for_digipeating));
 #endif
       } // else: too late. skip TX
-      *lora_TXBUFF_for_digipeating = 0L;
+      *lora_TXBUFF_for_digipeating = 0;
     }
   }
 

@@ -351,6 +351,7 @@ boolean is_locator(String s) {
     if (*p < '0' || p[1] > '9')
       return false;
     p += 2;
+    if (!*p) return true;
     if (*p < 'A' || p[1] > 'X')
       return false;
     p += 2;
@@ -605,7 +606,7 @@ void handle_SaveAPRSCfg() {
     if (s.indexOf("WIDE1,") > -1) s.replace("WIDE1,", "WIDE1-1,");
     if (s.indexOf("WIDE2,") > -1) s.replace("WIDE2,", "WIDE2-1,");
     // Avoid wrong paths like WIDE2-1,WIDE1-1
-    if (! (s.indexOf("WIDE1") > s.indexOf("WIDE")) && !s.startsWith("RFONLY,WIDE") && !s.startsWith("NOGATE,WIDE") && s.indexOf("*") == -1)
+    if (! ( s.indexOf("WIDE1") > s.indexOf("WIDE") || s.indexOf("WIDE-") > -1 || s.startsWith("RFONLY,WIDE") || s.startsWith("NOGATE,WIDE") || s.indexOf("*") > -1 ))
       preferences.putString(PREF_APRS_RELAY_PATH, s);
   }
   if (server.hasArg(PREF_APRS_COMMENT)){

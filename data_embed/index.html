@@ -138,7 +138,7 @@
                     </div>
                     <div>
                         <label for="aprs_relay_path">Relay Path</label>
-                        <input class="u-full-width" type="text" minlength="0" name="aprs_relay_path" id="aprs_relay_path" title="APRS path, use the shortest as possible, ECHO, WIDE1-1 or WIDE2-1. If you really need a fill-in-digi, choose WIDE1-1,WIDE2-1. RFONLY or NOGATE must not be set in front of WIDEn-m. WIDE2-1,WIDE1-1 is not valid. The path with value '1' enables dest-path-digi-notation (like DL9SAU>APRS-1:..) instead of Path ..,WIDE1-1:... If you are a transmitting igate, please leave empty (or set it to Q. See below). About the SNR/RSSI-Path feature: You may request to add SNR/RSSI by adding 'Q' to your path (i.e. 'WIDE1-1,Q'; for transmitting igates, only 'Q' is recommended). Then only the first digi (or igate) adds SNR/RSSI to the path. If you add 'QQ' instead of 'Q' to your path (i.e. 'WIDE1-1,QQ'). Then every digi and igate adds SNR/RSSI to the path (useful for analyzing RF net quality). Use with care; resulting longer path consumes a bit more airtime.">
+                        <input class="u-full-width" type="text" minlength="0" name="aprs_relay_path" id="aprs_relay_path" title="APRS path, use the shortest as possible, ECHO, WIDE1-1 or WIDE2-1. If you really need a fill-in-digi, choose WIDE1-1,WIDE2-1. RFONLY or NOGATE must not be set in front of WIDEn-m. WIDE2-1,WIDE1-1 is not valid. The path with value '1' enables dest-path-digi-notation (like DL9SAU>APRS-1:..) instead of Path ..,WIDE1-1:... If you are a transmitting igate, please leave empty (or set it to Q. See below). About the SNR/RSSI-Path feature: You may request to add SNR/RSSI by adding 'Q' to your path (i.e. 'WIDE1-1,Q'; for transmitting igates (and balloons, aircrafts, ..), only 'Q' is recommended). Then only the first digi (or igate) adds SNR/RSSI to the path. If you add 'QQ' instead of 'Q' to your path (i.e. 'WIDE1-1,QQ'). Then every digi and igate adds SNR/RSSI to the path (useful for analyzing RF net quality). Use with care; resulting longer path consumes a bit more airtime.">
                     </div>
                     <div>
                         <label for="aprs_s_table">Symbol Table</label>
@@ -206,11 +206,11 @@
                         <input name="aprs_fb_interv" id="aprs_fb_interv" type="number" min="120" title="time between sending a beacon if Fixed Beacon option is selected. 1800 or 3600 is recommended for users; 900 or 1800 for digis.">
                     </div>
                     <div>
-                        <label for="aprs_lat_p">Latitude Preset</label>
+                        <label for="aprs_lat_p">Latitude</label>
                         <input class="u-full-width" type="text" minlength="0" name="aprs_lat_p" id="aprs_lat_p" title="latitude for fixed beacon, APRS format for example: 5215.00N. 'dd.nnnnS', '-dd.nnnn', 'dd mm[.nnn]' and 'dd mm ss' and 'dd mm' ss\"' and 'dd-mm[.nn]N' are also supported. If position is south, you can prefix '-' instead of writing 'S' behind the coordinate. '-nnS' does not make sense. If your like to add a locator, add it here and leave longitude field blank.">
                     </div>
                     <div>
-                        <label for="aprs_lon_p">Longitude Preset</label>
+                        <label for="aprs_lon_p">Longitude</label>
                         <input class="u-full-width" type="text" minlength="0" name="aprs_lon_p" id="aprs_lon_p" title="longtitude for fixed beacon, APRS format for example 02050.59E. 'ddd.nnnnS', '-ddd.nnnn',  'ddd mm[.nnn]' and 'ddd mm ss' and 'ddd mm' ss\"' and 'ddd-mm[.nn]E' are also supported. If position is west, you can prefix '-' instead of writing 'W' behind the coordinate. '-nnW' does not make sense.. If your like to add a locator, add it too the latitude field and leave this field blank.">
                     </div>
                 </div>
@@ -370,7 +370,7 @@
                   </div>
                   <div>
                     <label for="aprsis_fltr">Filter (optional)</label>
-                    <input type="text" name="aprsis_fltr" id="aprsis_fltr" title="Request server-site filter (may be left empty). See http://www.aprs-is.net/javAPRSFilter.aspx" placeholder="may be left blank">
+                    <input type="text" name="aprsis_fltr" id="aprsis_fltr" title="Request server-site filter (may be left empty). See http://www.aprs-is.net/javAPRSFilter.aspx ; Example: 'e/DB0FRI-10/' -> db0fri-10 is an iate. If we are configured as bi-directional igate, we do not like to send the packets db0fri sent to APRS-IS (and we receive from APRS-IS) as third-party traffic back to RF." placeholder="may be left blank">
                   </div>
                   <div>
                     <label for="aprsis_2rf">Allow traffic from inet to rf</label>
