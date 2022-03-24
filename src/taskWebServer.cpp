@@ -5,6 +5,7 @@
 #include "PSRAMJsonDocument.h"
 #include <time.h>
 #include <ArduinoJson.h>
+#include <esp_task_wdt.h>
 
 /**
  * @see board_build.embed_txtfiles in platformio.ini
@@ -284,6 +285,7 @@ void handle_Cfg() {
   jsonData += jsonLineFromPreferenceInt(PREF_DEV_SHOW_RX_TIME);
   jsonData += jsonLineFromPreferenceBool(PREF_DEV_AUTO_SHUT);
   jsonData += jsonLineFromPreferenceInt(PREF_DEV_AUTO_SHUT_PRESET);
+  jsonData += jsonLineFromPreferenceInt(PREF_DEV_REBOOT_INTERVAL);
   jsonData += jsonLineFromPreferenceInt(PREF_DEV_SHOW_OLED_TIME);
   jsonData += jsonLineFromPreferenceBool(PREF_APRSIS_EN);
   jsonData += jsonLineFromPreferenceString(PREF_APRSIS_SERVER_NAME);
@@ -298,7 +300,8 @@ void handle_Cfg() {
   jsonData += jsonLineFromInt("HeapSize", ESP.getHeapSize());
   jsonData += jsonLineFromInt("FreeSketchSpace", ESP.getFreeSketchSpace());
   jsonData += jsonLineFromInt("PSRAMSize", ESP.getPsramSize());
-  jsonData += jsonLineFromInt("PSRAMFree", ESP.getFreePsram(), true);
+  jsonData += jsonLineFromInt("PSRAMFree", ESP.getFreePsram());
+  jsonData += jsonLineFromInt("UptimeMinutes", millis()/1000/60, true);
 
   jsonData += "}";
   server.send(200,"application/json", jsonData);
@@ -733,6 +736,10 @@ void handle_saveDeviceCfg(){
   if (server.hasArg(PREF_DEV_AUTO_SHUT_PRESET)){
     preferences.putInt(PREF_DEV_AUTO_SHUT_PRESET, server.arg(PREF_DEV_AUTO_SHUT_PRESET).toInt());
   } 
+  preferences.putBool(PREF_DEV_REBOOT_INTERVAL, server.hasArg(PREF_DEV_REBOOT_INTERVAL));
+  if (server.hasArg(PREF_DEV_REBOOT_INTERVAL)){
+    preferences.putInt(PREF_DEV_REBOOT_INTERVAL, server.arg(PREF_DEV_REBOOT_INTERVAL).toInt());
+  }
   server.sendHeader("Location", "/");
   server.send(302,"text/html", "");
 }
@@ -923,7 +930,12 @@ void handle_saveDeviceCfg(){
     }
   }
 
+  esp_task_wdt_init(120, true); //enable panic so ESP32 restarts
+  esp_task_wdt_add(NULL); //add current thread to WDT watch
+
   while (true){
+    esp_task_wdt_reset();
+
     server.handleClient();
     if (xQueueReceive(webListReceivedQueue, &receivedPacketData, (1 / portTICK_PERIOD_MS)) == pdPASS) {
       auto *receivedPacketToQueue = new tReceivedPacketData();
@@ -962,7 +974,7 @@ void handle_saveDeviceCfg(){
 	  } else { aprsis_status = "Error: No response"; goto on_err; }
           aprsis_status = "Login";
 	  char buffer[1024];
-	  sprintf(buffer, "user %s pass %s TTGO-T-Beam-LoRa-APRS 0.1%s%s\r\n", aprsis_callsign.c_str(), aprsis_password.c_str(), aprsis_filter.isEmpty() ? " filter " : "", aprsis_filter.isEmpty() ? aprsis_filter.c_str() : "");
+	  sprintf(buffer, "user %s pass %s TTGO-T-Beam-LoRa-APRS 0.1%s%s\r\n", aprsis_callsign.c_str(), aprsis_password.c_str(), aprsis_filter.isEmpty() ? "" : " filter ", aprsis_filter.isEmpty() ? "" :  aprsis_filter.c_str());
           aprs_is_client.print(String(buffer));
           t_start = millis();
           while (!aprs_is_client.available() && (millis()-t_start) < 25000) delay(100);

@@ -1,6 +1,7 @@
 #include <taskGPS.h>
 #include <SparkFun_Ublox_Arduino_Library.h>
 #include <taskWebServer.h>
+#include <esp_task_wdt.h>
 
 
 SFE_UBLOX_GPS myGPS;
@@ -43,8 +44,13 @@ bool gpsInitialized = false;
     }
   }
 
+
+  esp_task_wdt_init(120, true); //enable panic so ESP32 restarts
+  esp_task_wdt_add(NULL); //add current thread to WDT watch
+
   String gpsDataBuffer = "              ";
   for (;;) {
+    esp_task_wdt_reset();
     #ifdef ENABLE_WIFI
     check_for_new_clients(&gpsServer, gps_clients, MAX_GPS_WIFI_CLIENTS);
     #endif

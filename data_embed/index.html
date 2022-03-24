@@ -91,8 +91,8 @@
                         <input name="lora_cradapt" id="lora_cradapt" type="checkbox" value="1" title="Enable automatic CR adaption. Has only influence on TX (RX can decode every CR). Use this only if you are not a WIDE1 or WIDE2 digi (here you like to send always with higher speed). Still testing, if it behaves good to our network. Currently works only for SF12 modes, because for SF 10 and lower the code for programming CR+SF+BW-combination has not been written yet">
                     </div>
                     <div>
-                        <label for="aprs_blist">Filter src-calls on receiption</label>
-                        <input type="text" name="aprs_blist" id="aprs_blist" title="Filter out specifiedd source calls on receiption -> no repeating, no igate, not visible via kiss. They don't exist ;). List calls  separated by ',': DL1AAA,DL1BBB'. This filters out DL1AAA without SSID AND with SSID. If you specify DL1AAA-1, only DL1AAA-1 is filtered out. If you specify DL1AAA-0 (special case), then only packets from DL1AAA are filtered out.">
+                        <label for="aprs_blist">Filter src-calls or calls in digipath on receiption</label>
+                        <input type="text" name="aprs_blist" id="aprs_blist" title="Filter out specified source calls or calls in digipath on receiption -> no repeating, no igate, not visible via kiss. They don't exist ;). List calls  separated by ',': DL1AAA,DL1BBB'. This filters out DL1AAA without SSID AND with SSID. If you specify DL1AAA-1, only DL1AAA-1 is filtered out. If you specify DL1AAA-0 (special case), then only packets from DL1AAA are filtered out.">
                     </div>
                 </div>
                 <div class="grid-container halves">
@@ -370,7 +370,7 @@
                   </div>
                   <div>
                     <label for="aprsis_fltr">Filter (optional)</label>
-                    <input type="text" name="aprsis_fltr" id="aprsis_fltr" title="Request server-site filter (may be left empty). See http://www.aprs-is.net/javAPRSFilter.aspx ; Example: '-e/DB0FRI-10/' -> DB0FRI-10 is an iate. If we are configured as bi-directional igate, we do not like to send the packets DB0FRI-10 sent to APRS-IS (and we receive from APRS-IS) as third-party traffic back to RF." placeholder="may be left blank">
+                    <input type="text" name="aprsis_fltr" id="aprsis_fltr" title="Request server-site filter (may be left empty). See http://www.aprs-is.net/javAPRSFilter.aspx ; Example: 't/mqs/YOURCALL/50' -> Gate only messages, query and status messages to RF, from a circle of 50km around your last known position. w, o and i may be of interest, but some people on 2m APRS or APRS-IS may send those packets much too frequently. Please trace the effect! Perhaps in combination with '-e/DB0FRI-10'. In our case, the digi positioning beacon from DB0FRI-10 (which is also an igate nearby, APRS-IS path qAI,DB0FRI-10) came from APRS-IS to us and we gated his beacon, encoded as third-party-trafffic, back to RF (which makes no sense: 1. His direct RF beacon is much better heard than ours -> all RF users heard it. 2. We needless consumed airtime). -> Using -e/IGATE1/IGATE2/.. , everything heard (and sent to APRS-IS) by our neighbor igates like DB0FRI-10 will not be re-gated by us. Please also check, if '-d/..' instead of (or additional to) '-e/..' is more suitiable in your environment; you may also consider -/b/.. ." placeholder="may be left blank">
                   </div>
                   <div>
                     <label for="tx_aprsis_bc">TX our beacon to APRS-IS</label>
@@ -433,11 +433,12 @@
                     <input name="sh_oledtime" id="sh_oledtime" type="number" min="0" max="60" title="Turn OFF OLED after X seconds. Set 0 to disable">
                 </div>
                 <div>
-
-                </div>
-                <div>
                     <label for="shutdown_dt">Auto power off delay [s]</label>
                     <input name="shutdown_dt" id="shutdown_dt" type="number" min="3" max="3600" title="auto shutdown delay in seconds">
+                </div>
+                <div>
+                    <label for="reboot_intrvl">Reboot every n hours</label>
+                    <input name="reboot_intrvl" id="reboot_intrvl" type="number" min="0" max="1193" title="Do a periodical reboot every n hous. 0 = disable. Max 1193" placeholder="0">
                 </div>
             </div>
             <div class="grid-container full">
@@ -523,6 +524,10 @@
         </div>
         <article>
             <div class="grid-container full">
+              <h5 class="u-full-width">Tooltip</h5>
+            </div>
+            <div>If you navigate your mouse over an input field / button, you see a detailed description what it does / which values are expected.</div>
+            <div class="grid-container full">
               <h5 class="u-full-width">Info for SNR/RSSI path encoding</h5>
             </div>
             <div>If enabled, add SNR and RSSI in path on receiption, prefixed with 'Q'. Examples:<br/>
@@ -560,9 +565,9 @@
             </div>
             <div>
                <h6 class="u-full-width">TTGO LoRa32 V2.1 (aka T3 V1.6.1)</h6>
-	       Hardware limitation: if bluetooth is enabled and BT-client is connected, WIFI (-> Web-Server) does not work anymore.<br/>
-	       Hack: firmware compiled with -e ttgo-lora32-v2.1 and bluetooth configuration variable is set to enabled, now listens on boot up to one minute for your bluetooth device to connect.<br/>
-	       If a bluetooth device connects, it does not start the Web-Server. Else, it closes SerialBT port and starts the Web-Server.
+               Hardware limitation: if bluetooth is enabled and BT-client is connected, WIFI (-> Web-Server) does not work anymore.<br/>
+               Hack: firmware compiled with -e ttgo-lora32-v2.1 and bluetooth configuration variable is set to enabled, now listens on boot up to one minute for your bluetooth device to connect.<br/>
+               If a bluetooth device connects, it does not start the Web-Server. Else, it closes SerialBT port and starts the Web-Server.
             </div>
         </article>
     </section>

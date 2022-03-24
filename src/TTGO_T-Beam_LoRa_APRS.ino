@@ -20,6 +20,7 @@
 #include <Adafruit_SPITFT_Macros.h>
 #include <gfxfont.h>
 #include <axp20x.h>
+#include <esp_task_wdt.h>
 #include "taskGPS.h"
 #include "version.h"
 #include "preference_storage.h"
@@ -250,6 +251,7 @@ ulong shutdown_countdown_timer = 0;
 boolean shutdown_active =true;
 boolean shutdown_countdown_timer_enable = false;
 boolean shutdown_usb_status_bef = false;
+uint32_t reboot_interval = 0L;
 
 // Variables required to Power Save OLED
 // With "Display dimmer enabled" it will turn OLED off after some time
@@ -357,7 +359,7 @@ uint8_t loraReceivedLength = sizeof(lora_RXBUFF);
 BG_RF95 rf95(18, 26);        // TTGO T-Beam has NSS @ Pin 18 and Interrupt IO @ Pin26
 
 
-char src_call_blacklist[256] = "";
+char blacklist_calls[256] = "";
 
 // initialize OLED display
 #define OLED_RESET 16         // not used
@@ -1035,12 +1037,12 @@ void setup(){
     }
     { String s = preferences.getString(PREF_APRS_SENDER_BLACKLIST);
       s.toUpperCase(); s.trim(); s.replace(" ", ","); s.replace(",,", ",");
-      if (!s.isEmpty() && s != "," && s.length() < sizeof(src_call_blacklist)-3) {
-        *src_call_blacklist = ',';
-        strcpy(src_call_blacklist+1, s.c_str());
-        strcat(src_call_blacklist, ",");
+      if (!s.isEmpty() && s != "," && s.length() < sizeof(blacklist_calls)-3) {
+        *blacklist_calls = ',';
+        strcpy(blacklist_calls+1, s.c_str());
+        strcat(blacklist_calls, ",");
       } else {
-        *src_call_blacklist = 0;
+        *blacklist_calls = 0;
       }
     }
 
@@ -1129,7 +1131,13 @@ void setup(){
       preferences.putBool(PREF_DEV_AUTO_SHUT_INIT, true);
       preferences.putBool(PREF_DEV_AUTO_SHUT, shutdown_active);
     }
-    shutdown_active = preferences.getBool(PREF_DEV_AUTO_SHUT);          
+    shutdown_active = preferences.getBool(PREF_DEV_AUTO_SHUT);
+
+    if (!preferences.getBool(PREF_DEV_REBOOT_INTERVAL_INIT)){
+      preferences.putBool(PREF_DEV_REBOOT_INTERVAL_INIT, true);
+      preferences.putInt(PREF_DEV_REBOOT_INTERVAL, reboot_interval/60/60/1000);
+    }
+    reboot_interval = (uint32_t ) preferences.getInt(PREF_DEV_REBOOT_INTERVAL) *60*60*1000L;
 
     if (!preferences.getBool(PREF_APRS_SHOW_CMT_INIT)){
       preferences.putBool(PREF_APRS_SHOW_CMT_INIT, true);
@@ -1395,6 +1403,9 @@ void setup(){
 
   // Hold the OLED ON at first boot
   oled_timer=millis()+oled_timeout;
+
+  esp_task_wdt_init(120, true); //enable panic so ESP32 restarts
+  esp_task_wdt_add(NULL); //add current thread to WDT watch
 }
 
 void enableOled() {
@@ -1458,7 +1469,7 @@ int is_call_blacklisted(const char *frame_start) {
   }
 
   // list empty? we may leave here
-  if (!*src_call_blacklist || !strcmp(src_call_blacklist, ",,"))
+  if (!*blacklist_calls || !strcmp(blacklist_calls, ",,"))
     return 0;
 
   boolean ssid_present = false;
@@ -1489,12 +1500,12 @@ int is_call_blacklisted(const char *frame_start) {
   *p = 0;
 
   // exact match?
-  if (strstr(src_call_blacklist, buf))
+  if (strstr(blacklist_calls, buf))
     return 2;
   // filter call completely?
   if ((p = strchr(buf, '-'))) {
     *p++ = ','; *p++ = 0;
-    if (strstr(src_call_blacklist, buf))
+    if (strstr(blacklist_calls, buf))
       return 3;
   }
 
@@ -1522,12 +1533,12 @@ int is_call_blacklisted(const char *frame_start) {
         return 0;
       strcat(buf, ",");
       // exact match?
-      if (strstr(src_call_blacklist, buf))
+      if (strstr(blacklist_calls, buf))
         return 4;
       // filter call completely?
       if ((r = strchr(buf, '-'))) {
         *r++ = ','; *r++ = 0;
-        if (strstr(src_call_blacklist, buf))
+        if (strstr(blacklist_calls, buf))
           return 5;
       }
       if (q == header_end)
@@ -1980,6 +1991,13 @@ add_our_data:
 // + MAINLOOP -----------------------------------------------------------+//
 // +---------------------------------------------------------------------+//
 void loop() {
+
+  esp_task_wdt_reset();
+ 
+  if (reboot_interval && millis() > reboot_interval) {
+    ESP.restart();
+  }
+
   if(digitalRead(BUTTON)==LOW && key_up == true){
     key_up = false;
     delay(50);
