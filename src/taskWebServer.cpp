@@ -736,7 +736,6 @@ void handle_saveDeviceCfg(){
   if (server.hasArg(PREF_DEV_AUTO_SHUT_PRESET)){
     preferences.putInt(PREF_DEV_AUTO_SHUT_PRESET, server.arg(PREF_DEV_AUTO_SHUT_PRESET).toInt());
   } 
-  preferences.putBool(PREF_DEV_REBOOT_INTERVAL, server.hasArg(PREF_DEV_REBOOT_INTERVAL));
   if (server.hasArg(PREF_DEV_REBOOT_INTERVAL)){
     preferences.putInt(PREF_DEV_REBOOT_INTERVAL, server.arg(PREF_DEV_REBOOT_INTERVAL).toInt());
   }
