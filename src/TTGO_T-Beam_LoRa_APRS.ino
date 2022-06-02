@@ -194,6 +194,8 @@ String LongFixed="";
 String LatFixed="";
 String LongShownP="";
 String LatShownP="";
+String LongShownPs="";
+String LatShownPs="";
 
 #if defined(ENABLE_TNC_SELF_TELEMETRY) && defined(KISS_PROTOCOL)
   time_t nextTelemetryFrame;
@@ -670,7 +672,11 @@ void displayInvalidGPS() {
   } else {
     nextTxInfo = (char*)"(TX) at valid GPS";
   }
-  writedisplaytext(" " + Tcall, nextTxInfo, "LAT: not valid", "LON: not valid", "SPD: ---  CRS: ---", getSatAndBatInfo());
+  if (fixed_beacon_enabled) {
+    writedisplaytext(" " + Tcall, nextTxInfo, "LAT: nv " + aprsLatPreset, "LON: nv " + aprsLonPreset, "SPD: ---  CRS: ---", getSatAndBatInfo());
+  } else {
+    writedisplaytext(" " + Tcall, nextTxInfo, "LAT: not valid", "LON: not valid", "SPD: ---  CRS: ---", getSatAndBatInfo());
+  }
 }
 
 #if defined(KISS_PROTOCOL)
@@ -2044,6 +2050,31 @@ String create_long_aprs(RawDegrees lng) {
   return lng_str;
 }
 
+String create_lat_aprs_s(RawDegrees lat) {
+  char str[20];
+  char n_s = 'N';
+  if (lat.negative) {
+    n_s = 'S';
+  }
+  // we like sprintf's float up-rounding.
+  // but sprintf % may round to 60.00 -> 5360.00 (53° 60min is a wrong notation
+  // ;)
+  sprintf(str, "%02d%s%c", lat.deg, s_min_nn(lat.billionths, 0), n_s);
+  String lat_str(str);
+  return lat_str;
+}
+
+String create_long_aprs_s(RawDegrees lng) {
+  char str[20];
+  char e_w = 'E';
+  if (lng.negative) {
+    e_w = 'W';
+  }
+  sprintf(str, "%03d%s%c", lng.deg, s_min_nn(lng.billionths, 0), e_w);
+  String lng_str(str);
+  return lng_str;
+}
+
 
 // +---------------------------------------------------------------------+//
 // + MAINLOOP -----------------------------------------------------------+//
@@ -2554,6 +2585,8 @@ invalid_packet:
   LongShown = String(gps.location.lng(),5);
   LatShownP = create_lat_aprs(gps.location.rawLat());
   LongShownP = create_long_aprs(gps.location.rawLng());
+  LatShownPs = create_lat_aprs_s(gps.location.rawLat());
+  LongShownPs = create_long_aprs_s(gps.location.rawLng());
 
   average_speed[point_avg_speed] = gps.speed.kmph();   // calculate smart beaconing
   ++point_avg_speed;
@@ -2636,6 +2669,11 @@ invalid_packet:
       enableOled(); // enable OLED
       writedisplaytext(" ((TX))","","LAT: "+LatShownP,"LON: "+LongShownP,"SPD: "+String(gps.speed.kmph(),1)+"  CRS: "+String(gps.course.deg(),1),getSatAndBatInfo());
       sendpacket();
+//    save last valid position as new fixed location      
+//    LatShownP  = gg-mm.dd[N|S]
+//    LatShownPs = ggmm.dd[N|S]
+      aprsLatPreset = LatShownPs;
+      aprsLonPreset = LongShownPs;
       // We just transmitted. We transmitted due to turn? Don't TX again in next round:
       if (nextTX < sb_min_interval) nextTX = sb_min_interval;
     } else {
@@ -2647,6 +2685,15 @@ invalid_packet:
     if (millis() > time_to_refresh){
       if (gps.location.age() < 2000) {
         writedisplaytext(" "+Tcall,"Time to TX: "+((dont_send_own_position_packets || !lora_tx_enabled) ? "never" : (String(((lastTX+nextTX)-millis())/1000)+"sec")),"LAT: "+LatShownP,"LON: "+LongShownP,"SPD: "+String(gps.speed.kmph())+"  CRS: "+String(gps.course.deg(),1),getSatAndBatInfo());
+//      save last valid position as new fixed location      
+//      LatShownP  = gg-mm.dd[N|S]
+//      LatShownPs = ggmm.dd[N|S]
+        aprsLatPreset = LatShownPs;
+        aprsLonPreset = LongShownPs;
+        char buf[512] = ""; 
+        String ttx = "Time to TX: "+((dont_send_own_position_packets || !lora_tx_enabled) ? "never" : (String(((lastTX+nextTX)-millis())/1000)+"sec"));
+        sprintf(buf, "DL3EL-12>DL3EL-12: %s", ttx.c_str()); 
+        sendToTNC(String(buf)); 
       } else {
         displayInvalidGPS();
       }
