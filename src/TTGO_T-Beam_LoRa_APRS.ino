@@ -192,6 +192,8 @@ String LongShown="";
 String LatShown="";
 String LongFixed="";
 String LatFixed="";
+String LongShownP="";
+String LatShownP="";
 
 #if defined(ENABLE_TNC_SELF_TELEMETRY) && defined(KISS_PROTOCOL)
   time_t nextTelemetryFrame;
@@ -1986,6 +1988,62 @@ add_our_data:
 
 }
 
+char *s_min_nn(uint32_t min_nnnnn, int high_precision) {
+  /* min_nnnnn: RawDegrees billionths is uint32_t by definition and is n'telth
+   * degree (-> *= 6 -> nn.mmmmmm minutes) high_precision: 0: round at decimal
+   * position 2. 1: round at decimal position 4. 2: return decimal position 3-4
+   * as base91 encoded char
+   */
+
+  static char buf[6];
+  min_nnnnn = min_nnnnn * 0.006;
+
+  if (high_precision) {
+    if ((min_nnnnn % 10) >= 5 && min_nnnnn < 6000000 - 5) {
+      // round up. Avoid overflow (59.999999 should never become 60.0 or more)
+      min_nnnnn = min_nnnnn + 5;
+    }
+  } else {
+    if ((min_nnnnn % 1000) >= 500 && min_nnnnn < (6000000 - 500)) {
+      // round up. Avoid overflow (59.9999 should never become 60.0 or more)
+      min_nnnnn = min_nnnnn + 500;
+    }
+  }
+
+  if (high_precision < 2)
+    sprintf(buf, "%02u.%02u", (unsigned int)((min_nnnnn / 100000) % 100), (unsigned int)((min_nnnnn / 1000) % 100));
+  else
+    sprintf(buf, "%c", (char)((min_nnnnn % 1000) / 11) + 33);
+  // Like to verify? type in python for i.e. RawDegrees billions 566688333: i =
+  // 566688333; "%c" % (int(((i*.0006+0.5) % 100)/1.1) +33)
+  return buf;
+}
+
+String create_lat_aprs(RawDegrees lat) {
+  char str[20];
+  char n_s = 'N';
+  if (lat.negative) {
+    n_s = 'S';
+  }
+  // we like sprintf's float up-rounding.
+  // but sprintf % may round to 60.00 -> 5360.00 (53° 60min is a wrong notation
+  // ;)
+  sprintf(str, "%02d-%s%c", lat.deg, s_min_nn(lat.billionths, 0), n_s);
+  String lat_str(str);
+  return lat_str;
+}
+
+String create_long_aprs(RawDegrees lng) {
+  char str[20];
+  char e_w = 'E';
+  if (lng.negative) {
+    e_w = 'W';
+  }
+  sprintf(str, "%03d-%s%c", lng.deg, s_min_nn(lng.billionths, 0), e_w);
+  String lng_str(str);
+  return lng_str;
+}
+
 
 // +---------------------------------------------------------------------+//
 // + MAINLOOP -----------------------------------------------------------+//
@@ -2494,6 +2552,9 @@ invalid_packet:
 
   LatShown = String(gps.location.lat(),5);
   LongShown = String(gps.location.lng(),5);
+  LatShownP = create_lat_aprs(gps.location.rawLat());
+  LongShownP = create_long_aprs(gps.location.rawLng());
+
   average_speed[point_avg_speed] = gps.speed.kmph();   // calculate smart beaconing
   ++point_avg_speed;
   if (point_avg_speed>4) {
@@ -2573,7 +2634,7 @@ invalid_packet:
   if (!dont_send_own_position_packets && lora_tx_enabled && (lastTX+nextTX) < millis() && (nextTX <= 1 || (millis()-lastTX) >= (6000000L / lora_speed ))) {
     if (gps.location.age() < 2000) {
       enableOled(); // enable OLED
-      writedisplaytext(" ((TX))","","LAT: "+LatShown,"LON: "+LongShown,"SPD: "+String(gps.speed.kmph(),1)+"  CRS: "+String(gps.course.deg(),1),getSatAndBatInfo());
+      writedisplaytext(" ((TX))","","LAT: "+LatShownP,"LON: "+LongShownP,"SPD: "+String(gps.speed.kmph(),1)+"  CRS: "+String(gps.course.deg(),1),getSatAndBatInfo());
       sendpacket();
       // We just transmitted. We transmitted due to turn? Don't TX again in next round:
       if (nextTX < sb_min_interval) nextTX = sb_min_interval;
@@ -2585,7 +2646,7 @@ invalid_packet:
   }else{
     if (millis() > time_to_refresh){
       if (gps.location.age() < 2000) {
-        writedisplaytext(" "+Tcall,"Time to TX: "+((dont_send_own_position_packets || !lora_tx_enabled) ? "never" : (String(((lastTX+nextTX)-millis())/1000)+"sec")),"LAT: "+LatShown,"LON: "+LongShown,"SPD: "+String(gps.speed.kmph())+"  CRS: "+String(gps.course.deg(),1),getSatAndBatInfo());
+        writedisplaytext(" "+Tcall,"Time to TX: "+((dont_send_own_position_packets || !lora_tx_enabled) ? "never" : (String(((lastTX+nextTX)-millis())/1000)+"sec")),"LAT: "+LatShownP,"LON: "+LongShownP,"SPD: "+String(gps.speed.kmph())+"  CRS: "+String(gps.course.deg(),1),getSatAndBatInfo());
       } else {
         displayInvalidGPS();
       }
