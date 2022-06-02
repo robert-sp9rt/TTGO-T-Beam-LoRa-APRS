@@ -2001,7 +2001,7 @@ char *s_min_nn(uint32_t min_nnnnn, int high_precision) {
    * as base91 encoded char
    */
 
-  static char buf[6];
+  static char buf[8];
   min_nnnnn = min_nnnnn * 0.006;
 
   if (high_precision) {
@@ -2016,12 +2016,19 @@ char *s_min_nn(uint32_t min_nnnnn, int high_precision) {
     }
   }
 
-  if (high_precision < 2)
+  switch (high_precision) {
+  case 0:
+  case 1:
     sprintf(buf, "%02u.%02u", (unsigned int)((min_nnnnn / 100000) % 100), (unsigned int)((min_nnnnn / 1000) % 100));
-  else
+    break;
+  case 2:
     sprintf(buf, "%c", (char)((min_nnnnn % 1000) / 11) + 33);
-  // Like to verify? type in python for i.e. RawDegrees billions 566688333: i =
-  // 566688333; "%c" % (int(((i*.0006+0.5) % 100)/1.1) +33)
+    // Like to verify? type in python for i.e. RawDegrees billions 566688333: i =
+    // 566688333; "%c" % (int(((i*.0006+0.5) % 100)/1.1) +33)
+    break;
+  default:
+    sprintf(buf, "%02u.%04u", (unsigned int)((min_nnnnn / 100000) % 100), (unsigned int)((min_nnnnn / 10) % 10000));
+  }
   return buf;
 }
 
