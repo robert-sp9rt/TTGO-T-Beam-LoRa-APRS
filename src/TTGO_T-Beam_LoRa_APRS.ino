@@ -2697,10 +2697,6 @@ invalid_packet:
 //      LatShownPs = ggmm.dd[N|S]
         aprsLatPreset = LatShownPs;
         aprsLonPreset = LongShownPs;
-        char buf[512] = ""; 
-        String ttx = "Time to TX: "+((dont_send_own_position_packets || !lora_tx_enabled) ? "never" : (String(((lastTX+nextTX)-millis())/1000)+"sec"));
-        sprintf(buf, "DL3EL-12>DL3EL-12: %s", ttx.c_str()); 
-        sendToTNC(String(buf)); 
       } else {
         displayInvalidGPS();
       }

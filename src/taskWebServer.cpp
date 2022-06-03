@@ -796,7 +796,7 @@ void handle_saveDeviceCfg(){
 
   String wifi_password = preferences.getString(PREF_WIFI_PASSWORD);
   String wifi_ssid = preferences.getString(PREF_WIFI_SSID);
-  if (preferences.getString(PREF_AP_PASSWORD).length() > 8) {
+  if (preferences.getString(PREF_AP_PASSWORD).length() > 7) {
     // 8 characters is requirements for WPA2
     apPassword = preferences.getString(PREF_AP_PASSWORD);
   } else {
