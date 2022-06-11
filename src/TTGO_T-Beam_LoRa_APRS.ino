@@ -133,6 +133,8 @@ String relay_path;
 String aprsComment = MY_COMMENT;
 String aprsLatPreset = LATITUDE_PRESET;
 String aprsLonPreset = LONGITUDE_PRESET;
+String LatShownP = aprsLonPreset;
+String LongShownP = aprsLonPreset;
 #if defined(T_BEAM_V1_0) || defined(T_BEAM_V0_7)
 boolean gps_state = true;
 #else
@@ -188,14 +190,6 @@ String tel_path;
 String loraReceivedFrameString = "";      //data on buff is copied to this string
 String Outputstring = "";
 String outString="";                      //The new Output String with GPS Conversion RAW
-String LongShown="";
-String LatShown="";
-String LongFixed="";
-String LatFixed="";
-String LongShownP="";
-String LatShownP="";
-String LongShownPs="";
-String LatShownPs="";
 
 #if defined(ENABLE_TNC_SELF_TELEMETRY) && defined(KISS_PROTOCOL)
   time_t nextTelemetryFrame;
@@ -342,6 +336,7 @@ uint16_t lora_packets_received_in_timeslot_on_main_freq = 0;
 uint16_t lora_packets_received_in_timeslot_on_secondary_freq = 0;
 char lora_TXBUFF_for_digipeating[BG_RF95_MAX_MESSAGE_LEN+1] = "";		// buffer for digipeating
 time_t time_lora_TXBUFF_for_digipeating_was_filled = 0L;
+boolean sendpacket_was_called_twice = false;
 
 String MY_APRS_DEST_IDENTIFYER = "APLOX1";
 
@@ -382,26 +377,8 @@ char *ax25_base91enc(char *s, uint8_t n, uint32_t v){
   return(s);
 }
 
-void prepareAPRSFrame(){
-  String helper;
-  String Altx;
-  String Speedx, Coursex;
-  char helper_base91[] = {"0000\0"};
-  double Tlat=52.0000, Tlon=20.0000;
-  double Tspeed=0, Tcourse=0;
-  uint32_t aprs_lat, aprs_lon;
-  int i;
-  long Talt;
-  Tlat=gps.location.lat();
-  Tlon=gps.location.lng();
-  Tcourse=gps.course.deg();
-  Tspeed=gps.speed.knots();
-  aprs_lat = 900000000 - Tlat * 10000000;
-  aprs_lat = aprs_lat / 26 - aprs_lat / 2710 + aprs_lat / 15384615;
-  aprs_lon = 900000000 + Tlon * 10000000 / 2;
-  aprs_lon = aprs_lon / 26 - aprs_lon / 2710 + aprs_lon / 15384615;
-  outString = "";
-  outString += Tcall;
+void prepareAPRSFrame(boolean force_fixed){
+  outString = String(Tcall);
 
   outString += ">";
   outString += MY_APRS_DEST_IDENTIFYER;
@@ -434,7 +411,23 @@ out_relay_path:
   else
     outString += "!";
 
-  if(gps_state && gps.location.isValid()){
+  if (!force_fixed && gps_state && gps.location.isValid()){
+    uint32_t aprs_lat, aprs_lon;
+    String helper;
+    char helper_base91[] = {"0000\0"};
+    double Tlat=52.0000, Tlon=20.0000;
+    double Tspeed=0, Tcourse=0;
+    int i;
+    long Talt;
+    Tlat=gps.location.lat();
+    Tlon=gps.location.lng();
+    Tcourse=gps.course.deg();
+    Tspeed=gps.speed.knots();
+    aprs_lat = 900000000 - Tlat * 10000000;
+    aprs_lat = aprs_lat / 26 - aprs_lat / 2710 + aprs_lat / 15384615;
+    aprs_lon = 900000000 + Tlon * 10000000 / 2;
+    aprs_lon = aprs_lon / 26 - aprs_lon / 2710 + aprs_lon / 15384615;
+
     outString += aprsSymbolTable;
     ax25_base91enc(helper_base91, 4, aprs_lat);
     for (i = 0; i < 4; i++) {
@@ -460,7 +453,8 @@ out_relay_path:
       sprintf(buf, "%06ld", Talt);
       outString += buf;
     }
-  }else{  //fixed position not compresed
+
+  } else {  //fixed position not compresed
     outString += aprsLatPreset;
     outString += aprsSymbolTable;
     outString += aprsLonPreset;
@@ -536,13 +530,15 @@ void send_to_aprsis(String s)
 }
 #endif
 
-void sendpacket(){
+void sendpacket(boolean force_fixed){
+  if (sendpacket_was_called_twice)
+    return;
   #ifdef BUZZER
     int melody[] = {1000, 50, 800, 100};
     buzzer(melody, sizeof(melody)/sizeof(int));
   #endif
   batt_read();
-  prepareAPRSFrame();
+  prepareAPRSFrame(force_fixed);
   if (lora_tx_enabled && tx_own_beacon_from_this_device_or_fromKiss__to_frequencies) {
     if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies % 2)
       loraSend(txPower, lora_freq, lora_speed, outString);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
@@ -553,6 +549,7 @@ void sendpacket(){
   if (tx_own_beacon_from_this_device_or_fromKiss__to_aprsis)
     send_to_aprsis(outString);
 #endif
+  sendpacket_was_called_twice = true;
 }
 
 /**
@@ -1032,12 +1029,14 @@ void setup(){
       preferences.putString(PREF_APRS_LATITUDE_PRESET, LATITUDE_PRESET);
     }
     aprsLatPreset = preferences.getString(PREF_APRS_LATITUDE_PRESET);
+    LatShownP = aprsLonPreset;
 
     if (!preferences.getBool(PREF_APRS_LONGITUDE_PRESET_INIT)){
       preferences.putBool(PREF_APRS_LONGITUDE_PRESET_INIT, true);
       preferences.putString(PREF_APRS_LONGITUDE_PRESET, LONGITUDE_PRESET);
     }
     aprsLonPreset = preferences.getString(PREF_APRS_LONGITUDE_PRESET);
+    LongShownP = aprsLonPreset;
 
     if (!preferences.getBool(PREF_APRS_SENDER_BLACKLIST_INIT)){
       preferences.putBool(PREF_APRS_SENDER_BLACKLIST_INIT, true);
@@ -1998,13 +1997,18 @@ char *s_min_nn(uint32_t min_nnnnn, int high_precision) {
   /* min_nnnnn: RawDegrees billionths is uint32_t by definition and is n'telth
    * degree (-> *= 6 -> nn.mmmmmm minutes) high_precision: 0: round at decimal
    * position 2. 1: round at decimal position 4. 2: return decimal position 3-4
-   * as base91 encoded char
+   * as base91 encoded char.
    */
 
   static char buf[8];
   min_nnnnn = min_nnnnn * 0.006;
 
-  if (high_precision) {
+  if (high_precision == 3) {
+    if ((min_nnnnn % 100) >= 50 && min_nnnnn < 6000000 - 50) {
+      // round up. Avoid overflow (59.99999 should never become 60.0 or more)
+      min_nnnnn = min_nnnnn + 50;
+    }
+  } else if (high_precision) {
     if ((min_nnnnn % 10) >= 5 && min_nnnnn < 6000000 - 5) {
       // round up. Avoid overflow (59.999999 should never become 60.0 or more)
       min_nnnnn = min_nnnnn + 5;
@@ -2026,60 +2030,39 @@ char *s_min_nn(uint32_t min_nnnnn, int high_precision) {
     // Like to verify? type in python for i.e. RawDegrees billions 566688333: i =
     // 566688333; "%c" % (int(((i*.0006+0.5) % 100)/1.1) +33)
     break;
+  case 3:
+    sprintf(buf, "%02u.%03u", (unsigned int)((min_nnnnn / 100000) % 100), (unsigned int)((min_nnnnn / 100) % 1000));
   default:
     sprintf(buf, "%02u.%04u", (unsigned int)((min_nnnnn / 100000) % 100), (unsigned int)((min_nnnnn / 10) % 10000));
   }
   return buf;
 }
 
-String create_lat_aprs(RawDegrees lat) {
+String create_lat_aprs(const char *delimiter, RawDegrees lat) {
   char str[20];
   char n_s = 'N';
   if (lat.negative) {
     n_s = 'S';
   }
+  if (delimiter && strlen(delimiter) > 1)
+    delimiter = 0;
   // we like sprintf's float up-rounding.
   // but sprintf % may round to 60.00 -> 5360.00 (53° 60min is a wrong notation
   // ;)
-  sprintf(str, "%02d-%s%c", lat.deg, s_min_nn(lat.billionths, 0), n_s);
-  String lat_str(str);
-  return lat_str;
+  sprintf(str, "%02d%s%s%c", lat.deg, delimiter ? delimiter : "", s_min_nn(lat.billionths, 0), n_s);
+  return String(str);
 }
 
-String create_long_aprs(RawDegrees lng) {
+String create_long_aprs(const char *delimiter, RawDegrees lng) {
   char str[20];
   char e_w = 'E';
   if (lng.negative) {
     e_w = 'W';
   }
-  sprintf(str, "%03d-%s%c", lng.deg, s_min_nn(lng.billionths, 0), e_w);
-  String lng_str(str);
-  return lng_str;
-}
-
-String create_lat_aprs_s(RawDegrees lat) {
-  char str[20];
-  char n_s = 'N';
-  if (lat.negative) {
-    n_s = 'S';
-  }
-  // we like sprintf's float up-rounding.
-  // but sprintf % may round to 60.00 -> 5360.00 (53° 60min is a wrong notation
-  // ;)
-  sprintf(str, "%02d%s%c", lat.deg, s_min_nn(lat.billionths, 0), n_s);
-  String lat_str(str);
-  return lat_str;
-}
-
-String create_long_aprs_s(RawDegrees lng) {
-  char str[20];
-  char e_w = 'E';
-  if (lng.negative) {
-    e_w = 'W';
-  }
-  sprintf(str, "%03d%s%c", lng.deg, s_min_nn(lng.billionths, 0), e_w);
-  String lng_str(str);
-  return lng_str;
+  if (delimiter && strlen(delimiter) > 1)
+    delimiter = 0;
+  sprintf(str, "%03d%s%s%c", lng.deg, delimiter ? delimiter : "", s_min_nn(lng.billionths, 0), e_w);
+  return String(str);
 }
 
 
@@ -2094,6 +2077,8 @@ void loop() {
     ESP.restart();
   }
 
+  sendpacket_was_called_twice = false;
+
   if(digitalRead(BUTTON)==LOW && key_up == true){
     key_up = false;
     delay(50);
@@ -2106,10 +2091,10 @@ void loop() {
         } else {
           if(gps_state == true && gps.location.isValid()){
               writedisplaytext("((MAN TX))","","","","","");
-              sendpacket();
+              sendpacket(0);
           }else{
               writedisplaytext("((FIX TX))","","","","","");
-              sendpacket();
+              sendpacket(1);
           }
         }
         key_up = true;
@@ -2132,7 +2117,7 @@ void loop() {
     // Manually sending beacon from html page
     enableOled();
     writedisplaytext("((WEB TX))","","","","","");
-    sendpacket();
+    sendpacket(0);
     manBeacon=false;
   }
   // Only wake up OLED when necessary, note that DIM is to turn OFF the backlight
@@ -2214,7 +2199,7 @@ void loop() {
       enableOled(); // enable OLED
       next_fixed_beacon = millis() + fix_beacon_interval;
       writedisplaytext("((AUT TX))", "", "", "", "", "");
-      sendpacket();
+      sendpacket(1);
     }
   }
 
@@ -2588,12 +2573,6 @@ invalid_packet:
   if (!gps_state && (!dont_send_own_position_packets || !lora_tx_enabled))
     goto behind_position_tx;
 
-  LatShown = String(gps.location.lat(),5);
-  LongShown = String(gps.location.lng(),5);
-  LatShownP = create_lat_aprs(gps.location.rawLat());
-  LongShownP = create_long_aprs(gps.location.rawLng());
-  LatShownPs = create_lat_aprs_s(gps.location.rawLat());
-  LongShownPs = create_long_aprs_s(gps.location.rawLng());
 
   average_speed[point_avg_speed] = gps.speed.kmph();   // calculate smart beaconing
   ++point_avg_speed;
@@ -2672,18 +2651,23 @@ invalid_packet:
     // now, nextTX is <= sb_min_interval
   }
 
+  // LatShownP  = gg-mm.dd[N|S]
+  // aprsLatPreset = ggmm.dd[N|S]
+  if (gps.location.isValid() && gps.location.age() < 2000) {
+    LatShownP = create_lat_aprs("-", gps.location.rawLat());
+    LongShownP = create_long_aprs("-", gps.location.rawLng());
+    //save last valid position as new fixed location
+    aprsLatPreset = create_lat_aprs("", gps.location.rawLat());
+    aprsLonPreset = create_long_aprs("", gps.location.rawLng());
+  }
+
   // rate limit to 20s in SF12 CR4/5 aka lora_speed 300; 5s in lora_speed 1200 (SF9 CR4/7). -> 1200/lora_speed*5 seconds == 6000000 / lora_speed ms
   // If special case nextTX <= 1: we already enforced rate-limiting (see course computation)
-  if (!dont_send_own_position_packets && lora_tx_enabled && (lastTX+nextTX) < millis() && (nextTX <= 1 || (millis()-lastTX) >= (6000000L / lora_speed ))) {
+  if (!fixed_beacon_enabled && !dont_send_own_position_packets && lora_tx_enabled && (lastTX+nextTX) < millis() && (nextTX <= 1 || (millis()-lastTX) >= (6000000L / lora_speed ))) {
     if (gps.location.age() < 2000) {
       enableOled(); // enable OLED
       writedisplaytext(" ((TX))","","LAT: "+LatShownP,"LON: "+LongShownP,"SPD: "+String(gps.speed.kmph(),1)+"  CRS: "+String(gps.course.deg(),1),getSatAndBatInfo());
-      sendpacket();
-//    save last valid position as new fixed location      
-//    LatShownP  = gg-mm.dd[N|S]
-//    LatShownPs = ggmm.dd[N|S]
-      aprsLatPreset = LatShownPs;
-      aprsLonPreset = LongShownPs;
+      sendpacket(0);
       // We just transmitted. We transmitted due to turn? Don't TX again in next round:
       if (nextTX < sb_min_interval) nextTX = sb_min_interval;
     } else {
@@ -2691,15 +2675,10 @@ invalid_packet:
         displayInvalidGPS();
       }
     }
-  }else{
+  } else {
     if (millis() > time_to_refresh){
       if (gps.location.age() < 2000) {
-        writedisplaytext(" "+Tcall,"Time to TX: "+((dont_send_own_position_packets || !lora_tx_enabled) ? "never" : (String(((lastTX+nextTX)-millis())/1000)+"sec")),"LAT: "+LatShownP,"LON: "+LongShownP,"SPD: "+String(gps.speed.kmph())+"  CRS: "+String(gps.course.deg(),1),getSatAndBatInfo());
-//      save last valid position as new fixed location      
-//      LatShownP  = gg-mm.dd[N|S]
-//      LatShownPs = ggmm.dd[N|S]
-        aprsLatPreset = LatShownPs;
-        aprsLonPreset = LongShownPs;
+        writedisplaytext(" "+Tcall,"Time to TX: "+ (dont_send_own_position_packets || !lora_tx_enabled) ? "never" : (fixed_beacon_enabled ? String(next_fixed_beacon-millis() / 1000) : (String(((lastTX+nextTX)-millis())/1000)+"sec")),"LAT: "+LatShownP,"LON: "+LongShownP,"SPD: "+String(gps.speed.kmph())+"  CRS: "+String(gps.course.deg(),1),getSatAndBatInfo());
       } else {
         displayInvalidGPS();
       }
