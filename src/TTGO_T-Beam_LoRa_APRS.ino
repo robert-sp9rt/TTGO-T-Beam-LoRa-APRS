@@ -337,6 +337,7 @@ uint16_t lora_packets_received_in_timeslot_on_secondary_freq = 0;
 char lora_TXBUFF_for_digipeating[BG_RF95_MAX_MESSAGE_LEN+1] = "";		// buffer for digipeating
 time_t time_lora_TXBUFF_for_digipeating_was_filled = 0L;
 boolean sendpacket_was_called_twice = false;
+uint32_t t_last_smart_beacon_sent = 0L;
 
 String MY_APRS_DEST_IDENTIFYER = "APLOX1";
 
@@ -1333,6 +1334,12 @@ void setup(){
   if (sb_max_interval < nextTX){
     sb_max_interval=nextTX;
   }
+
+  // we need this assurance for failback to fixed interval, if gps position is lost.
+  // fixed beacon rate higher than sb_max_interval does not make sense
+  if (gps_state && fix_beacon_interval < sb_max_interval)
+    fix_beacon_interval = sb_max_interval;
+
   writedisplaytext("LoRa-APRS","","Init:","RF95 OK!","","");
   writedisplaytext(" "+Tcall,"","Init:","Waiting for GPS","","");
   xTaskCreate(taskGPS, "taskGPS", 5000, nullptr, 1, nullptr);
@@ -2146,6 +2153,7 @@ void loop() {
         #endif
         writedisplaytext("((GPSOFF))","","","","","");
         next_fixed_beacon = millis() + fix_beacon_interval;
+        fixed_beacon_enabled = true;
         #ifdef ENABLE_PREFERENCES
           preferences.putBool(PREF_APRS_GPS_EN, false);
         #endif
@@ -2155,6 +2163,7 @@ void loop() {
           axp.setPowerOutPut(AXP192_LDO3, AXP202_ON);
         #endif
         writedisplaytext("((GPS ON))","","","","","");                // GPS ON
+        fixed_beacon_enabled = false;
         #ifdef ENABLE_PREFERENCES
           preferences.putBool(PREF_APRS_GPS_EN, true);
         #endif
@@ -2194,13 +2203,16 @@ void loop() {
     }
 #endif
   }
-  if (fixed_beacon_enabled && !dont_send_own_position_packets) {
-    if (millis() >= next_fixed_beacon && (!gps_state || !gps.location.isValid())) {
+
+  // fixed beacon, or if smartbeaconing with lost gps fix (but had at least one gps fix).
+  // smartbeaconing also ensures correct next_fixed_beacon time
+  if (!dont_send_own_position_packets && millis() >= next_fixed_beacon &&
+         (fixed_beacon_enabled ||
+           (t_last_smart_beacon_sent && (!gps_state || !gps.location.isValid())) ) ) {
       enableOled(); // enable OLED
       next_fixed_beacon = millis() + fix_beacon_interval;
       writedisplaytext("((AUT TX))", "", "", "", "", "");
       sendpacket(1);
-    }
   }
 
   #ifdef T_BEAM_V1_0
@@ -2638,7 +2650,7 @@ invalid_packet:
     else {
       nextTX = sb_min_interval * sb_max_speed / average_speed_final;
       if (nextTX > sb_max_interval)
-        nextTX = sb_max_interval ;
+        nextTX = sb_max_interval;
     }
 #else
     // dl9sau: imho, too affine at high speed level
@@ -2668,6 +2680,9 @@ invalid_packet:
       enableOled(); // enable OLED
       writedisplaytext(" ((TX))","","LAT: "+LatShownP,"LON: "+LongShownP,"SPD: "+String(gps.speed.kmph(),1)+"  CRS: "+String(gps.course.deg(),1),getSatAndBatInfo());
       sendpacket(0);
+      // for fixed beacon (if we loose gps fix, we'll send our last position in fix_beacon_interval)
+      next_fixed_beacon = millis() + fix_beacon_interval;
+      t_last_smart_beacon_sent = millis();
       // We just transmitted. We transmitted due to turn? Don't TX again in next round:
       if (nextTX < sb_min_interval) nextTX = sb_min_interval;
     } else {
@@ -2678,7 +2693,7 @@ invalid_packet:
   } else {
     if (millis() > time_to_refresh){
       if (gps.location.age() < 2000) {
-        writedisplaytext(" "+Tcall,"Time to TX: "+ (dont_send_own_position_packets || !lora_tx_enabled) ? "never" : (fixed_beacon_enabled ? String(next_fixed_beacon-millis() / 1000) : (String(((lastTX+nextTX)-millis())/1000)+"sec")),"LAT: "+LatShownP,"LON: "+LongShownP,"SPD: "+String(gps.speed.kmph())+"  CRS: "+String(gps.course.deg(),1),getSatAndBatInfo());
+        writedisplaytext(" "+Tcall,"Time to TX: "+ (dont_send_own_position_packets || !lora_tx_enabled) ? "never" : (fixed_beacon_enabled ? String((next_fixed_beacon-millis()) / 1000) : (String(((lastTX+nextTX)-millis())/1000)+"sec")),"LAT: "+LatShownP,"LON: "+LongShownP,"SPD: "+String(gps.speed.kmph())+"  CRS: "+String(gps.course.deg(),1),getSatAndBatInfo());
       } else {
         displayInvalidGPS();
       }
