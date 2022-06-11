@@ -670,7 +670,7 @@ void displayInvalidGPS() {
   } else {
     nextTxInfo = (char*)"(TX) at valid GPS";
   }
-  if (fixed_beacon_enabled) {
+  if (t_last_smart_beacon_sent) {
     writedisplaytext(" " + Tcall, nextTxInfo, "LAT: nv " + aprsLatPreset, "LON: nv " + aprsLonPreset, "SPD: ---  CRS: ---", getSatAndBatInfo());
   } else {
     writedisplaytext(" " + Tcall, nextTxInfo, "LAT: not valid", "LON: not valid", "SPD: ---  CRS: ---", getSatAndBatInfo());
@@ -1337,7 +1337,7 @@ void setup(){
 
   // we need this assurance for failback to fixed interval, if gps position is lost.
   // fixed beacon rate higher than sb_max_interval does not make sense
-  if (gps_state && fix_beacon_interval < sb_max_interval)
+  if (!fixed_beacon_enabled && gps_state && fix_beacon_interval < sb_max_interval)
     fix_beacon_interval = sb_max_interval;
 
   writedisplaytext("LoRa-APRS","","Init:","RF95 OK!","","");
