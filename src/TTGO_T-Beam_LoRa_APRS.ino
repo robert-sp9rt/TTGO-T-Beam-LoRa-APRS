@@ -2656,8 +2656,11 @@ invalid_packet:
       nextTX = sb_max_interval;
     else if (average_speed_final > sb_max_speed)
       nextTX = sb_min_interval;
-    else
-      nextTX = ( sb_min_interval * sb_max_speed / average_speed_final);
+    else {
+      nextTX = sb_min_interval * sb_max_speed / average_speed_final;
+      if (nextTX > sb_max_interval)
+        nextTX = sb_max_interval ;
+    }
 #else
     // dl9sau: imho, too affine at high speed level
     //nextTX = (sb_max_interval-sb_min_interval)/(sb_max_speed-sb_min_speed)*(sb_max_speed-average_speed_final)+sb_min_interval;
@@ -2666,7 +2669,7 @@ invalid_packet:
     //if (nextTX < sb_min_interval) {nextTX=sb_min_interval;}   // already assured (  (sb_max_speed <= average_speed_final) -> nextTX=sb_min_interval)
     if (nextTX > sb_max_interval) {nextTX=sb_max_interval;}
  #endif
-    // now, nextTX is >= sb_min_interval
+    // now, nextTX is <= sb_min_interval
   }
 
   // rate limit to 20s in SF12 CR4/5 aka lora_speed 300; 5s in lora_speed 1200 (SF9 CR4/7). -> 1200/lora_speed*5 seconds == 6000000 / lora_speed ms
