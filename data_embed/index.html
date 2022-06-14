@@ -30,11 +30,11 @@
                     </div>
                     <div>
                         <label for="wifi_password">WiFi Password</label>
-                        <input class="u-full-width" type="password" name="wifi_password" id="wifi_password" placeholder="Your WiFi Password" title="Your WiFi Password">
+                        <input class="u-full-width" type="password" name="wifi_password" id="wifi_password" placeholder="Your WiFi Password" title="Your WiFi Password, 8 characters minimum">
                     </div>
                     <div>
                         <label for="ap_password">AUTO AP Password</label>
-                        <input class="u-full-width" type="password" name="ap_password" id="ap_password" placeholder="AUTO AP Password" title="AUTO AP Password">
+                        <input class="u-full-width" type="password" name="ap_password" id="ap_password" placeholder="AUTO AP Password" title="AUTO AP Password, 8 characters minimum">
                     </div>
                 </div>
                 <div class="grid-container quarters">
@@ -199,7 +199,7 @@
                 <div class="grid-container quarters">
                     <div>
                         <label for="aprs_fixed_beac">Fixed Beacon</label>
-                        <input name="aprs_fixed_beac" id="aprs_fixed_beac" type="checkbox" value="1" title="enable fixed beacon when GPS is disabled or no fix">
+                        <input name="aprs_fixed_beac" id="aprs_fixed_beac" type="checkbox" value="1" title="enable fixed beacon when GPS is disabled or no fix, disables Smart Beaconing">
                     </div>
                     <div>
                         <label for="aprs_fb_interv">Fixed Beacon Interval [s]</label>
@@ -207,11 +207,11 @@
                     </div>
                     <div>
                         <label for="aprs_lat_p">Latitude</label>
-                        <input class="u-full-width" type="text" minlength="0" name="aprs_lat_p" id="aprs_lat_p" title="latitude for fixed beacon, APRS format for example: 5215.00N. 'dd.nnnnS', '-dd.nnnn', 'dd mm[.nnn]' and 'dd mm ss' and 'dd mm' ss\"' and 'dd-mm[.nn]N' are also supported. If position is south, you can prefix '-' instead of writing 'S' behind the coordinate. '-nnS' does not make sense. If your like to add a locator, add it here and leave longitude field blank.">
+                        <input class="u-full-width" type="text" minlength="0" name="aprs_lat_p" id="aprs_lat_p" title="latitude for fixed beacon, APRS format for example: 5215.00N. 'dd.nnnnS', '-dd.nnnn', 'dd mm[.nnn]' and 'dd mm ss' and 'dd mm' ss&quot;' and 'dd-mm[.nn]N' are also supported. If position is south, you can prefix '-' instead of writing 'S' behind the coordinate. '-nnS' does not make sense. If you like to add a locator, add it here and leave longitude field blank. If GPS is enabled and a valid position has been received, that one will be used instead of the configured one, until the next system reboot">
                     </div>
                     <div>
                         <label for="aprs_lon_p">Longitude</label>
-                        <input class="u-full-width" type="text" minlength="0" name="aprs_lon_p" id="aprs_lon_p" title="longtitude for fixed beacon, APRS format for example 02050.59E. 'ddd.nnnnS', '-ddd.nnnn',  'ddd mm[.nnn]' and 'ddd mm ss' and 'ddd mm' ss\"' and 'ddd-mm[.nn]E' are also supported. If position is west, you can prefix '-' instead of writing 'W' behind the coordinate. '-nnW' does not make sense.. If your like to add a locator, add it too the latitude field and leave this field blank.">
+                        <input class="u-full-width" type="text" minlength="0" name="aprs_lon_p" id="aprs_lon_p" title="longtitude for fixed beacon, APRS format for example 02050.59E. 'ddd.nnnnS', '-ddd.nnnn',  'ddd mm[.nnn]' and 'ddd mm ss' and 'ddd mm' ss&quot;' and 'ddd-mm[.nn]E' are also supported. If position is west, you can prefix '-' instead of writing 'W' behind the coordinate. '-nnW' does not make sense.. If you like to add a locator, add it to the latitude field and leave this field blank.">
                     </div>
                 </div>
                 <div class="grid-container full">
@@ -374,7 +374,7 @@
                   </div>
                   <div>
                     <label for="tx_aprsis_bc">TX our beacon to APRS-IS</label>
-                    <input name="tx_aprsis_bc" id="tx_aprsis_bc" type="checkbox" value="1" title="TX our beacon from this device or from-kiss to APRS-IS. You may like to disable this i.e. if you are a portable hotspot togehther your mobile, but like others than you yourself gate your own packets to APRS-IS -> you'll see at APRS-IS who heard you.">
+                    <input name="tx_aprsis_bc" id="tx_aprsis_bc" type="checkbox" value="1" title="TX our beacon from this device or from KISS to APRS-IS. You may like to disable this i.e. if you are a portable hotspot together with your tracker, but others already gate your own packets to APRS-IS -> you'll see at APRS-IS who heard you.">
                   </div>
                   <div>
                     <label for="aprsis_2rf">Gate APRS-IS traffic to frequencies</label>
@@ -416,7 +416,7 @@
                 </div>
                 <div>
                     <label for="led_enable">LED signaling</label>
-                    <input name="led_enable" id="led_enable" type="checkbox" value="1" title="enable or disable LED" DISABLED>
+                    <input name="led_enable" id="led_enable" type="checkbox" value="1" title="enable or disable LED (not implemented)" DISABLED>
                 </div>
                 <div>
                     <label for="shutdown_act">Auto power off</label>
@@ -573,7 +573,7 @@
     </section>
 </div>
 <footer>
-    <center><b>Contributors in order of appearance:</b><br> OE1ACM, OE3CJB, SQ9MDD, SQ5RWU, DJ1AN, M0IGA, SQ5WPR, DO2JMG, SP6VWX, SQ2WB, IU2FRL, DO3BOX, DL9SAU</center>
+    <center><b>Contributors in order of appearance:</b><br> OE1ACM, OE3CJB, SQ9MDD, SQ5RWU, DJ1AN, M0IGA, SQ5WPR, DO2JMG, SP6VWX, SQ2WB, IU2FRL, DO3BOX, DL9SAU, DL3EL</center>
     <center><b>Latest stable version:</b> <a href=https://github.com/SQ9MDD/TTGO-T-Beam-LoRa-APRS>https://github.com/SQ9MDD/TTGO-T-Beam-LoRa-APRS</a></center>
     <center><b>Licensed under:</b> CC BY-NC-SA</center>
     <center><!--VERSION--></center>
