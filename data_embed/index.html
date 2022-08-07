@@ -20,10 +20,22 @@
         <article>
             <form action="/save_wifi_cfg" method="post">
                 <div class="grid-container quarters">
+                    <div id="wifi_en">
+                        <label for="wifi_en">Enable Wifi</label>
+                        <select id="wifi_en" name="wifi_en">
+                            <option value="1">1: Wifi may off if bluetooth client is connected in between 60s on boot (recommended for portables, and for LORA32_21 devices)</option>
+                            <option value="2">2: Wifi on (during hardware limitaion, bluetooth will be disabled on LORA32_21 devices)</option>
+                            <option value="0">0: Wifi off (ideal for battery powered trackers - honored only if aprs-is disabled). Hack: Pressing beacon button sets value to 1</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="grid-container quarters">
                     <div id="wifi_list">
                         <label for="wifi_ssid">Network</label>
                         <input type="button" value="Scan WiFi" id="scan_wifi_btn" onclick="scanWifi();">
                     </div>
+                </div>
+                <div class="grid-container quarters">
                     <div>
                         <label for="wifi_ssid">WiFi SSID</label>
                         <input class="u-full-width" type="text" name="wifi_ssid" placeholder="Your Wifi SSID" title="Your Wifi SSID" id="wifi_ssid">
@@ -32,6 +44,20 @@
                         <label for="wifi_password">WiFi Password</label>
                         <input class="u-full-width" type="password" name="wifi_password" id="wifi_password" placeholder="Your WiFi Password" title="Your WiFi Password, 8 characters minimum">
                     </div>
+                </div>
+                <div class="grid-container quarters">
+                    <div>
+                        <label for="wifi_pwrSTA">TXPWR as STA</label>
+                        <select id="wifi_pwrSTA" name="wifi_pwrSTA">
+                            <option value="80">Max (20dBm, 100mW, suggested)</option>
+                            <option value="8">Min (2dBm, 2mW)</option>
+                            <option value="44">Low (11dBm, 12mW)</option>
+                            <option value="60">Mid (15dBm, 32mW)</option>
+                            <option value="72">High (18dBm, 63mW)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="grid-container quarters">
                     <div>
                         <label for="ap_password">AUTO AP Password</label>
                         <input class="u-full-width" type="password" name="ap_password" id="ap_password" placeholder="AUTO AP Password" title="AUTO AP Password, 8 characters minimum">
@@ -39,9 +65,31 @@
                 </div>
                 <div class="grid-container quarters">
                     <div>
+                        <label for="wifi_pwrAP">TXPWR as AP</label>
+                        <select id="wifi_pwrAP" name="wifi_pwrAP">
+                            <option value="8">Min (2dBm, 2mW, suggested)</option>
+                            <option value="44">Low (11dBm, 12mW)</option>
+                            <option value="60">Mid (15dBm, 32mW)</option>
+                            <option value="72">High (18dBm, 63mW)</option>
+                            <option value="80">Max (20dBm, 100mW)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="grid-container quarters">
+                    <div>
                         <label for="ntp_server">NTP Server</label>
                         <input type="text" name="ntp_server" id="ntp_server" placeholder="pool.ntp.org" title="NTP Server or IP Address. I.e. pool.ntp.org. If your igate is in the HAMNET, use ntp.hc.r1.ampr.org">
                       </div>
+                </div>
+                <div class="grid-container quarters">
+                    <div>
+                        <label for="tncsrvr_en">Enable TNC-Server</label>
+                        <input name="tncsrvr_en" id="tncsrvr_en" type="checkbox" value="1" title="Enable TNC-Server (KISS over TCP) on port tcp 8001. If your device in open networks like HAMNET, enable it only when needed and consider firewalling.">
+                    </div>
+                    <div>
+                        <label for="gpssrv_en">Enable GPS-Server</label>
+                        <input name="gpssrv_en" id="gpssrv_en" type="checkbox" value="1" title="Enable GPS-Server (NMEA on port tcp 10110. If your device in open networks like HAMNET, enable it only when needed and consider firewalling.">
+                    </div>
                 </div>
                 <div class="grid-container full">
                     <input class="button-primary" type="submit" value="Save">
@@ -80,7 +128,7 @@
                     </div>
                     <div>
                         <label for="lora_rx_en">Enable LoRa receiver</label>
-                        <input name="lora_rx_en" id="lora_rx_en" type="checkbox" value="1" title="Allow RX on LoRa. Disable this if you need to save power consumption.">
+                        <input name="lora_rx_en" id="lora_rx_en" type="checkbox" value="1" title="Allow RX on LoRa. Disable this if you need to save power consumption; LoRa chip will be only powered on during TX. Only honored if lora_digipeating_mode == 0 and no bluetooth client is connected on boot">
                     </div>
                     <div>
                         <label for="txPower">TX power [dBm]</label>
@@ -149,20 +197,24 @@
                         <input class="u-full-width" type="text" minlength="1" maxlength="1" name="aprs_symbol" id="aprs_symbol" title="select an icon, for example: [ - jogger, Y - jacht, > - car, b - bike">
                     </div>
                     <div>
-                        <label for="aprs_alt">Show Altitude</label>
-                        <input name="aprs_alt" id="aprs_alt" type="checkbox" value="1" title=" show altitude as frame part">
+                        <label for="aprs_alt_r">Altitude ratio [%]</label>
+                        <input name="aprs_alt_r" id="aprs_alt_r" type="number" min="0" max="100" title="Altitude ratio every n'th packet.. Use 100 for every packet, 0 for no altitude, or any number in between. Recommended: 10 (altitude every tenth's frame). If you use compression for saving airtime, you may choose 50 for ballons, where speed/dir and altitude are of equal interrest; if you choose 10, then 90 % of your transmissions encode speed/direction." placeholder="10">
+                    </div>
+                    <div>
+                        <label for="aprs_ALTinC">Show Altitude in compressed position</label>
+                        <input name="aprs_ALTinC" id="aprs_ALTinC" type="checkbox" value="1" title="Show altitude in compressed position format - safes airtime instead: of /A=...... in comment field. Speed/Course and Altiude are exclusive. If you need speed/course AND altitude on every transmission, set this off and configure altitude ratio to 100).">
                     </div>
                     <div>
                         <label for="show_cmt">Show Comment</label>
                         <input name="show_cmt" id="show_cmt" type="checkbox" value="1" title=" show comment text">
                     </div>
                     <div>
-                        <label for="aprs_comment">Comment</label>
-                        <input class="u-full-width" type="text" minlength="0" maxlength="64" name="aprs_comment" id="aprs_comment" title=" personal comment">
-                    </div>
-                    <div>
                         <label for="aprs_comm_rt">Ratelimit adding comment text</label>
                         <input name="aprs_comm_rt" id="aprs_comm_rt" type="checkbox" value="1" title="If enabled, comment text is sent only every tenth's transmission. Saves airtime.">
+                    </div>
+                    <div>
+                        <label for="aprs_comment">Comment</label>
+                        <input class="u-full-width" type="text" minlength="0" maxlength="64" name="aprs_comment" id="aprs_comment" title=" personal comment">
                     </div>
                     <div>
                         <label for="aprs_batt">Show Battery</label>
@@ -418,9 +470,23 @@
                     <label for="led_enable">LED signaling</label>
                     <input name="led_enable" id="led_enable" type="checkbox" value="1" title="enable or disable LED (not implemented)" DISABLED>
                 </div>
+            </div>
+            <div class="grid-container quarters">
+                <div>
+                    <label for="cpufreq">Adjust CPU frequency (MHz)</label>
+                    <input name="cpufreq" id="cpufreq" type="number" min="0" max="250" title="Reduce CPU freq for power consumption (up to 20 % less). Use with extreme care! Tested with value 80. 0 means: no change to power-on-state." placeholder="0">
+                </div>
+                <div>
+                    <label for="reboot_intrvl">Reboot every n hours</label>
+                    <input name="reboot_intrvl" id="reboot_intrvl" type="number" min="0" max="1193" title="Do a periodical reboot every n hous. 0 = disable. Max 1193" placeholder="0">
+                </div>
                 <div>
                     <label for="shutdown_act">Auto power off</label>
                     <input name="shutdown_act" id="shutdown_act" type="checkbox" value="1" title="activate auto shutdown after usb plug off (not for T-BEAM 0.7)">
+                </div>
+                <div>
+                    <label for="shutdown_dt">Auto power off delay [s]</label>
+                    <input name="shutdown_dt" id="shutdown_dt" type="number" min="3" max="3600" title="auto shutdown delay in seconds">
                 </div>
             </div>
             <div class="grid-container quarters">
@@ -431,14 +497,6 @@
                 <div>
                     <label for="sh_oledtime">Display timeout [s]</label>
                     <input name="sh_oledtime" id="sh_oledtime" type="number" min="0" max="60" title="Turn OFF OLED after X seconds. Set 0 to disable">
-                </div>
-                <div>
-                    <label for="shutdown_dt">Auto power off delay [s]</label>
-                    <input name="shutdown_dt" id="shutdown_dt" type="number" min="3" max="3600" title="auto shutdown delay in seconds">
-                </div>
-                <div>
-                    <label for="reboot_intrvl">Reboot every n hours</label>
-                    <input name="reboot_intrvl" id="reboot_intrvl" type="number" min="0" max="1193" title="Do a periodical reboot every n hous. 0 = disable. Max 1193" placeholder="0">
                 </div>
             </div>
             <div class="grid-container full">
@@ -566,8 +624,10 @@
             <div>
                <h6 class="u-full-width">TTGO LoRa32 V2.1 (aka T3 V1.6.1)</h6>
                Hardware limitation: if bluetooth is enabled and BT-client is connected, WIFI (-> Web-Server) does not work anymore.<br/>
+               You'll see the red LED while booting turned on for 60s as indicatior for waiting for BT-clients.
                Hack: firmware compiled with -e ttgo-lora32-v2.1 and bluetooth configuration variable is set to enabled, now listens on boot up to one minute for your bluetooth device to connect.<br/>
-               If a bluetooth device connects, it does not start the Web-Server. Else, it closes SerialBT port and starts the Web-Server.
+               If a bluetooth device connects, it does not start the Web-Server. Else, it closes SerialBT port and starts the Web-Server on LORA32_21 devices.<br>
+               See also: new feature for switching WIFI off (i.e. if you use the device as portable tracker), if you don't need it: Webserver eats abt 80mA..<br>
             </div>
         </article>
     </section>

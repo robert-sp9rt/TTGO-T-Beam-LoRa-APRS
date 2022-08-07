@@ -150,10 +150,13 @@ int tel_sequence;
 String tel_path;
 
 #ifdef SHOW_ALT
-  boolean showAltitude = true;
+  boolean showAltitude = true;  /* obsolete. use altitude_ratio 0 .. 100 % */
+  uint8_t altitude_ratio = 100; // Recommended: 10%. May be 0 % speed (-> 100% altitude), 100 % speed (-> no altitude), or something in between
 #else
-  boolean showAltitude = false;
+  boolean showAltitude = false;  /* obsolete. use altitude_ratio 0 .. 100 % */
+  uint8_t altitude_ratio = 0; // Recommended 10%. May be 0 % speed (-> 100% altitude), 100 % speed (-> no altitude), or something in between
 #endif
+boolean showAltitudeInsideCompressedPosition = true;
 #ifdef SHOW_BATT
   boolean showBattery = true;
 #else
@@ -179,6 +182,16 @@ String tel_path;
   boolean enable_bluetooth = true;
 #else
   boolean enable_bluetooth = false;
+#endif
+#if defined(ENABLE_WIFI)
+  uint8_t enable_webserver = 2;
+  boolean webserverStarted = 0;
+  boolean tncServer_enabled = false;
+  boolean gpsServer_enabled = false;
+  // Mapping Table {Power, max_tx_power} = {{8, 2}, {20, 5}, {28, 7}, {34, 8}, {44, 11}, {52, 13}, {56, 14}, {60, 15}, {66, 16}, {72, 18}, {80,20}}.
+  // We'll use "min", "low", "mid", "high", "max" -> 2dBm (1.5mW) -> 8, 11dBm (12mW) -> 44, 15dBm (32mW) -> 60, 18dBm (63mW) ->72, 20dBm (100mW) ->80
+  int8_t wifi_txpwr_mode_AP = 8;
+  int8_t wifi_txpwr_mode_STA = 80;
 #endif
 #ifdef ENABLE_OLED
   boolean enabled_oled = true;
@@ -325,6 +338,8 @@ uint32_t time_last_frame_via_kiss_received = 0L;	// kiss client sends aprs-text-
 boolean kiss_client_came_via_bluetooth = false;
 #endif
 
+uint16_t adjust_cpuFreq_to = 80;
+
 // do not configure
 boolean dont_send_own_position_packets = false;		// dynamicaly set if kiss device sends position. Maybe there are other usecases (-> kiss-independent)
 boolean gps_state_before_autochange = false;		// remember gps state before autochange
@@ -420,6 +435,9 @@ out_relay_path:
     double Tspeed=0, Tcourse=0;
     int i;
     long Talt;
+    static uint8_t cnt = 0;
+    boolean time_to_add_alt = false;
+
     Tlat=gps.location.lat();
     Tlon=gps.location.lng();
     Tcourse=gps.course.deg();
@@ -428,6 +446,16 @@ out_relay_path:
     aprs_lat = aprs_lat / 26 - aprs_lat / 2710 + aprs_lat / 15384615;
     aprs_lon = 900000000 + Tlon * 10000000 / 2;
     aprs_lon = aprs_lon / 26 - aprs_lon / 2710 + aprs_lon / 15384615;
+
+    // altitude_ratio: 0%, 10%, 25%, 50%, 75%, 90%, 100%
+    if (gps.altitude.isValid() && altitude_ratio > 0) {
+      if (altitude_ratio <= 50)
+        time_to_add_alt = (cnt % (100 / altitude_ratio) == 0);
+      else if (altitude_ratio < 100)
+        time_to_add_alt = (cnt % (100 / (100-altitude_ratio)) != 0);
+      else
+        time_to_add_alt = true;
+    }
 
     outString += aprsSymbolTable;
     ax25_base91enc(helper_base91, 4, aprs_lat);
@@ -439,21 +467,38 @@ out_relay_path:
       outString += helper_base91[i];
     }
     outString += aprsSymbol;
-    ax25_base91enc(helper_base91, 1, (uint32_t) Tcourse / 4);
-    outString += helper_base91[0];
-    ax25_base91enc(helper_base91, 1, (uint32_t) (log1p(Tspeed) / 0.07696));
-    outString += helper_base91[0];
-    outString += "H";
 
-    if (showAltitude){
+
+    if (showAltitudeInsideCompressedPosition && time_to_add_alt) {
       Talt = gps.altitude.feet();
-      char buf[7];
-      outString += "/A=";
-      if (Talt > 999999) Talt=999999;
-      else if (Talt < -99999) Talt=-99999;
-      sprintf(buf, "%06ld", Talt);
-      outString += buf;
+      if (Talt < 0) Talt = 0;
+      else if (Talt > 15270967) Talt = 15270967; /* 1.002** (90*91+90-1) */
+      ax25_base91enc(helper_base91, 2, (uint32_t) (log1p(Talt) / 0.001998));
+      								/* ^ math.log1p(1.002-1) */
+      outString += helper_base91[0];
+      outString += helper_base91[1];
+      outString += "X";
+    } else {
+      ax25_base91enc(helper_base91, 1, (uint32_t) Tcourse / 4);
+      outString += helper_base91[0];
+      if (Tspeed > 1018) Tspeed = 1018; /* 1.08**90 */
+      ax25_base91enc(helper_base91, 1, (uint32_t) (log1p(Tspeed) / 0.07696));
+      								   /* ^ math.log1p(1.08-1) */
+      outString += helper_base91[0];
+      outString += "H";
+
+      if (time_to_add_alt) {
+        Talt = gps.altitude.feet();
+        char buf[7];
+        outString += "/A=";
+        if (Talt > 999999) Talt=999999;
+        else if (Talt < -99999) Talt=-99999;
+        sprintf(buf, "%06ld", Talt);
+        outString += buf;
+      }
     }
+
+    cnt++;
 
   } else {  //fixed position not compresed
     outString += aprsLatPreset;
@@ -465,8 +510,19 @@ out_relay_path:
   if(show_cmt){
     static uint8_t comments_added = 0;
     static uint32_t time_comment_added = 0L;
-    if (!rate_limit_message_text || (time_comment_added + (gps_state ? sb_max_interval : fix_beacon_interval) < millis()))
+
+    if (!rate_limit_message_text) {
       comments_added = 0;
+    } else {
+      uint32_t t_offset = (gps_state ? sb_max_interval : fix_beacon_interval);
+      // send comment text not under 10min, and at least every hour
+      if (t_offset < 600000)
+        t_offset = 600000;
+      else if (t_offset > 3600000)
+        t_offset = 3600000;
+      if ((time_comment_added + t_offset) < millis())
+        comments_added = 0;
+    }
     if ((comments_added++ % 10) == 0) {
       outString += aprsComment;
       time_comment_added = millis();
@@ -563,26 +619,66 @@ void sendpacket(boolean force_fixed){
 void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, const String &message) {
   if (!lora_tx_enabled)
     return;
-  #ifdef ENABLE_LED_SIGNALING
-    digitalWrite(TXLED, LOW);
-  #endif
-  lastTX = millis();
+#ifdef T_BEAM_V1_0
+   axp.setPowerOutPut(AXP192_LDO2, AXP202_ON);                           // LoRa
+#endif
 
   int messageSize = min(message.length(), sizeof(lora_TXBUFF) - 1);
   message.toCharArray((char*)lora_TXBUFF, messageSize + 1, 0);
   lora_set_speed(lora_SPEED);
   rf95.setFrequency(lora_FREQ);
   rf95.setTxPower(lora_LTXPower);
+
+  // kind of csma/cd. TODO: better approach: add to a tx-queue
+  // in SF12: preamble + lora header = 663.552 -> we wait 1300ms for check if lora-chip is in decoding
+  // See https://www.rfwireless-world.com/calculators/LoRaWAN-Airtime-calculator.html
+  // In detail:       At our supported speed "names":
+  // SF7: 28.928ms
+  // SF8: 57.856ms
+  // SF9: 115.712ms   1200
+  // SF10: 231.424ms  610
+  // SF11: 331.776ms
+  // SF12: 663.552ms  300,240, 210, 180
+  uint32_t wait_for_signal = 700;
+  if (lora_speed  == 610) wait_for_signal = 250;
+  else if (lora_speed  == 1200) wait_for_signal = 125;
+
+  randomSeed(millis());
+  int n;
+  for (n = 0; n < 30; n++) {
+    delay(wait_for_signal);
+    if (rf95.SignalDetected()) {
+      continue;
+    }
+    delay(100);
+    if (!rf95.SignalDetected() && random(256) < 64) {
+      break;
+    }
+  }
+
+  #ifdef ENABLE_LED_SIGNALING
+    digitalWrite(TXLED, LOW);
+  #endif
+  lastTX = millis();
   rf95.sendAPRS(lora_TXBUFF, messageSize);
   rf95.waitPacketSent();
   #ifdef ENABLE_LED_SIGNALING
     digitalWrite(TXLED, HIGH);
   #endif
   // cross-digipeating may have altered our RX-frequency. Revert frequency change needed for this transmission.
-  if (lora_FREQ != lora_freq_rx_curr)
+  if (lora_FREQ != lora_freq_rx_curr) {
     rf95.setFrequency(lora_freq_rx_curr);
+    // flush cache. just to be sure, so that no cross-digi-qrg packet comes in the input-buffer of the main qrg.
+    // With no buffer / length called, recvAPRS directly calls clearRxBuf()
+    rf95.recvAPRS(0, 0);
+  } 
   if (lora_SPEED != lora_speed_rx_curr)
     lora_set_speed(lora_speed_rx_curr);
+#ifdef T_BEAM_V1_0
+  // (if lora_digipeating_mode == 0 or not lora_rx_enabled) and no bt client is connected
+  if ((!lora_digipeating_mode || !lora_rx_enabled) && !SerialBT.hasClient())
+    axp.setPowerOutPut(AXP192_LDO2, AXP202_OFF);                           // LoRa
+#endif
 }
 
 void batt_read(){
@@ -839,6 +935,37 @@ void setup(){
     }
 
     preferences.begin("cfg", false);
+
+#ifdef ENABLE_WIFI
+    if (!preferences.getBool(PREF_WIFI_ENABLE_INIT)){
+      preferences.putBool(PREF_WIFI_ENABLE_INIT, true);
+      preferences.putInt(PREF_WIFI_ENABLE, enable_webserver);
+    }
+    enable_webserver = preferences.getInt(PREF_WIFI_ENABLE);
+    if (!preferences.getBool(PREF_TNCSERVER_ENABLE_INIT)){
+      preferences.putBool(PREF_TNCSERVER_ENABLE_INIT, true);
+      preferences.putBool(PREF_TNCSERVER_ENABLE, tncServer_enabled);
+    }
+    tncServer_enabled = preferences.getBool(PREF_TNCSERVER_ENABLE);
+
+    if (!preferences.getBool(PREF_GPSSERVER_ENABLE_INIT)){
+      preferences.putBool(PREF_GPSSERVER_ENABLE_INIT, true);
+      preferences.putBool(PREF_GPSSERVER_ENABLE, gpsServer_enabled);
+    }
+    gpsServer_enabled = preferences.getBool(PREF_GPSSERVER_ENABLE);
+
+    if (!preferences.getBool(PREF_WIFI_TXPWR_MODE_AP_INIT)){
+      preferences.putBool(PREF_WIFI_TXPWR_MODE_AP_INIT, true);
+      preferences.putInt(PREF_WIFI_TXPWR_MODE_AP, wifi_txpwr_mode_AP);
+    }
+    wifi_txpwr_mode_AP = preferences.getInt(PREF_WIFI_TXPWR_MODE_AP);
+
+    if (!preferences.getBool(PREF_WIFI_TXPWR_MODE_STA_INIT)){
+      preferences.putBool(PREF_WIFI_TXPWR_MODE_STA_INIT, true);
+      preferences.putInt(PREF_WIFI_TXPWR_MODE_STA, wifi_txpwr_mode_STA);
+    }
+    wifi_txpwr_mode_STA = preferences.getInt(PREF_WIFI_TXPWR_MODE_STA);
+#endif
     
     // LoRa transmission settings
 
@@ -940,13 +1067,13 @@ void setup(){
 
     // APRS station settings
 
-    aprsSymbolTable = preferences.getString(PREF_APRS_SYMBOL_TABLE);
+    aprsSymbolTable = preferences.getString(PREF_APRS_SYMBOL_TABLE, "");
     if (aprsSymbolTable.isEmpty()){
       preferences.putString(PREF_APRS_SYMBOL_TABLE, APRS_SYMBOL_TABLE);
       aprsSymbolTable = preferences.getString(PREF_APRS_SYMBOL_TABLE);
     }
 
-    aprsSymbol = preferences.getString(PREF_APRS_SYMBOL);
+    aprsSymbol = preferences.getString(PREF_APRS_SYMBOL, "");
     if (aprsSymbol.isEmpty()){
       preferences.putString(PREF_APRS_SYMBOL, APRS_SYMBOL);
       aprsSymbol = preferences.getString(PREF_APRS_SYMBOL, APRS_SYMBOL);
@@ -956,19 +1083,31 @@ void setup(){
       preferences.putBool(PREF_APRS_COMMENT_INIT, true);
       preferences.putString(PREF_APRS_COMMENT, MY_COMMENT);
     }
-    aprsComment = preferences.getString(PREF_APRS_COMMENT);
+    aprsComment = preferences.getString(PREF_APRS_COMMENT, "");
 
     if (!preferences.getBool(PREF_APRS_RELAY_PATH_INIT)){
       preferences.putBool(PREF_APRS_RELAY_PATH_INIT, true);
       preferences.putString(PREF_APRS_RELAY_PATH, DIGI_PATH);
     }
-    relay_path = preferences.getString(PREF_APRS_RELAY_PATH);
+    relay_path = preferences.getString(PREF_APRS_RELAY_PATH, "");
 
     if (!preferences.getBool(PREF_APRS_SHOW_ALTITUDE_INIT)){
       preferences.putBool(PREF_APRS_SHOW_ALTITUDE_INIT, true);
       preferences.putBool(PREF_APRS_SHOW_ALTITUDE, showAltitude);
     }
     showAltitude = preferences.getBool(PREF_APRS_SHOW_ALTITUDE);
+    if (!preferences.getBool(PREF_APRS_SHOW_ALTITUDE_INSIDE_COMPRESSED_POSITION_INIT)){
+      preferences.putBool(PREF_APRS_SHOW_ALTITUDE_INSIDE_COMPRESSED_POSITION_INIT, true);
+      preferences.putBool(PREF_APRS_SHOW_ALTITUDE_INSIDE_COMPRESSED_POSITION, showAltitudeInsideCompressedPosition);
+    }
+    showAltitudeInsideCompressedPosition = preferences.getBool(PREF_APRS_SHOW_ALTITUDE_INSIDE_COMPRESSED_POSITION);
+    if (!preferences.getBool(PREF_APRS_ALTITUDE_RATIO_INIT)){
+      preferences.putBool(PREF_APRS_ALTITUDE_RATIO_INIT, true);
+      // preferences.putInt(PREF_APRS_ALTITUDE_RATIO, altitude_ratio); // until SHOW_ALTITUDE is obsolete, commented out
+      preferences.putInt(PREF_APRS_ALTITUDE_RATIO, showAltitude ? 100 : 0);
+    }
+    altitude_ratio = preferences.getInt(PREF_APRS_ALTITUDE_RATIO);
+    
 
     if (!preferences.getBool(PREF_APRS_GPS_EN_INIT)){
       preferences.putBool(PREF_APRS_GPS_EN_INIT, true);
@@ -1023,27 +1162,27 @@ void setup(){
       preferences.putBool(PREF_TNC_SELF_TELEMETRY_PATH_INIT, true);
       preferences.putString(PREF_TNC_SELF_TELEMETRY_PATH, tel_path);
     }
-    tel_path = preferences.getString(PREF_TNC_SELF_TELEMETRY_PATH);
+    tel_path = preferences.getString(PREF_TNC_SELF_TELEMETRY_PATH, "");
 
     if (!preferences.getBool(PREF_APRS_LATITUDE_PRESET_INIT)){
       preferences.putBool(PREF_APRS_LATITUDE_PRESET_INIT, true);
       preferences.putString(PREF_APRS_LATITUDE_PRESET, LATITUDE_PRESET);
     }
-    aprsLatPreset = preferences.getString(PREF_APRS_LATITUDE_PRESET);
+    aprsLatPreset = preferences.getString(PREF_APRS_LATITUDE_PRESET, "");
     LatShownP = aprsLonPreset;
 
     if (!preferences.getBool(PREF_APRS_LONGITUDE_PRESET_INIT)){
       preferences.putBool(PREF_APRS_LONGITUDE_PRESET_INIT, true);
       preferences.putString(PREF_APRS_LONGITUDE_PRESET, LONGITUDE_PRESET);
     }
-    aprsLonPreset = preferences.getString(PREF_APRS_LONGITUDE_PRESET);
+    aprsLonPreset = preferences.getString(PREF_APRS_LONGITUDE_PRESET, "");
     LongShownP = aprsLonPreset;
 
     if (!preferences.getBool(PREF_APRS_SENDER_BLACKLIST_INIT)){
       preferences.putBool(PREF_APRS_SENDER_BLACKLIST_INIT, true);
       preferences.putString(PREF_APRS_SENDER_BLACKLIST, "");
     }
-    { String s = preferences.getString(PREF_APRS_SENDER_BLACKLIST);
+    { String s = preferences.getString(PREF_APRS_SENDER_BLACKLIST, "");
       s.toUpperCase(); s.trim(); s.replace(" ", ","); s.replace(",,", ",");
       if (!s.isEmpty() && s != "," && s.length() < sizeof(blacklist_calls)-3) {
         *blacklist_calls = ',';
@@ -1172,6 +1311,12 @@ void setup(){
     }
     enabled_oled  = preferences.getBool(PREF_DEV_OL_EN); 
 
+    if (!preferences.getBool(PREF_DEV_CPU_FREQ_INIT)){
+      preferences.putBool(PREF_DEV_CPU_FREQ_INIT, true);
+      preferences.putInt(PREF_DEV_CPU_FREQ, adjust_cpuFreq_to);
+    }
+    adjust_cpuFreq_to = preferences.getInt(PREF_DEV_CPU_FREQ); 
+
 
 // APRSIS settings
 #ifdef ENABLE_WIFI
@@ -1185,7 +1330,7 @@ void setup(){
       preferences.putBool(PREF_APRSIS_SERVER_NAME_INIT, true);
       preferences.putString(PREF_APRSIS_SERVER_NAME, aprsis_host);
     }
-    aprsis_host = preferences.getString(PREF_APRSIS_SERVER_NAME);
+    aprsis_host = preferences.getString(PREF_APRSIS_SERVER_NAME, "");
 
     if (!preferences.getBool(PREF_APRSIS_SERVER_PORT_INIT)){
       preferences.putBool(PREF_APRSIS_SERVER_PORT_INIT, true);
@@ -1197,19 +1342,19 @@ void setup(){
       preferences.putBool(PREF_APRSIS_FILTER_INIT, true);
       preferences.putString(PREF_APRSIS_FILTER, aprsis_filter);
     }
-    aprsis_filter = preferences.getString(PREF_APRSIS_FILTER);
+    aprsis_filter = preferences.getString(PREF_APRSIS_FILTER, "");
 
     if (!preferences.getBool(PREF_APRSIS_CALLSIGN_INIT)){
       preferences.putBool(PREF_APRSIS_CALLSIGN_INIT, true);
       preferences.putString(PREF_APRSIS_CALLSIGN, aprsis_callsign);
     }
-    aprsis_callsign = preferences.getString(PREF_APRSIS_CALLSIGN);
+    aprsis_callsign = preferences.getString(PREF_APRSIS_CALLSIGN, "");
 
     if (!preferences.getBool(PREF_APRSIS_PASSWORD_INIT)){
       preferences.putBool(PREF_APRSIS_PASSWORD_INIT, true);
       preferences.putString(PREF_APRSIS_PASSWORD, aprsis_password);
     }
-    aprsis_password = preferences.getString(PREF_APRSIS_PASSWORD);
+    aprsis_password = preferences.getString(PREF_APRSIS_PASSWORD, "");
 
     if (!preferences.getBool(PREF_APRSIS_ALLOW_INET_TO_RF_INIT)){
       preferences.putBool(PREF_APRSIS_ALLOW_INET_TO_RF_INIT, true);
@@ -1276,14 +1421,18 @@ void setup(){
     if (!axp.begin(Wire, AXP192_SLAVE_ADDRESS)) {
     }
     axp.setLowTemp(0xFF);                                                 //SP6VWX Set low charging temperature
-    axp.setPowerOutPut(AXP192_LDO2, AXP202_ON);                           // LoRa
+    if (lora_digipeating_mode > 0 || lora_rx_enabled || SerialBT.hasClient())
+      axp.setPowerOutPut(AXP192_LDO2, AXP202_ON);                           // LoRa
+    else
+      axp.setPowerOutPut(AXP192_LDO2, AXP202_OFF);                           // LoRa
     if (gps_state){
       axp.setPowerOutPut(AXP192_LDO3, AXP202_ON);                           // switch on GPS
     } else {
       axp.setPowerOutPut(AXP192_LDO3, AXP202_OFF);                           // switch off GPS
     }
     axp.setPowerOutPut(AXP192_DCDC2, AXP202_ON);
-    axp.setPowerOutPut(AXP192_EXTEN, AXP202_ON);
+    axp.setPowerOutPut(AXP192_EXTEN, AXP202_OFF);
+    //axp.setPowerOutPut(AXP192_EXTEN, AXP202_ON);				// switch this on if you need it
     axp.setDCDC1Voltage(3300);
     // Enable ADC to measure battery current, USB voltage etc.
     axp.adc1Enable(0xfe, true);
@@ -1291,6 +1440,9 @@ void setup(){
     axp.setChgLEDMode(AXP20X_LED_OFF);
     axp.setPowerOutPut(AXP192_DCDC1, AXP202_ON);                          // oled do not turn off     
   #endif
+  // can reduce cpu power consumtion up to 20 %
+  if (adjust_cpuFreq_to > 0)
+    setCpuFrequencyMhz(adjust_cpuFreq_to);
 
   if(!display.begin(SSD1306_SWITCHCAPVCC, SSD1306_ADDRESS)) {
       for(;;);                                                             // Don't proceed, loop forever
@@ -1319,7 +1471,7 @@ void setup(){
 
   Tcall = prepareCallsign(String(CALLSIGN));
   #ifdef ENABLE_PREFERENCES
-    Tcall = preferences.getString(PREF_APRS_CALLSIGN);
+    Tcall = preferences.getString(PREF_APRS_CALLSIGN, "");
     if (Tcall.isEmpty()){
       preferences.putString(PREF_APRS_CALLSIGN, String(CALLSIGN));
       Tcall = preferences.getString(PREF_APRS_CALLSIGN);
@@ -1367,14 +1519,33 @@ void setup(){
     xTaskCreatePinnedToCore(taskTNC, "taskTNC", 10000, nullptr, 1, nullptr, xPortGetCoreID());
   #endif
 
+
 #if defined(KISS_PROTOCOL) && defined(ENABLE_BLUETOOTH)
-    if (enable_bluetooth){
+  // LORA32_21: bug in hardware. cannot run bluetooth and wifi concurrently.
+  // We wait for a bt-client connecting, up to 60s. If none connected,
+  // we start the webserver.
+  // TTGO: webserver cunsumes abt 80mA. User may not start the webserver
+  // if bt-client is connected. We'll also wait herefor clients.
+  // If enable_webserver on LORA32_21 is set to 2, user
+  // likes the webserver always to be started -> do not start bluetooth.
+#if defined(ENABLE_WIFI)
+#if defined(LORA32_21)
+  if (enable_bluetooth && enable_webserver < 2) {
+#else
+  if (enable_bluetooth) {
+#endif /* LORA32_21 */
+#else
+  if (enable_bluetooth) {
+#endif /* ENABLE_WIFI */
+
 #ifdef BLUETOOTH_PIN
-      SerialBT.setPin(BLUETOOTH_PIN);
+    SerialBT.setPin(BLUETOOTH_PIN);
 #endif
-      SerialBT.begin(String("TTGO LORA APRS ") + Tcall);
-      writedisplaytext("LoRa-APRS","","Init:","BT OK!","","");
-#if defined(ENABLE_WIFI) && defined(LORA32_21)
+    SerialBT.begin(String("TTGO LORA APRS ") + Tcall);
+    writedisplaytext("LoRa-APRS","","Init:","BT OK!","","");
+
+#if defined(ENABLE_WIFI)
+    if (enable_webserver == 1 && !aprsis_enabled) {
       writedisplaytext("LoRa-APRS","","Init:","Waiting for BT-client","","");
       // wait 60s until BT client connects
       uint32_t t_end = millis() + 60000;
@@ -1384,30 +1555,41 @@ void setup(){
         delay(100);
       }
       if (!SerialBT.hasClient()) {
+  #if defined(LORA32_21)
         writedisplaytext("LoRa-APRS","","Init:","Waiting for BT-client","Disabling BT!","");
         SerialBT.end();
+  #endif
       } else {
         writedisplaytext("LoRa-APRS","","Init:","Waiting for BT-clients","BT-client connected","Will NOT start WiFi!");
       }
       delay(1500);
-#endif /* ENABLE_WIFI && LORA32_21 */
     }
+#endif /* ENABLE_WIFI */
+  }
 #endif /* KISS_PROTOCOL && ENABLE_BLUETOOTH */
 
 #ifdef ENABLE_WIFI
-#if defined(LORA32_21) && defined(ENABLE_BLUETOOTH)
-    if (!SerialBT.hasClient()) {
-#endif
+  if (enable_webserver) {
+#if defined(KISS_PROTOCOL) && defined(ENABLE_BLUETOOTH)
+    // if enabble_webserver == 2 or (enable_webserver == 1 && (no serial-bt-client is connected OR aprs-is-connecion configuried)
+    if (enable_webserver > 1 || aprsis_enabled || !SerialBT.hasClient()) {
+#else
+    {
+#endif /* KISS_PROTOCOL && ENABLE_BLUETOOTH */
       webServerCfg = {.callsign = Tcall};
       xTaskCreate(taskWebServer, "taskWebServer", 12000, (void*)(&webServerCfg), 1, nullptr);
+      webserverStarted = true;
       writedisplaytext("LoRa-APRS","","Init:","WiFi task started","   =:-)   ","");
-#if defined(LORA32_21) && defined(ENABLE_BLUETOOTH)
+#if defined(KISS_PROTOCOL) && defined(ENABLE_BLUETOOTH)
     } else {
       writedisplaytext("LoRa-APRS","","Init:","WiFi NOT started!","   =:-S   ","");
     }
+#else
+    }
+#endif /* KISS_PROTOCOL && ENABLE_BLUETOOTH */
     delay(1500);
-#endif
 #endif /* ENABLE_WIFI */
+  }
 
   writedisplaytext("LoRa-APRS","","Init:","FINISHED OK!","   =:-)   ","");
   writedisplaytext("","","","","","");
@@ -2094,7 +2276,7 @@ void loop() {
       time_delay = millis() + 1500;
       if(digitalRead(BUTTON)==HIGH){
         if (!tempOled && enabled_oled) {
-        enableOled(); // turn ON OLED temporary
+          enableOled(); // turn ON OLED temporary
         } else {
           if(gps_state == true && gps.location.isValid()){
               writedisplaytext("((MAN TX))","","","","","");
@@ -2104,6 +2286,25 @@ void loop() {
               sendpacket(1);
           }
         }
+        // hack: re-enable webserevr, if was set to off.
+#ifdef	ENABLE_WIFI
+        if (!webserverStarted) {
+	  enable_webserver = 1;
+#ifdef ENABLE_PREFERENCES
+	  preferences.putInt("PREF_WIFI_ENABLED", enable_webserver);
+#endif
+#if defined(LORA32_21) && defined(ENABLE_BLUETOOTH)
+	  // lora32_21 hardware bug: btt and wifi are mutual exclusive
+	  SerialBT.end();
+	  delay(100);
+#endif
+	  webServerCfg = {.callsign = Tcall};
+          xTaskCreate(taskWebServer, "taskWebServer", 12000, (void*)(&webServerCfg), 1, nullptr);
+          webserverStarted = true;
+          writedisplaytext("LoRa-APRS","","Init:","WiFi task started","   =:-)   ","");
+	  delay(1500);
+#endif
+	}
         key_up = true;
       }
     }

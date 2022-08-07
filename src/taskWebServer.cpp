@@ -27,6 +27,12 @@ extern String infoApName;
 extern String infoApPass;
 extern String infoApAddr;
 
+extern int8_t wifi_txpwr_mode_AP;
+extern int8_t wifi_txpwr_mode_STA;
+
+extern bool tncServer_enabled;
+extern bool gpsServer_enabled;
+
 // For APRS-IS connection
 extern String to_aprsis_data;
 extern boolean aprsis_enabled;
@@ -66,7 +72,6 @@ extern ulong lora_speed_cross_digi;
 extern double lora_freq_cross_digi;
 extern void loraSend(byte, float, ulong, const String &);
 
-
 WebServer server(80);
 #ifdef KISS_PROTOCOL
   WiFiServer tncServer(NETWORK_TNC_PORT);
@@ -101,7 +106,7 @@ String jsonEscape(String s){
 }
 
 String jsonLineFromPreferenceString(const char *preferenceName, bool last=false){
-  return String("\"") + preferenceName + "\":\"" + jsonEscape(preferences.getString(preferenceName)) + (last ?  + R"(")" :  + R"(",)");
+  return String("\"") + preferenceName + "\":\"" + jsonEscape(preferences.getString(preferenceName, "")) + (last ?  + R"(")" :  + R"(",)");
 }
 String jsonLineFromPreferenceBool(const char *preferenceName, bool last=false){
   return String("\"") + preferenceName + "\":" + (preferences.getBool(preferenceName) ? "true" : "false") + (last ?  + R"()" :  + R"(,)");
@@ -157,10 +162,12 @@ void handle_ScanWifi() {
 }
 
 void handle_SaveWifiCfg() {
+
   if (!server.hasArg(PREF_WIFI_SSID) || !server.hasArg(PREF_WIFI_PASSWORD) || !server.hasArg(PREF_AP_PASSWORD)){
     server.send(500, "text/plain", "Invalid request, make sure all fields are set");
   }
 
+  // Mode STA:
   if (!server.arg(PREF_WIFI_SSID).length()){
     server.send(403, "text/plain", "Empty SSID");
   } else {
@@ -178,7 +185,16 @@ void handle_SaveWifiCfg() {
       Serial.println("Updated WiFi PASS: " + server.arg(PREF_WIFI_PASSWORD));
     }
   }
+  if (server.hasArg(PREF_WIFI_TXPWR_MODE_STA)) {
+    // Web chooser min, low, mid, high, max
+    // We'll use "min", "low", "mid", "high", "max" -> 2dBm (1.5mW) -> 8, 11dBm (12mW) -> 44, 15dBm (32mW) -> 60, 18dBm (63mW) ->72, 20dBm (100mW) ->80
+    int8_t choosed = server.arg(PREF_WIFI_TXPWR_MODE_STA).toInt();
+    if (choosed < 0) choosed = 8;
+    else if (choosed > 84) choosed = 84;
+    preferences.putInt(PREF_WIFI_TXPWR_MODE_STA, choosed);
+  }
 
+  // Mode AP:
   if (server.arg(PREF_AP_PASSWORD)!="*" && server.arg(PREF_AP_PASSWORD).length()<8){
     server.send(403, "text/plain", "AP Password must be minimum 8 character");
   } else {
@@ -188,8 +204,22 @@ void handle_SaveWifiCfg() {
       Serial.println("Updated AP PASS: " + server.arg(PREF_AP_PASSWORD));
     }
   }
+  if (server.hasArg(PREF_WIFI_TXPWR_MODE_AP)) {
+    // Web chooser min, low, mid, high, max
+    // We'll use "min", "low", "mid", "high", "max" -> 2dBm (1.5mW) -> 8, 11dBm (12mW) -> 44, 15dBm (32mW) -> 60, 18dBm (63mW) ->72, 20dBm (100mW) ->80
+    int8_t choosed = server.arg(PREF_WIFI_TXPWR_MODE_AP).toInt();
+    if (choosed < 0) choosed = 8;
+    else if (choosed > 84) choosed = 84;
+    preferences.putInt(PREF_WIFI_TXPWR_MODE_AP, choosed);
+  }
+
+  if (server.hasArg(PREF_WIFI_ENABLE))
+    preferences.putInt(PREF_WIFI_ENABLE, server.arg(PREF_WIFI_ENABLE).toInt());
+
+  preferences.putBool(PREF_TNCSERVER_ENABLE, server.hasArg(PREF_TNCSERVER_ENABLE));
+  preferences.putBool(PREF_GPSSERVER_ENABLE, server.hasArg(PREF_GPSSERVER_ENABLE));
   String s = "";
-  if (server.arg(PREF_NTP_SERVER).length()) {
+  if (server.hasArg(PREF_NTP_SERVER) && server.arg(PREF_NTP_SERVER).length()) {
     s = server.arg(PREF_NTP_SERVER);
     s.trim();
   }
@@ -232,9 +262,14 @@ void handle_Restore() {
 
 void handle_Cfg() {
   String jsonData = "{";
-  jsonData += String("\"") + PREF_WIFI_PASSWORD + "\": \"" + jsonEscape((preferences.getString(PREF_WIFI_PASSWORD).isEmpty() ? String("") : "*")) + R"(",)";
-  jsonData += String("\"") + PREF_AP_PASSWORD + "\": \"" + jsonEscape((preferences.getString(PREF_AP_PASSWORD).isEmpty() ? String("") : "*")) + R"(",)";
+  jsonData += String("\"") + PREF_WIFI_PASSWORD + "\": \"" + jsonEscape((preferences.getString(PREF_WIFI_PASSWORD, "").isEmpty() ? String("") : "*")) + R"(",)";
+  jsonData += String("\"") + PREF_AP_PASSWORD + "\": \"" + jsonEscape((preferences.getString(PREF_AP_PASSWORD, "").isEmpty() ? String("") : "*")) + R"(",)";
+  jsonData += jsonLineFromPreferenceInt(PREF_WIFI_ENABLE);
   jsonData += jsonLineFromPreferenceString(PREF_WIFI_SSID);
+  jsonData += jsonLineFromPreferenceInt(PREF_WIFI_TXPWR_MODE_AP);
+  jsonData += jsonLineFromPreferenceInt(PREF_WIFI_TXPWR_MODE_STA);
+  jsonData += jsonLineFromPreferenceBool(PREF_TNCSERVER_ENABLE);
+  jsonData += jsonLineFromPreferenceBool(PREF_GPSSERVER_ENABLE);
   jsonData += jsonLineFromPreferenceString(PREF_NTP_SERVER);
   jsonData += jsonLineFromPreferenceDouble(PREF_LORA_FREQ_PRESET);
   jsonData += jsonLineFromPreferenceInt(PREF_LORA_SPEED_PRESET);
@@ -270,7 +305,9 @@ void handle_Cfg() {
   jsonData += jsonLineFromPreferenceInt(PREF_APRS_SB_TURN_TIME_PRESET);
   jsonData += jsonLineFromPreferenceBool(PREF_APRS_SHOW_BATTERY);
   jsonData += jsonLineFromPreferenceBool(PREF_APRS_FIXED_BEACON_PRESET);
-  jsonData += jsonLineFromPreferenceBool(PREF_APRS_SHOW_ALTITUDE);
+  //jsonData += jsonLineFromPreferenceBool(PREF_APRS_SHOW_ALTITUDE);
+  jsonData += jsonLineFromPreferenceBool(PREF_APRS_SHOW_ALTITUDE_INSIDE_COMPRESSED_POSITION);
+  jsonData += jsonLineFromPreferenceInt(PREF_APRS_ALTITUDE_RATIO);
   jsonData += jsonLineFromPreferenceBool(PREF_APRS_GPS_EN);
   jsonData += jsonLineFromPreferenceBool(PREF_ACCEPT_OWN_POSITION_REPORTS_VIA_KISS);
   jsonData += jsonLineFromPreferenceBool(PREF_GPS_ALLOW_SLEEP_WHILE_KISS);
@@ -287,6 +324,7 @@ void handle_Cfg() {
   jsonData += jsonLineFromPreferenceInt(PREF_DEV_AUTO_SHUT_PRESET);
   jsonData += jsonLineFromPreferenceInt(PREF_DEV_REBOOT_INTERVAL);
   jsonData += jsonLineFromPreferenceInt(PREF_DEV_SHOW_OLED_TIME);
+  jsonData += jsonLineFromPreferenceInt(PREF_DEV_CPU_FREQ);
   jsonData += jsonLineFromPreferenceBool(PREF_APRSIS_EN);
   jsonData += jsonLineFromPreferenceString(PREF_APRSIS_SERVER_NAME);
   jsonData += jsonLineFromPreferenceInt(PREF_APRSIS_SERVER_PORT);
@@ -709,7 +747,11 @@ void handle_SaveAPRSCfg() {
 
   preferences.putBool(PREF_APRS_SHOW_BATTERY, server.hasArg(PREF_APRS_SHOW_BATTERY));
   preferences.putBool(PREF_ENABLE_TNC_SELF_TELEMETRY, server.hasArg(PREF_ENABLE_TNC_SELF_TELEMETRY));
-  preferences.putBool(PREF_APRS_SHOW_ALTITUDE, server.hasArg(PREF_APRS_SHOW_ALTITUDE));
+  //preferences.putBool(PREF_APRS_SHOW_ALTITUDE, server.hasArg(PREF_APRS_SHOW_ALTITUDE));
+  preferences.putBool(PREF_APRS_SHOW_ALTITUDE_INSIDE_COMPRESSED_POSITION, server.hasArg(PREF_APRS_SHOW_ALTITUDE_INSIDE_COMPRESSED_POSITION));
+  if (server.hasArg(PREF_APRS_ALTITUDE_RATIO)){
+    preferences.putInt(PREF_APRS_ALTITUDE_RATIO, server.arg(PREF_APRS_ALTITUDE_RATIO).toInt());
+  }
   preferences.putBool(PREF_APRS_FIXED_BEACON_PRESET, server.hasArg(PREF_APRS_FIXED_BEACON_PRESET));
   preferences.putBool(PREF_APRS_GPS_EN, server.hasArg(PREF_APRS_GPS_EN));
   preferences.putBool(PREF_ACCEPT_OWN_POSITION_REPORTS_VIA_KISS, server.hasArg(PREF_ACCEPT_OWN_POSITION_REPORTS_VIA_KISS));
@@ -738,6 +780,12 @@ void handle_saveDeviceCfg(){
   } 
   if (server.hasArg(PREF_DEV_REBOOT_INTERVAL)){
     preferences.putInt(PREF_DEV_REBOOT_INTERVAL, server.arg(PREF_DEV_REBOOT_INTERVAL).toInt());
+  }
+  if (server.hasArg(PREF_DEV_CPU_FREQ)){
+    uint8_t cpufreq = server.arg(PREF_DEV_CPU_FREQ).toInt();
+    if (cpufreq != 0 && cpufreq < 10)
+      cpufreq = 10;
+    preferences.putInt(PREF_DEV_CPU_FREQ, cpufreq);
   }
   server.sendHeader("Location", "/");
   server.send(302,"text/html", "");
@@ -794,23 +842,25 @@ void handle_saveDeviceCfg(){
   });
   server.onNotFound(handle_NotFound);
 
-  String wifi_password = preferences.getString(PREF_WIFI_PASSWORD);
-  String wifi_ssid = preferences.getString(PREF_WIFI_SSID);
-  if (preferences.getString(PREF_AP_PASSWORD).length() > 7) {
-    // 8 characters is requirements for WPA2
-    apPassword = preferences.getString(PREF_AP_PASSWORD);
-  } else {
+  String wifi_password = preferences.getString(PREF_WIFI_PASSWORD, "");
+  String wifi_ssid = preferences.getString(PREF_WIFI_SSID, "");
+  apPassword = preferences.getString(PREF_AP_PASSWORD, "");
+  // 8 characters is requirements for WPA2
+  if (apPassword.length() < 8) {
     apPassword = defApPassword;
   }
   if (!wifi_ssid.length()){
     WiFi.softAP(apSSID.c_str(), apPassword.c_str());
+    esp_wifi_set_max_tx_power(wifi_txpwr_mode_AP);
   } else {
     int retryWifi = 0;
     WiFi.begin(wifi_ssid.c_str(), wifi_password.length() ? wifi_password.c_str() : nullptr);
     Serial.println("Connecting to " + wifi_ssid);
-    // Set power to minimum (max 20)
+    // Set power:  minimum 8 (2dBm) (max 80 (20dBm))
     // https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/network/esp_wifi.html
-    esp_wifi_set_max_tx_power(8);
+    // Mapping Table {Power, max_tx_power} = {{8, 2}, {20, 5}, {28, 7}, {34, 8}, {44, 11}, {52, 13}, {56, 14}, {60, 15}, {66, 16}, {72, 18}, {80, 20}}.
+    // We'll use "min", "low", "mid", "high", "max" -> 2dBm (1.5mW) -> 8, 11dBm (12mW) -> 44, 15dBm (32mW) -> 60, 18dBm (63mW) ->72, 20dBm (100mW) ->80
+    esp_wifi_set_max_tx_power(wifi_txpwr_mode_STA);
     while (WiFi.status() != WL_CONNECTED) {
       Serial.print("Not connected: ");
       Serial.println((int)WiFi.status());
@@ -826,8 +876,7 @@ void handle_saveDeviceCfg(){
         Serial.print(apSSID.c_str());
         Serial.print(" Password: ");
         Serial.println(apPassword.c_str());
-        // Set power to minimum (max 20)
-        esp_wifi_set_max_tx_power(8);
+        esp_wifi_set_max_tx_power(wifi_txpwr_mode_AP);
         break;
       }
     }
@@ -860,7 +909,7 @@ void handle_saveDeviceCfg(){
       syslog.defaultPriority(LOG_KERN);
       syslog_log(LOG_INFO, "Connected. IP: " + WiFi.localIP().toString());
     #endif
-    String ntp_server = preferences.getString(PREF_NTP_SERVER);
+    String ntp_server = preferences.getString(PREF_NTP_SERVER, "");
     if (ntp_server.isEmpty()) {
       if (infoApAddr.startsWith("44."))
         ntp_server = "ntp.hc.r1.ampr.org";
@@ -882,9 +931,11 @@ void handle_saveDeviceCfg(){
 
   server.begin();
   #ifdef KISS_PROTOCOL
-    tncServer.begin();
+    if (tncServer_enabled)
+      tncServer.begin();
   #endif
-  gpsServer.begin();
+  if (gpsServer_enabled)
+    gpsServer.begin();
   if (MDNS.begin(webServerCfg->callsign.c_str())) {
     MDNS.setInstanceName(webServerCfg->callsign + " TTGO LoRa APRS TNC " + TXFREQ + "MHz");
     MDNS.addService("http", "tcp", 80);
@@ -934,6 +985,23 @@ void handle_saveDeviceCfg(){
 
   while (true){
     esp_task_wdt_reset();
+
+    // Mode STA and connection lost? -> reconnect
+    if (WiFi.getMode() == 1 && WiFi.status() != WL_CONNECTED) {
+      static uint32_t last_connection_attempt = millis();
+      if (millis() - last_connection_attempt > 20000L) {
+        WiFi.disconnect();
+        esp_task_wdt_reset();
+        WiFi.reconnect();
+        esp_task_wdt_reset();
+        last_connection_attempt = millis();
+      }
+      if (WiFi.status() != WL_CONNECTED) {
+         // 500ms for reconnect should be enough, ant not too often (power consumption).. Or, if we did not try to reconnect, this value is also fine
+         delay(500);
+         continue;
+      }
+    }
 
     server.handleClient();
     if (xQueueReceive(webListReceivedQueue, &receivedPacketData, (1 / portTICK_PERIOD_MS)) == pdPASS) {

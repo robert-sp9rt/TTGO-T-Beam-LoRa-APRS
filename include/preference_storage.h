@@ -11,6 +11,17 @@ static const char *const PREF_WIFI_SSID = "wifi_ssid";
 static const char *const PREF_WIFI_PASSWORD = "wifi_password";
 static const char *const PREF_AP_PASSWORD = "ap_password";
 static const char *const PREF_NTP_SERVER = "ntp_server";
+static const char *const PREF_WIFI_ENABLE_INIT = "wifi_en_i";
+static const char *const PREF_WIFI_ENABLE = "wifi_en";
+static const char *const PREF_WIFI_TXPWR_MODE_AP_INIT = "wifi_pwrAP_i";
+static const char *const PREF_WIFI_TXPWR_MODE_AP = "wifi_pwrAP";
+static const char *const PREF_WIFI_TXPWR_MODE_STA_INIT = "wifi_pwrSTA_i";
+static const char *const PREF_WIFI_TXPWR_MODE_STA = "wifi_pwrSTA";
+static const char *const PREF_TNCSERVER_ENABLE_INIT = "tncsrvr_en_i";
+static const char *const PREF_TNCSERVER_ENABLE = "tncsrvr_en";
+static const char *const PREF_GPSSERVER_ENABLE_INIT = "gpssrv_en_i";
+static const char *const PREF_GPSSERVER_ENABLE = "gpssrv_en";
+
 
 // LoRa settings
 static const char *const PREF_LORA_FREQ_PRESET_INIT = "lora_freq_i";
@@ -56,8 +67,13 @@ static const char *const PREF_APRS_COMMENT = "aprs_comment";
 static const char *const PREF_APRS_COMMENT_INIT = "aprs_comm_init";
 static const char *const PREF_APRS_COMMENT_RATELIMIT_PRESET = "aprs_comm_rt";
 static const char *const PREF_APRS_COMMENT_RATELIMIT_PRESET_INIT = "aprs_comm_rt_i";
-static const char *const PREF_APRS_SHOW_ALTITUDE = "aprs_alt";
-static const char *const PREF_APRS_SHOW_ALTITUDE_INIT = "aprs_alt_init";
+static const char *const PREF_APRS_SHOW_ALTITUDE = "aprs_alt";			/* obsoleted. may be removed later. Use alt ratio 0 .. 100*/
+static const char *const PREF_APRS_SHOW_ALTITUDE_INIT = "aprs_alt_init";	/* obsoleted. may be removed later. Use alt ratio 0 .. 100*/
+static const char *const PREF_APRS_SHOW_ALTITUDE_INSIDE_COMPRESSED_POSITION = "aprs_ALTinC";
+static const char *const PREF_APRS_SHOW_ALTITUDE_INSIDE_COMPRESSED_POSITION_INIT = "aprs_ALTinC_i";
+static const char *const PREF_APRS_ALTITUDE_RATIO = "aprs_alt_r";
+static const char *const PREF_APRS_ALTITUDE_RATIO_INIT = "aprs_alt_r_i";
+
 static const char *const PREF_APRS_SHOW_BATTERY = "aprs_batt";
 static const char *const PREF_APRS_SHOW_BATTERY_INIT = "aprs_batt_init";
 static const char *const PREF_APRS_LATITUDE_PRESET = "aprs_lat_p";
@@ -120,6 +136,9 @@ static const char *const PREF_DEV_REBOOT_INTERVAL = "reboot_intrvl";
 static const char *const PREF_DEV_REBOOT_INTERVAL_INIT = "reboot_intrvl_i";
 static const char *const PREF_DEV_SHOW_OLED_TIME = "sh_oledtime"; // set OLED timeout
 static const char *const PREF_DEV_SHOW_OLED_TIME_INIT = "sh_oledtime_i";
+static const char *const PREF_DEV_CPU_FREQ = "cpufreq";
+static const char *const PREF_DEV_CPU_FREQ_INIT = "cpufreq_i";
+
 
 // APRSIS settings
 static const char *const PREF_APRSIS_EN_INIT = "aprsis_en_i";

@@ -455,3 +455,8 @@ void BG_RF95::setPreambleLength(uint16_t bytes)
     spiWrite(BG_RF95_REG_20_PREAMBLE_MSB, bytes >> 8);
     spiWrite(BG_RF95_REG_21_PREAMBLE_LSB, bytes & 0xff);
 }
+
+bool BG_RF95::SignalDetected(void)
+{
+  return ((spiRead(BG_RF95_REG_18_MODEM_STAT) & 0x01) == 0x01);
+}

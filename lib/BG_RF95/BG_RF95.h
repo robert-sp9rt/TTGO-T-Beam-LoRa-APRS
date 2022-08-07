@@ -694,6 +694,8 @@ virtual uint8_t	lastSNR();
     /// \return true if sleep mode was successfully entered.
     virtual bool    sleep();
 
+    virtual bool SignalDetected();
+
 protected:
     /// This is a low level function to handle the interrupts for one instance of BG_RF95.
     /// Called automatically by isr*()
