@@ -25,7 +25,7 @@
                         <select id="wifi_en" name="wifi_en">
                             <option value="1">1: Wifi may off if bluetooth client is connected in between 60s on boot (recommended for portables, and for LORA32_21 devices)</option>
                             <option value="2">2: Wifi on (during hardware limitaion, bluetooth will be disabled on LORA32_21 devices)</option>
-                            <option value="0">0: Wifi off (ideal for battery powered trackers - honored only if aprs-is disabled). Hack: Pressing beacon button sets value to 1</option>
+                            <option value="0">0: Wifi off (ideal for battery powered trackers - be aware, that aprs-is connection depends on the Webserver and will stop working). Hack: long-pressing the (GPS) button switches ON/OFF the GPS. When switching GPS ON, the webserver-config is also set to value 1</option>
                         </select>
                     </div>
                 </div>
@@ -251,11 +251,11 @@
                 <div class="grid-container quarters">
                     <div>
                         <label for="aprs_fixed_beac">Fixed Beacon</label>
-                        <input name="aprs_fixed_beac" id="aprs_fixed_beac" type="checkbox" value="1" title="enable fixed beacon when GPS is disabled or no fix, disables Smart Beaconing">
+                        <input name="aprs_fixed_beac" id="aprs_fixed_beac" type="checkbox" value="1" title="enable fixed beacon when GPS is disabled or no fix">
                     </div>
                     <div>
                         <label for="aprs_fb_interv">Fixed Beacon Interval [s]</label>
-                        <input name="aprs_fb_interv" id="aprs_fb_interv" type="number" min="120" title="time between sending a beacon if Fixed Beacon option is selected. 1800 or 3600 is recommended for users; 900 or 1800 for digis.">
+                        <input name="aprs_fb_interv" id="aprs_fb_interv" type="number" min="120" title="time between sending a beacon if Fixed Beacon option is selected. 1800 or 3600 is recommended for users; 900 or 1800 for digis. This beacon value is also used if GPS is lost when smart-beacooning. If it is >= sb_max_intervall, this value is used.">
                     </div>
                     <div>
                         <label for="aprs_lat_p">Latitude</label>
@@ -612,8 +612,9 @@
                <h6 class="u-full-width">long press</h6>
                <ul>
                    <li>toggle on or off GPS power supply</li>
-                   <li>if the "FIXED_BEACON_EN" option is enabled in the configuration, a beacon will be sent every set time interval</li>
+                   <li>if the "FIXED_BEACON_EN" option is enabled in the configuration and GPS is switched off, a beacon will be sent every set time interval</li>
                    <li>while booting: reset to factory default</li>
+                   <li>Hack: If you set your Webserver off, and GPS is currently off, and you long-press the button, it switches on both, Webserver and GPS.</li>
                 </ul>
             </div>
         </article>
@@ -628,6 +629,7 @@
                Hack: firmware compiled with -e ttgo-lora32-v2.1 and bluetooth configuration variable is set to enabled, now listens on boot up to one minute for your bluetooth device to connect.<br/>
                If a bluetooth device connects, it does not start the Web-Server. Else, it closes SerialBT port and starts the Web-Server on LORA32_21 devices.<br>
                See also: new feature for switching WIFI off (i.e. if you use the device as portable tracker), if you don't need it: Webserver eats abt 80mA..<br>
+               How to switch the Webserver on again, please read the long-press button (GPS) section.
             </div>
         </article>
     </section>

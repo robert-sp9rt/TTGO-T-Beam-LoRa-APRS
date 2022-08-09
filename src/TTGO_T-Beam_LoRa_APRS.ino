@@ -620,7 +620,7 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, const Strin
   if (!lora_tx_enabled)
     return;
 #ifdef T_BEAM_V1_0
-   axp.setPowerOutPut(AXP192_LDO2, AXP202_ON);                           // LoRa
+   axp.setPowerOutPut(AXP192_LDO2, AXP202_ON);                           // switch LoRa chip on
 #endif
 
   int messageSize = min(message.length(), sizeof(lora_TXBUFF) - 1);
@@ -675,9 +675,10 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, const Strin
   if (lora_SPEED != lora_speed_rx_curr)
     lora_set_speed(lora_speed_rx_curr);
 #ifdef T_BEAM_V1_0
-  // (if lora_digipeating_mode == 0 or not lora_rx_enabled) and no bt client is connected
-  if ((!lora_digipeating_mode || !lora_rx_enabled) && !SerialBT.hasClient())
-    axp.setPowerOutPut(AXP192_LDO2, AXP202_OFF);                           // LoRa
+  // if lora_rx is disabled, but  ONLY if lora_digipeating_mode == 0 AND no SerialBT.hasClient is connected,
+  // we can savely go to sleep
+  if (! (lora_rx_enabled || lora_digipeating_mode > 0  || SerialBT.hasClient()) )
+    axp.setPowerOutPut(AXP192_LDO2, AXP202_OFF);                           // switch LoRa chip off
 #endif
 }
 
@@ -1421,10 +1422,10 @@ void setup(){
     if (!axp.begin(Wire, AXP192_SLAVE_ADDRESS)) {
     }
     axp.setLowTemp(0xFF);                                                 //SP6VWX Set low charging temperature
-    if (lora_digipeating_mode > 0 || lora_rx_enabled || SerialBT.hasClient())
-      axp.setPowerOutPut(AXP192_LDO2, AXP202_ON);                           // LoRa
+    if (lora_rx_enabled || lora_digipeating_mode > 0 || SerialBT.hasClient())
+      axp.setPowerOutPut(AXP192_LDO2, AXP202_ON);                            // switch LoRa chip on
     else
-      axp.setPowerOutPut(AXP192_LDO2, AXP202_OFF);                           // LoRa
+      axp.setPowerOutPut(AXP192_LDO2, AXP202_OFF);                           // switch LoRa chip off
     if (gps_state){
       axp.setPowerOutPut(AXP192_LDO3, AXP202_ON);                           // switch on GPS
     } else {
@@ -2279,32 +2280,13 @@ void loop() {
           enableOled(); // turn ON OLED temporary
         } else {
           if(gps_state == true && gps.location.isValid()){
-              writedisplaytext("((MAN TX))","","","","","");
+              writedisplaytext("((MAN TX))","SSID: " + infoApName,"IP: " + infoApAddr,"","","");
               sendpacket(0);
           }else{
-              writedisplaytext("((FIX TX))","","","","","");
+              writedisplaytext("((FIX TX))","SSID: " + infoApName,"IP: " + infoApAddr,"","","");
               sendpacket(1);
           }
         }
-        // hack: re-enable webserevr, if was set to off.
-#ifdef	ENABLE_WIFI
-        if (!webserverStarted) {
-	  enable_webserver = 1;
-#ifdef ENABLE_PREFERENCES
-	  preferences.putInt("PREF_WIFI_ENABLED", enable_webserver);
-#endif
-#if defined(LORA32_21) && defined(ENABLE_BLUETOOTH)
-	  // lora32_21 hardware bug: btt and wifi are mutual exclusive
-	  SerialBT.end();
-	  delay(100);
-#endif
-	  webServerCfg = {.callsign = Tcall};
-          xTaskCreate(taskWebServer, "taskWebServer", 12000, (void*)(&webServerCfg), 1, nullptr);
-          webserverStarted = true;
-          writedisplaytext("LoRa-APRS","","Init:","WiFi task started","   =:-)   ","");
-	  delay(1500);
-#endif
-	}
         key_up = true;
       }
     }
@@ -2359,6 +2341,8 @@ void loop() {
           preferences.putBool(PREF_APRS_GPS_EN, false);
         #endif
       }else{
+        // If (!webserverStarted):  start webserver and start GPS
+        // If (webserverStarted):   only start GPS
         gps_state = true;
         #ifdef T_BEAM_V1_0
           axp.setPowerOutPut(AXP192_LDO3, AXP202_ON);
@@ -2368,6 +2352,25 @@ void loop() {
         #ifdef ENABLE_PREFERENCES
           preferences.putBool(PREF_APRS_GPS_EN, true);
         #endif
+        // hack: re-enable webserver, if was set to off.
+#ifdef	ENABLE_WIFI
+        if (!webserverStarted) {
+          enable_webserver = 1;
+#ifdef ENABLE_PREFERENCES
+          preferences.putInt(PREF_WIFI_ENABLE, enable_webserver);
+#endif
+#if defined(LORA32_21) && defined(ENABLE_BLUETOOTH)
+          // lora32_21 hardware bug: btt and wifi are mutual exclusive
+          SerialBT.end();
+          delay(100);
+#endif
+          webServerCfg = {.callsign = Tcall};
+          xTaskCreate(taskWebServer, "taskWebServer", 12000, (void*)(&webServerCfg), 1, nullptr);
+          webserverStarted = true;
+          writedisplaytext("LoRa-APRS","","Init:","WiFi task started","   =:-)   ","");
+          delay(1500);
+        }
+#endif
       }
   }
   
@@ -2640,7 +2643,7 @@ out:
 	  user_demands_trace = 2;
 
 #if defined(ENABLE_WIFI)
-        if (aprsis_enabled && !our_packet && !blacklisted) {
+	if (aprsis_enabled && !our_packet && !blacklisted) {
 	  // No word "NOGATE" or "RFONLY" in header? -> may be sent to aprs-is
 	  q = strstr(received_frame, ",NOGATE");
 	  if (!q || q > header_end) {
