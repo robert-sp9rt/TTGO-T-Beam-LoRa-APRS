@@ -20,12 +20,12 @@
         <article>
             <form action="/save_wifi_cfg" method="post">
                 <div class="grid-container quarters">
-                    <div id="wifi_en">
+                    <div>
                         <label for="wifi_en">Enable Wifi</label>
                         <select id="wifi_en" name="wifi_en">
-                            <option value="1">1: Wifi may off if bluetooth client is connected in between 60s on boot (recommended for portables, and for LORA32_21 devices)</option>
+                            <option value="1">1: Wifi may be off if bluetooth client is connected in between 60s on boot (recommended, see below)</option>
                             <option value="2">2: Wifi on (during hardware limitaion, bluetooth will be disabled on LORA32_21 devices)</option>
-                            <option value="0">0: Wifi off (ideal for battery powered trackers - be aware, that aprs-is connection depends on the Webserver and will stop working). Hack: long-pressing the (GPS) button switches ON/OFF the GPS. When switching GPS ON, the webserver-config is also set to value 1</option>
+                            <option value="0">0: Wifi off (see below for hints and caveats)</option>
                         </select>
                     </div>
                 </div>
@@ -198,11 +198,11 @@
                     </div>
                     <div>
                         <label for="aprs_alt_r">Altitude ratio [%]</label>
-                        <input name="aprs_alt_r" id="aprs_alt_r" type="number" min="0" max="100" title="Altitude ratio every n'th packet.. Use 100 for every packet, 0 for no altitude, or any number in between. Recommended: 10 (altitude every tenth's frame). If you use compression for saving airtime, you may choose 50 for ballons, where speed/dir and altitude are of equal interrest; if you choose 10, then 90 % of your transmissions encode speed/direction." placeholder="10">
+                        <input name="aprs_alt_r" id="aprs_alt_r" type="number" min="0" max="100" title="Altitude ratio every n'th packet.. Use 100 for every packet, 0 for no altitude, or any number in between. Recommended: 10 (altitude every tenth's frame). If you use compression ('Send Course/Speed along with Altitude switched off') for reducing airtime (-> then n% altitude-encoding packets are sent, and 100-n% course/speed-encoded packets), you may choose 50 for ballons, where speed/dir and altitude are of equal interrest; if you choose 10, then 90 % of your transmissions encode speed/direction. Cave: if you set it to 100 and switch next option 'Send Course/Speed along with Altitude' to off, then only altitude packets are sent. If you configure 0, altitude is never sent (-> only compressed speed). If ratio is < 100 and gps altitude is not refreshed, only encoded speed is sent." placeholder="10">
                     </div>
                     <div>
-                        <label for="aprs_ALTinC">Show Altitude in compressed position</label>
-                        <input name="aprs_ALTinC" id="aprs_ALTinC" type="checkbox" value="1" title="Show altitude in compressed position format - safes airtime instead: of /A=...... in comment field. Speed/Course and Altiude are exclusive. If you need speed/course AND altitude on every transmission, set this off and configure altitude ratio to 100).">
+                        <label for="aprs_CSandA">Send Course/Speed along with Altitude</label>
+                        <input name="aprs_CSandA" id="aprs_CSandA" type="checkbox" value="1" title="If set to on, course/speed and altitude are always sent both in one (larger) packet. If gps signal for course/speed is valid, cse/spd will be encoded in the compressed part and altitude is added as /A=...... in the message-part. If set off, either compressed cse/spd OR compressed altitude packets are sent, according to the 'Altitude ratio' setting.">
                     </div>
                     <div>
                         <label for="show_cmt">Show Comment</label>
@@ -231,7 +231,7 @@
                     </div>
                     <div>
                         <label for="tnc_tel_int">Self Telemetry Interval [s]</label>
-                        <input name="tnc_tel_int" id="tnc_tel_int" type="number" min="600" title="time between sending telemetry if Enable Self Telemetry option is selected. 3600 is recommended.">
+                        <input name="tnc_tel_int" id="tnc_tel_int" type="number" min="600" title="time between sending telemetry if Enable Self Telemetry option is selected. 3600 is recommended. Min 600.">
                     </div>
                     <div>
                         <label for="tnc_tel_mic">Self Telemetry Sequence</label>
@@ -255,7 +255,7 @@
                     </div>
                     <div>
                         <label for="aprs_fb_interv">Fixed Beacon Interval [s]</label>
-                        <input name="aprs_fb_interv" id="aprs_fb_interv" type="number" min="120" title="time between sending a beacon if Fixed Beacon option is selected. 1800 or 3600 is recommended for users; 900 or 1800 for digis. This beacon value is also used if GPS is lost when smart-beacooning. If it is >= sb_max_intervall, this value is used.">
+                        <input name="aprs_fb_interv" id="aprs_fb_interv" type="number" min="120" title="time between sending a beacon if Fixed Beacon option is selected. 1800 or 3600 is recommended for users; 900 or 1800 for digis. Min 120. This beacon value is also used if GPS is lost when smart-beacooning. If it is >= sb_max_intervall, this value is used.">
                     </div>
                     <div>
                         <label for="aprs_lat_p">Latitude</label>
@@ -272,35 +272,35 @@
                 <div class="grid-container quarters">
                     <div>
                         <label for="sb_min_interv">Min interval [s]</label>
-                        <input name="sb_min_interv" id="sb_min_interv" type="number" min="10" title="Minimal time for Smart Beaconing. 60 is recommended">
+                        <input name="sb_min_interv" id="sb_min_interv" type="number" min="10" title="Minimal time for Smart Beaconing. 60 is recommended. Min 10.">
                     </div>
                     <div>
                         <label for="sb_max_interv">Max interval [s]</label>
-                        <input name="sb_max_interv" id="sb_max_interv" type="number" min="120" title="Maximal time for Smart Beaconing. 1800 is recommended">
+                        <input name="sb_max_interv" id="sb_max_interv" type="number" min="90" title="Maximal time for Smart Beaconing. 1800 is recommended. Min 90.">
                     </div>
                 </div>
                 <div class="grid-container quarters">
                     <div>
                         <label for="sb_min_speed">Min speed [km/h]</label>
-                        <input name="sb_min_speed" id="sb_min_speed" type="number" min="0" title="Minimal speed for Smart Beaconing">
+                        <input name="sb_min_speed" id="sb_min_speed" type="number" min="0" title="Minimal speed for Smart Beaconing. Min 0.">
                     </div>
                     <div>
                         <label for="sb_max_speed">Max speed [km/h]</label>
-                        <input name="sb_max_speed" id="sb_max_speed" type="number" min="1" title="Maximal speed for Smart Beaconing">
+                        <input name="sb_max_speed" id="sb_max_speed" type="number" min="1" title="Maximal speed for Smart Beaconing. Min 1.">
                     </div>
                 </div>
                 <div class="grid-container quarters">
                     <div>
                         <label for="sb_angle">Course change [degrees]</label>
-                        <input name="sb_angle" id="sb_angle" type="number" min="5" max="360" title="Angle of course change to speed up beacon transmission. Recommended value: 28">
+                        <input name="sb_angle" id="sb_angle" type="number" min="5" max="360" title="Angle of course change to speed up beacon transmission. Recommended value: 28. Range 0 to 360.">
                     </div>
                     <div>
                         <label for="sb_turn_slope">Turn Slope [degrees]</label>
-                        <input name="sb_turn_slope" id="sb_turn_slope" type="number" min="5" max="255" title="Smart beaconing turn slope. Use 7 for pedestrian, 11 for low/mid speed and 26 for high speed. Recommended value: 26">
+                        <input name="sb_turn_slope" id="sb_turn_slope" type="number" min="5" max="255" title="Smart beaconing turn slope. Use 7 for pedestrian, 11 for low/mid speed and 26 for high speed. Recommended value: 26. Range 5 to 255.">
                     </div>
                     <div>
                         <label for="sb_turn_time">Turn Time [seconds]</label>
-                        <input name="sb_turn_time" id="sb_turn_time" type="number" min="5", title="Smart beaconing turn time. Wait at least this amount of seconds for next beacon. Recommended value: 30">
+                        <input name="sb_turn_time" id="sb_turn_time" type="number" min="5", title="Smart beaconing turn time. Wait at least this amount of seconds for next beacon. Recommended value: 30. Min 5.">
                     </div>
                 </div>
                 <div class="grid-container quarters">
@@ -478,7 +478,7 @@
                 </div>
                 <div>
                     <label for="reboot_intrvl">Reboot every n hours</label>
-                    <input name="reboot_intrvl" id="reboot_intrvl" type="number" min="0" max="1193" title="Do a periodical reboot every n hous. 0 = disable. Max 1193" placeholder="0">
+                    <input name="reboot_intrvl" id="reboot_intrvl" type="number" min="0" max="1193" title="Do a periodical reboot every n hous. 0 = disable. Range 0 to 1193" placeholder="0">
                 </div>
                 <div>
                     <label for="shutdown_act">Auto power off</label>
@@ -486,18 +486,33 @@
                 </div>
                 <div>
                     <label for="shutdown_dt">Auto power off delay [s]</label>
-                    <input name="shutdown_dt" id="shutdown_dt" type="number" min="3" max="3600" title="auto shutdown delay in seconds">
+                    <input name="shutdown_dt" id="shutdown_dt" type="number" min="3" max="3600" title="auto shutdown delay in seconds. Range 3 to 3600.">
                 </div>
             </div>
             <div class="grid-container quarters">
                 <div>
                     <label for="sh_rxtime">Display show RX time [s]</label>
-                    <input name="sh_rxtime" id="sh_rxtime" type="number" min="0" max="45" title="show RX packet for seconds">
+                    <input name="sh_rxtime" id="sh_rxtime" type="number" min="0" max="45" title="show RX packet for seconds, refresh rate for OLED. Range 0 to 45.">
                 </div>
                 <div>
                     <label for="sh_oledtime">Display timeout [s]</label>
-                    <input name="sh_oledtime" id="sh_oledtime" type="number" min="0" max="60" title="Turn OFF OLED after X seconds. Set 0 to disable">
+                    <input name="sh_oledtime" id="sh_oledtime" type="number" min="0" max="60" title="Turn OFF OLED after X seconds. Set 0 to disable (constantly active OLED has a refresh rate of 1s. Range 0 to 60.">
                 </div>
+            </div>
+            <div class="grid-container quarters">
+                <div>
+                  <label for="curPos">Current Position</label>
+                  <input type="text" name="curPos" id="curPos" readonly title="Current Postition of device [P if preset; p, if gps is invalid and used as temporary preset]">
+                </div>
+                <div>
+                  <label for="UptimeMinutes">Uptime of Device [min]</label>
+                  <input type="text" name="UptimeMinutes" id="UptimeMinutes" readonly title="uptime device in minutes">
+                </div>
+                <div>
+                  <label for="OledLine5">Satellite & Batt Info</label>
+                  <input type="text" name="OledLine5" id="OledLine5" readonly title="Satellite (#Sats/HDOP) [more sats are good, lowest HDOP is best. Should be < 8], and Batt Info [B means Battery; P means external pwr. Positive current is battery-charge-current, while prefixed with 'B', and battery voltage shown.]">
+                </div>
+
             </div>
             <div class="grid-container full">
                 <div>
@@ -616,6 +631,25 @@
                    <li>while booting: reset to factory default</li>
                    <li>Hack: If you set your Webserver off, and GPS is currently off, and you long-press the button, it switches on both, Webserver and GPS.</li>
                 </ul>
+            </div>
+            <div class="grid-container full">
+              <h5 class="u-full-width">Tips for reducing power (Usage as tracker only):</h5>
+            </div>
+            <div>
+               WiFi OFF<br/>
+               <ul>
+                 <li>be aware, that aprs-is connection depends on the Webserver and will stop working). Hack: long-pressing the (GPS) button switches ON/OFF the GPS. When switching GPS ON, the webserver-config is also set to value 1</li>
+                 <li>select option 0 to disable WiFi & APRS-IS</li>
+                 <li>select option 1 to disable WiFi if a bluetooth client is connected in between 60s on boot (recommended for portables, and for LORA32_21 devices)</li>
+               </ul>
+               LoRa Receiver OFF:<br>
+               <ul>
+                    <li>reduces power consumption, if you just use the device as a tracker</li>
+               </ul>
+               Fixed Beacon off:<br>
+               <ul>
+                    <li>Smart Beaconing is activated, if there is no fixed beacon</li>
+               </ul>
             </div>
         </article>
         <article>

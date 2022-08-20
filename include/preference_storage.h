@@ -69,10 +69,11 @@ static const char *const PREF_APRS_COMMENT_RATELIMIT_PRESET = "aprs_comm_rt";
 static const char *const PREF_APRS_COMMENT_RATELIMIT_PRESET_INIT = "aprs_comm_rt_i";
 static const char *const PREF_APRS_SHOW_ALTITUDE = "aprs_alt";			/* obsoleted. may be removed later. Use alt ratio 0 .. 100*/
 static const char *const PREF_APRS_SHOW_ALTITUDE_INIT = "aprs_alt_init";	/* obsoleted. may be removed later. Use alt ratio 0 .. 100*/
-static const char *const PREF_APRS_SHOW_ALTITUDE_INSIDE_COMPRESSED_POSITION = "aprs_ALTinC";
-static const char *const PREF_APRS_SHOW_ALTITUDE_INSIDE_COMPRESSED_POSITION_INIT = "aprs_ALTinC_i";
 static const char *const PREF_APRS_ALTITUDE_RATIO = "aprs_alt_r";
 static const char *const PREF_APRS_ALTITUDE_RATIO_INIT = "aprs_alt_r_i";
+static const char *const PREF_APRS_ALWAYS_SEND_CSE_SPEED_AND_ALTITUDE = "aprs_CSandA";
+static const char *const PREF_APRS_ALWAYS_SEND_CSE_SPEED_AND_ALTITUDE_INIT = "aprs_CSandA_i";
+
 
 static const char *const PREF_APRS_SHOW_BATTERY = "aprs_batt";
 static const char *const PREF_APRS_SHOW_BATTERY_INIT = "aprs_batt_init";

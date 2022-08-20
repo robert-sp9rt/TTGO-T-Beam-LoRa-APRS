@@ -2,7 +2,7 @@
 #include "taskWebServer.h"
 #include "preference_storage.h"
 #include "syslog_log.h"
-#include "PSRAMJsonDocument.h"
+//#include "PSRAMJsonDocument.h"
 #include <time.h>
 #include <ArduinoJson.h>
 #include <esp_task_wdt.h>
@@ -21,8 +21,11 @@ extern const char web_js_js_end[] asm("_binary_data_embed_js_js_out_end");
 extern bool manBeacon;
 
 // Variable to show AP status
-extern bool apEnabled;
-extern bool apConnected;
+extern uint8_t WIFI_DISABLED;
+extern uint8_t WIFI_SEARCHING_FOR_AP;
+extern uint8_t WIFI_CONNECTED_TO_AP;
+extern const uint8_t WIFI_RUNNING_AS_AP;
+extern int8_t wifi_connection_status;
 extern String infoApName;
 extern String infoApPass;
 extern String infoApAddr;
@@ -46,6 +49,13 @@ extern String MY_APRS_DEST_IDENTIFYER;
 
 extern double lora_freq_rx_curr;
 extern boolean lora_tx_enabled;
+
+extern String aprsLatPreset;
+extern String aprsLonPreset;
+extern String aprsPresetShown;
+String curPos;
+// last line of display, Sat & Batt Info
+extern String OledLine5;
 
 extern char src_call_blacklist;
 
@@ -71,6 +81,13 @@ extern uint8_t txPower_cross_digi;
 extern ulong lora_speed_cross_digi;
 extern double lora_freq_cross_digi;
 extern void loraSend(byte, float, ulong, const String &);
+
+IPAddress IP_NULL(0,0,0,0);
+IPAddress IP_SUBNET_NULL(0,0,0,0);
+IPAddress IP_GATEWAY_NULL(0,0,0,0);
+
+
+uint8_t wifi_ssid_length = 0;
 
 WebServer server(80);
 #ifdef KISS_PROTOCOL
@@ -306,8 +323,8 @@ void handle_Cfg() {
   jsonData += jsonLineFromPreferenceBool(PREF_APRS_SHOW_BATTERY);
   jsonData += jsonLineFromPreferenceBool(PREF_APRS_FIXED_BEACON_PRESET);
   //jsonData += jsonLineFromPreferenceBool(PREF_APRS_SHOW_ALTITUDE);
-  jsonData += jsonLineFromPreferenceBool(PREF_APRS_SHOW_ALTITUDE_INSIDE_COMPRESSED_POSITION);
   jsonData += jsonLineFromPreferenceInt(PREF_APRS_ALTITUDE_RATIO);
+  jsonData += jsonLineFromPreferenceBool(PREF_APRS_ALWAYS_SEND_CSE_SPEED_AND_ALTITUDE);
   jsonData += jsonLineFromPreferenceBool(PREF_APRS_GPS_EN);
   jsonData += jsonLineFromPreferenceBool(PREF_ACCEPT_OWN_POSITION_REPORTS_VIA_KISS);
   jsonData += jsonLineFromPreferenceBool(PREF_GPS_ALLOW_SLEEP_WHILE_KISS);
@@ -339,7 +356,10 @@ void handle_Cfg() {
   jsonData += jsonLineFromInt("FreeSketchSpace", ESP.getFreeSketchSpace());
   jsonData += jsonLineFromInt("PSRAMSize", ESP.getPsramSize());
   jsonData += jsonLineFromInt("PSRAMFree", ESP.getFreePsram());
-  jsonData += jsonLineFromInt("UptimeMinutes", millis()/1000/60, true);
+  curPos = aprsLatPreset + " " + aprsLonPreset + " [" + (aprsPresetShown == "" ? "GPS" : aprsPresetShown) + "]";
+  jsonData += jsonLineFromString("curPos", curPos.c_str());
+  jsonData += jsonLineFromInt("UptimeMinutes", millis()/1000/60);
+  jsonData += jsonLineFromString("OledLine5", OledLine5.c_str(), true);
 
   jsonData += "}";
   server.send(200,"application/json", jsonData);
@@ -347,7 +367,7 @@ void handle_Cfg() {
 
 void handle_ReceivedList() {
   //PSRAMJsonDocument doc(MAX_RECEIVED_LIST_SIZE * 1000);
-  DynamicJsonDocument doc(MAX_RECEIVED_LIST_SIZE * 500);
+  DynamicJsonDocument doc(MAX_RECEIVED_LIST_SIZE * 1000);
   JsonObject root = doc.to<JsonObject>();
   auto received = root.createNestedArray("received");
   for (auto element: receivedPackets){
@@ -748,10 +768,10 @@ void handle_SaveAPRSCfg() {
   preferences.putBool(PREF_APRS_SHOW_BATTERY, server.hasArg(PREF_APRS_SHOW_BATTERY));
   preferences.putBool(PREF_ENABLE_TNC_SELF_TELEMETRY, server.hasArg(PREF_ENABLE_TNC_SELF_TELEMETRY));
   //preferences.putBool(PREF_APRS_SHOW_ALTITUDE, server.hasArg(PREF_APRS_SHOW_ALTITUDE));
-  preferences.putBool(PREF_APRS_SHOW_ALTITUDE_INSIDE_COMPRESSED_POSITION, server.hasArg(PREF_APRS_SHOW_ALTITUDE_INSIDE_COMPRESSED_POSITION));
   if (server.hasArg(PREF_APRS_ALTITUDE_RATIO)){
     preferences.putInt(PREF_APRS_ALTITUDE_RATIO, server.arg(PREF_APRS_ALTITUDE_RATIO).toInt());
   }
+  preferences.putBool(PREF_APRS_ALWAYS_SEND_CSE_SPEED_AND_ALTITUDE, server.hasArg(PREF_APRS_ALWAYS_SEND_CSE_SPEED_AND_ALTITUDE));
   preferences.putBool(PREF_APRS_FIXED_BEACON_PRESET, server.hasArg(PREF_APRS_FIXED_BEACON_PRESET));
   preferences.putBool(PREF_APRS_GPS_EN, server.hasArg(PREF_APRS_GPS_EN));
   preferences.putBool(PREF_ACCEPT_OWN_POSITION_REPORTS_VIA_KISS, server.hasArg(PREF_ACCEPT_OWN_POSITION_REPORTS_VIA_KISS));
@@ -790,6 +810,97 @@ void handle_saveDeviceCfg(){
   server.sendHeader("Location", "/");
   server.send(302,"text/html", "");
 }
+
+
+void restart_AP_or_STA(void) {
+
+  String wifi_password = preferences.getString(PREF_WIFI_PASSWORD, "");
+  String wifi_ssid = preferences.getString(PREF_WIFI_SSID, "");
+  apPassword = preferences.getString(PREF_AP_PASSWORD, "");
+  // 8 characters is requirements for WPA2
+  if (apPassword.length() < 8) {
+    apPassword = defApPassword;
+  }
+  wifi_ssid_length = wifi_ssid.length();
+  if (wifi_ssid_length == 0){
+    wifi_connection_status = WIFI_RUNNING_AS_AP;
+    WiFi.softAP(apSSID.c_str(), apPassword.c_str());
+    esp_wifi_set_max_tx_power(wifi_txpwr_mode_AP);
+  } else {
+    int retryWifi = 0;
+    WiFi.begin(wifi_ssid.c_str(), wifi_password.length() ? wifi_password.c_str() : nullptr);
+    Serial.println("Connecting to " + wifi_ssid);
+    // Set power:  minimum 8 (2dBm) (max 80 (20dBm))
+    // https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/network/esp_wifi.html
+    // Mapping Table {Power, max_tx_power} = {{8, 2}, {20, 5}, {28, 7}, {34, 8}, {44, 11}, {52, 13}, {56, 14}, {60, 15}, {66, 16}, {72, 18}, {80, 20}}.
+    // We'll use "min", "low", "mid", "high", "max" -> 2dBm (1.5mW) -> 8, 11dBm (12mW) -> 44, 15dBm (32mW) -> 60, 18dBm (63mW) ->72, 20dBm (100mW) ->80
+    esp_wifi_set_max_tx_power(wifi_txpwr_mode_STA);
+    wifi_connection_status = WIFI_SEARCHING_FOR_AP;
+    while (WiFi.status() != WL_CONNECTED) {
+      esp_task_wdt_reset();
+      Serial.print("Not connected: ");
+      Serial.println((int)WiFi.status());
+      Serial.print("Retry: ");
+      Serial.println(retryWifi);
+      vTaskDelay(500/portTICK_PERIOD_MS);
+      retryWifi += 1;
+      if (retryWifi > 60) {
+        WiFi.softAP(apSSID.c_str(), apPassword.c_str());
+        wifi_connection_status = WIFI_RUNNING_AS_AP;
+        Serial.println("Unable to connect to to wifi. Starting AP");
+        Serial.print("SSID: ");
+        Serial.print(apSSID.c_str());
+        Serial.print(" Password: ");
+        Serial.println(apPassword.c_str());
+        esp_wifi_set_max_tx_power(wifi_txpwr_mode_AP);
+        break;
+      }
+    }
+    esp_task_wdt_reset();
+
+    //Serial.print("WiFi Mode: ");
+    //Serial.println(WiFi.getMode());
+    if (WiFi.getMode() == 3){
+      Serial.println("Running AP. IP: " + WiFi.softAPIP().toString());
+      wifi_connection_status = WIFI_RUNNING_AS_AP;
+      infoApName = apSSID.c_str();
+      infoApPass = apSSID.c_str();
+      infoApAddr = WiFi.softAPIP().toString();
+    } else if (WiFi.getMode() == 1) {
+      // Save some battery
+      //WiFi.setSleep(true);
+      esp_wifi_set_ps(WIFI_PS_MAX_MODEM);
+      Serial.println("Connected. IP: " + WiFi.localIP().toString());
+      wifi_connection_status = WIFI_CONNECTED_TO_AP;
+      infoApName = wifi_ssid.c_str();
+      infoApPass = wifi_password.c_str();
+      infoApAddr = WiFi.localIP().toString();
+    } else {
+      Serial.println("WiFi Mode: " + WiFi.getMode());
+    }
+
+    String ntp_server = preferences.getString(PREF_NTP_SERVER, "");
+    if (ntp_server.isEmpty()) {
+      if (infoApAddr.startsWith("44."))
+        ntp_server = "ntp.hc.r1.ampr.org";
+      else
+        ntp_server = "pool.ntp.org";
+    }
+    configTime(0, 0, ntp_server.c_str());
+    #ifdef ENABLE_SYSLOG
+      struct tm timeinfo{};
+      if(!getLocalTime(&timeinfo)){
+        syslog_log(LOG_WARNING, "Failed to obtain time");
+      } else {
+        char buf[64];
+        strftime(buf, 64, "%A, %B %d %Y %H:%M:%S", &timeinfo);
+        syslog_log(LOG_INFO, String("Time: ") + String(buf));
+      }
+    #endif
+  }
+  esp_task_wdt_reset();
+}
+
 
 [[noreturn]] void taskWebServer(void *parameter) {
   auto *webServerCfg = (tWebServerCfg*)parameter;
@@ -842,92 +953,19 @@ void handle_saveDeviceCfg(){
   });
   server.onNotFound(handle_NotFound);
 
-  String wifi_password = preferences.getString(PREF_WIFI_PASSWORD, "");
-  String wifi_ssid = preferences.getString(PREF_WIFI_SSID, "");
-  apPassword = preferences.getString(PREF_AP_PASSWORD, "");
-  // 8 characters is requirements for WPA2
-  if (apPassword.length() < 8) {
-    apPassword = defApPassword;
-  }
-  if (!wifi_ssid.length()){
-    WiFi.softAP(apSSID.c_str(), apPassword.c_str());
-    esp_wifi_set_max_tx_power(wifi_txpwr_mode_AP);
-  } else {
-    int retryWifi = 0;
-    WiFi.begin(wifi_ssid.c_str(), wifi_password.length() ? wifi_password.c_str() : nullptr);
-    Serial.println("Connecting to " + wifi_ssid);
-    // Set power:  minimum 8 (2dBm) (max 80 (20dBm))
-    // https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/network/esp_wifi.html
-    // Mapping Table {Power, max_tx_power} = {{8, 2}, {20, 5}, {28, 7}, {34, 8}, {44, 11}, {52, 13}, {56, 14}, {60, 15}, {66, 16}, {72, 18}, {80, 20}}.
-    // We'll use "min", "low", "mid", "high", "max" -> 2dBm (1.5mW) -> 8, 11dBm (12mW) -> 44, 15dBm (32mW) -> 60, 18dBm (63mW) ->72, 20dBm (100mW) ->80
-    esp_wifi_set_max_tx_power(wifi_txpwr_mode_STA);
-    while (WiFi.status() != WL_CONNECTED) {
-      Serial.print("Not connected: ");
-      Serial.println((int)WiFi.status());
-      Serial.print("Retry: ");
-      Serial.println(retryWifi);
-      vTaskDelay(500/portTICK_PERIOD_MS);
-      retryWifi += 1;
-      if (retryWifi > 60) {
-        WiFi.softAP(apSSID.c_str(), apPassword.c_str());
-        //WiFi.softAP(apSSID.c_str(), "password");
-        Serial.println("Unable to connect to to wifi. Starting AP");
-        Serial.print("SSID: ");
-        Serial.print(apSSID.c_str());
-        Serial.print(" Password: ");
-        Serial.println(apPassword.c_str());
-        esp_wifi_set_max_tx_power(wifi_txpwr_mode_AP);
-        break;
-      }
-    }
 
-    //Serial.print("WiFi Mode: ");
-    //Serial.println(WiFi.getMode());
-    if (WiFi.getMode() == 3){
-      Serial.println("Running AP. IP: " + WiFi.softAPIP().toString());
-      apEnabled=true;
-      infoApName = apSSID.c_str();
-      infoApPass = apSSID.c_str();
-      infoApAddr = WiFi.softAPIP().toString();
-    } else if (WiFi.getMode() == 1) {
-      // Save some battery
-      //WiFi.setSleep(true);
-      esp_wifi_set_ps(WIFI_PS_MAX_MODEM);
-      Serial.println("Connected. IP: " + WiFi.localIP().toString());
-      apConnected=true;
-      infoApName = wifi_ssid.c_str();
-      infoApPass = wifi_password.c_str();
-      infoApAddr = WiFi.localIP().toString();
-    } else {
-      Serial.println("WiFi Mode: " + WiFi.getMode());
-    }
+  esp_task_wdt_init(120, true); //enable panic so ESP32 restarts
+  esp_task_wdt_add(NULL); //add current thread to WDT watch
 
-    #ifdef ENABLE_SYSLOG
-      syslog.server(SYSLOG_IP, 514);
-      syslog.deviceHostname(webServerCfg->callsign.c_str());
-      syslog.appName("TTGO");
-      syslog.defaultPriority(LOG_KERN);
-      syslog_log(LOG_INFO, "Connected. IP: " + WiFi.localIP().toString());
-    #endif
-    String ntp_server = preferences.getString(PREF_NTP_SERVER, "");
-    if (ntp_server.isEmpty()) {
-      if (infoApAddr.startsWith("44."))
-        ntp_server = "ntp.hc.r1.ampr.org";
-      else
-        ntp_server = "pool.ntp.org";
-    }
-    configTime(0, 0, ntp_server.c_str());
-    #ifdef ENABLE_SYSLOG
-      struct tm timeinfo{};
-      if(!getLocalTime(&timeinfo)){
-        syslog_log(LOG_WARNING, "Failed to obtain time");
-      } else {
-        char buf[64];
-        strftime(buf, 64, "%A, %B %d %Y %H:%M:%S", &timeinfo);
-        syslog_log(LOG_INFO, String("Time: ") + String(buf));
-      }
-    #endif
-  }
+  restart_AP_or_STA();
+ #ifdef ENABLE_SYSLOG
+   syslog.server(SYSLOG_IP, 514);
+   syslog.deviceHostname(webServerCfg->callsign.c_str());
+   syslog.appName("TTGO");
+   syslog.defaultPriority(LOG_KERN);
+   if (WiFi.getMode() == 1 && WiFi.status() == WL_CONNECTED)
+     syslog_log(LOG_INFO, "Connected. IP: " + WiFi.localIP().toString());
+ #endif
 
   server.begin();
   #ifdef KISS_PROTOCOL
@@ -945,8 +983,6 @@ void handle_saveDeviceCfg(){
   }
 
   webListReceivedQueue = xQueueCreate(4,sizeof(tReceivedPacketData *));
-
-
   tReceivedPacketData *receivedPacketData = nullptr;
 
   WiFiClient aprs_is_client;
@@ -980,27 +1016,36 @@ void handle_saveDeviceCfg(){
     }
   }
 
-  esp_task_wdt_init(120, true); //enable panic so ESP32 restarts
-  esp_task_wdt_add(NULL); //add current thread to WDT watch
+  uint32_t webserver_started = millis();
 
   while (true){
     esp_task_wdt_reset();
 
-    // Mode STA and connection lost? -> reconnect
-    if (WiFi.getMode() == 1 && WiFi.status() != WL_CONNECTED) {
+    // Mode STA and connection lost? -> reconnect. Or when dhcp renew failed?
+    if (WiFi.getMode() == 1 && (WiFi.status() != WL_CONNECTED || WiFi.localIP() == IP_NULL || WiFi.subnetMask() == IP_SUBNET_NULL || WiFi.gatewayIP() == IP_GATEWAY_NULL)) {
       static uint32_t last_connection_attempt = millis();
       if (millis() - last_connection_attempt > 20000L) {
+        wifi_connection_status = WIFI_SEARCHING_FOR_AP;
         WiFi.disconnect();
         esp_task_wdt_reset();
         WiFi.reconnect();
         esp_task_wdt_reset();
         last_connection_attempt = millis();
+ #ifdef ENABLE_SYSLOG
+        if (WiFi.getMode() == 1 && WiFi.status() == WL_CONNECTED)
+          syslog_log(LOG_INFO, "Connected. IP: " + WiFi.localIP().toString());
+ #endif
       }
       if (WiFi.status() != WL_CONNECTED) {
          // 500ms for reconnect should be enough, ant not too often (power consumption).. Or, if we did not try to reconnect, this value is also fine
          delay(500);
          continue;
       }
+    } else if (WiFi.getMode() == 3 && wifi_ssid_length > 0 && millis() - webserver_started > 5*60*1000L && WiFi.softAPgetStationNum() == 0) {
+      wifi_connection_status = WIFI_SEARCHING_FOR_AP;
+      restart_AP_or_STA();
+      webserver_started = millis();
+      continue;
     }
 
     server.handleClient();
@@ -1033,7 +1078,7 @@ void handle_saveDeviceCfg(){
           if (!aprs_is_client.connected()) { aprsis_status = "Error: connect failed"; goto on_err; }
           aprsis_status = "Connected. Waiting for greeting.";
           uint32_t t_start = millis();
-          while (!aprs_is_client.available() && (millis()-t_start) < 25000) delay(100);
+          while (!aprs_is_client.available() && (millis()-t_start) < 25000L) delay(100);
           if (aprs_is_client.available()) {
 	    // check 
 	    String s = aprs_is_client.readStringUntil('\n');
@@ -1044,7 +1089,7 @@ void handle_saveDeviceCfg(){
 	  sprintf(buffer, "user %s pass %s TTGO-T-Beam-LoRa-APRS 0.1%s%s\r\n", aprsis_callsign.c_str(), aprsis_password.c_str(), aprsis_filter.isEmpty() ? "" : " filter ", aprsis_filter.isEmpty() ? "" :  aprsis_filter.c_str());
           aprs_is_client.print(String(buffer));
           t_start = millis();
-          while (!aprs_is_client.available() && (millis()-t_start) < 25000) delay(100);
+          while (!aprs_is_client.available() && (millis()-t_start) < 25000L) delay(100);
           aprsis_status = "Logged in";
           if (aprs_is_client.available()) {
 	    // check 
@@ -1159,7 +1204,7 @@ on_err:
 	  if (!aprsis_status.startsWith("Error: "))
             aprsis_status = "Disconnected";
 	  if (t_connect_apprsis_again <=  millis())
-	    t_connect_apprsis_again = millis() + 60000;
+	    t_connect_apprsis_again = millis() + 60000L;
           to_aprsis_data = "";
         }
       }

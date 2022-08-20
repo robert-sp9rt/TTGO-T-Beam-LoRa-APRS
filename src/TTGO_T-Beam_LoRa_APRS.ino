@@ -133,13 +133,26 @@ String relay_path;
 String aprsComment = MY_COMMENT;
 String aprsLatPreset = LATITUDE_PRESET;
 String aprsLonPreset = LONGITUDE_PRESET;
-String LatShownP = aprsLonPreset;
-String LongShownP = aprsLonPreset;
+//String LatShownP = aprsLonPreset;
+//String LongShownP = aprsLonPreset;
+// "P" means original Preset, "u": Preset has been updated to the last valid position (DL3EL). "p" means, invalid gps, last known position used a temporary preset.
+String aprsPresetShown = "P";
+double lastTxdistance = 0;
+
 #if defined(T_BEAM_V1_0) || defined(T_BEAM_V0_7)
-boolean gps_state = true;
+  boolean gps_state = true;
 #else
-boolean gps_state = false;
+  boolean gps_state = false;
 #endif
+// as we now collect the gps_data at the beginning of loop(), also the speed ist from there, we should not query gps.speed.kmph directly later on
+// the same show be done with course and alti (later)
+// after successful data retrieval, gps_isValid becomes true (or turn false, if retrieval fails)
+// all by DL3EL
+boolean gps_isValid = false;
+int gps_speed_kmph = 0;
+int gps_speed_kmph_oled = 0;
+char gps_time_s[20];// Room for len(01:02:03 04.05.2022) + 1 /* \0 */  -> 20
+
 boolean key_up = true;
 boolean t_lock = false;
 boolean fixed_beacon_enabled = false;
@@ -156,18 +169,19 @@ String tel_path;
   boolean showAltitude = false;  /* obsolete. use altitude_ratio 0 .. 100 % */
   uint8_t altitude_ratio = 0; // Recommended 10%. May be 0 % speed (-> 100% altitude), 100 % speed (-> no altitude), or something in between
 #endif
-boolean showAltitudeInsideCompressedPosition = true;
+boolean always_send_cseSpd_AND_altitude = false;
 #ifdef SHOW_BATT
   boolean showBattery = true;
 #else
   boolean showBattery = false;
 #endif
 #ifdef ENABLE_TNC_SELF_TELEMETRY
-  boolean enable_tel = true;
+  //boolean enable_tel = true;
+  boolean enable_tel = false;
 #else
   boolean enable_tel = false;
 #endif
-  // Telemetry interval, seconds
+// Telemetry interval, seconds
 #ifdef TNC_SELF_TELEMETRY_INTERVAL
   int tel_interval = TNC_SELF_TELEMETRY_INTERVAL;
 #else
@@ -185,11 +199,11 @@ boolean showAltitudeInsideCompressedPosition = true;
 #endif
 #if defined(ENABLE_WIFI)
   uint8_t enable_webserver = 2;
-  boolean webserverStarted = 0;
+  boolean webserverStarted = false;
   boolean tncServer_enabled = false;
   boolean gpsServer_enabled = false;
-  // Mapping Table {Power, max_tx_power} = {{8, 2}, {20, 5}, {28, 7}, {34, 8}, {44, 11}, {52, 13}, {56, 14}, {60, 15}, {66, 16}, {72, 18}, {80,20}}.
-  // We'll use "min", "low", "mid", "high", "max" -> 2dBm (1.5mW) -> 8, 11dBm (12mW) -> 44, 15dBm (32mW) -> 60, 18dBm (63mW) ->72, 20dBm (100mW) ->80
+// Mapping Table {Power, max_tx_power} = {{8, 2}, {20, 5}, {28, 7}, {34, 8}, {44, 11}, {52, 13}, {56, 14}, {60, 15}, {66, 16}, {72, 18}, {80,20}}.
+// We'll use "min", "low", "mid", "high", "max" -> 2dBm (1.5mW) -> 8, 11dBm (12mW) -> 44, 15dBm (32mW) -> 60, 18dBm (63mW) ->72, 20dBm (100mW) ->80
   int8_t wifi_txpwr_mode_AP = 8;
   int8_t wifi_txpwr_mode_STA = 80;
 #endif
@@ -203,6 +217,16 @@ boolean showAltitudeInsideCompressedPosition = true;
 String loraReceivedFrameString = "";      //data on buff is copied to this string
 String Outputstring = "";
 String outString="";                      //The new Output String with GPS Conversion RAW
+
+//Oled Display (DL3EL)
+// to implement the blinking ticker, we have to save the content of the OLED. Also the preparation of output to OLED is done via these variables
+String OledHdr = "";
+String OledLine1 = "";
+String OledLine2 = "";
+String OledLine3 = "";
+String OledLine4 = "";
+String OledLine5 = "";
+String OledLine1s = "";;
 
 #if defined(ENABLE_TNC_SELF_TELEMETRY) && defined(KISS_PROTOCOL)
   time_t nextTelemetryFrame;
@@ -242,7 +266,7 @@ float InpVolts;
   float sb_angle = 30;                      // angle to send packet at smart beaconing
 #endif
 int sb_turn_slope = 26;			// kenwood example: 26 in mph. Yaesu suggests 26 in high speed car, 11 car in low/mid speed, 7 on walking;
-					// TS 7 if <= 20km/h, TS 11 if <= 50km/h, TS 26 else.
+						// TS 7 if <= 20km/h, TS 11 if <= 50km/h, TS 26 else.
 int sb_turn_time = 30;			// min. 30s between transmissions (kenwood example)
 
 float average_speed[5] = {0,0,0,0,0}, average_speed_final=0;
@@ -252,7 +276,7 @@ int point_avg_speed = 0, point_avg_course = 0;
 ulong nextTX=60000L;                  // preset time period between TX = 60000ms = 60secs = 1min
 
 ulong time_to_refresh = 0;
-ulong next_fixed_beacon = 0;
+ulong next_fixed_beacon = 75000L;    // first fixed beacon app. 125s after system start (DL3EL)
 ulong fix_beacon_interval = FIX_BEACON_INTERVAL;
 ulong showRXTime = SHOW_RX_TIME;
 ulong time_delay = 0;
@@ -275,8 +299,12 @@ ulong oled_timer;
 bool manBeacon = false;
 
 // Variable to show AP settings on OLED
-bool apEnabled = false;
-bool apConnected = false;
+int8_t WIFI_DISABLED = 0;
+int8_t WIFI_SEARCHING_FOR_AP = 1;
+int8_t WIFI_CONNECTED_TO_AP = 2;
+int8_t WIFI_RUNNING_AS_AP = 4;
+int8_t wifi_connection_status = WIFI_DISABLED;
+int8_t wifi_connection_status_prev = -1;
 String infoApName = "";
 String infoApPass = "";
 String infoApAddr = "";
@@ -286,23 +314,23 @@ float average_course[ANGLE_AVGS];
 float avg_c_y, avg_c_x;
 
 #ifdef RXDISABLE		// define RXDISABLE if you don't like to receive packets. Saves power consumption
-boolean lora_rx_enabled = false;
+  boolean lora_rx_enabled = false;
 #else
-boolean lora_rx_enabled = true;
+  boolean lora_rx_enabled = true;
 #endif
 
 #ifdef TXDISABLE		// define TXDISABLE if you like to ensure that we never TX (i.e. if we are behind an rx-amplifier)
-boolean lora_tx_enabled = false;
-uint8_t txPower = 0;
-uint8_t txPower_cross_digi = 0;
-#else
+  boolean lora_tx_enabled = false;
+  uint8_t txPower = 0;
+  uint8_t txPower_cross_digi = 0;
+  #else
 boolean lora_tx_enabled = true;
 #ifdef TXdbmW
-uint8_t txPower = TXdbmW;
-uint8_t txPower_cross_digi = TXdbmW;
-#else
-uint8_t txPower = 23;
-uint8_t txPower_cross_digi = 23;
+  uint8_t txPower = TXdbmW;
+  uint8_t txPower_cross_digi = TXdbmW;
+  #else
+  uint8_t txPower = 23;
+  uint8_t txPower_cross_digi = 23;
 #endif
 #endif
 
@@ -352,6 +380,10 @@ uint16_t lora_packets_received_in_timeslot_on_secondary_freq = 0;
 char lora_TXBUFF_for_digipeating[BG_RF95_MAX_MESSAGE_LEN+1] = "";		// buffer for digipeating
 time_t time_lora_TXBUFF_for_digipeating_was_filled = 0L;
 boolean sendpacket_was_called_twice = false;
+// bits for sendpacket()
+#define SP_POS_FIXED 1
+#define SP_POS_GPS   2
+#define SP_ENFORCE_COURSE 4
 uint32_t t_last_smart_beacon_sent = 0L;
 
 String MY_APRS_DEST_IDENTIFYER = "APLOX1";
@@ -380,7 +412,9 @@ char blacklist_calls[256] = "";
 #define OLED_RESET 16         // not used
 Adafruit_SSD1306 display(128, 64, &Wire, OLED_RESET);
 
+
 // + FUNCTIONS-----------------------------------------------------------+//
+
 
 char *ax25_base91enc(char *s, uint8_t n, uint32_t v){
   /* Creates a Base-91 representation of the value in v in the string */
@@ -393,7 +427,8 @@ char *ax25_base91enc(char *s, uint8_t n, uint32_t v){
   return(s);
 }
 
-void prepareAPRSFrame(boolean force_fixed){
+
+void prepareAPRSFrame(uint8_t sp_flags){
   outString = String(Tcall);
 
   outString += ">";
@@ -419,15 +454,15 @@ out_relay_path:
 
   if (
 #if defined(ENABLE_BLUETOOTH) && defined(KISS_PROTOCOL)
-       SerialBT.hasClient() ||
+      SerialBT.hasClient() ||
 #endif
-       ((time_last_own_text_message_via_kiss_received + 24*60*60*1000L) > millis())
+      ((time_last_own_text_message_via_kiss_received + 24*60*60*1000L) > millis())
      )
     outString += "=";
   else
     outString += "!";
 
-  if (!force_fixed && gps_state && gps.location.isValid()){
+  if (!(sp_flags & SP_POS_FIXED) && gps_state && gps_isValid) {
     uint32_t aprs_lat, aprs_lon;
     String helper;
     char helper_base91[] = {"0000\0"};
@@ -448,13 +483,42 @@ out_relay_path:
     aprs_lon = aprs_lon / 26 - aprs_lon / 2710 + aprs_lon / 15384615;
 
     // altitude_ratio: 0%, 10%, 25%, 50%, 75%, 90%, 100%
-    if (gps.altitude.isValid() && altitude_ratio > 0) {
+    // course change on turn has a higher priority
+    boolean altitude_isValid = (gps.altitude.isValid() && gps.altitude.age() < 10000);
+    boolean cseSpd_isValid = (gps.speed.isValid() && gps.speed.age() < 10000 && gps.course.isValid() && gps.course.age() < 10000);
+
+    if (altitude_isValid && altitude_ratio > 0) {
       if (altitude_ratio <= 50)
         time_to_add_alt = (cnt % (100 / altitude_ratio) == 0);
       else if (altitude_ratio < 100)
         time_to_add_alt = (cnt % (100 / (100-altitude_ratio)) != 0);
       else
         time_to_add_alt = true;
+    }
+
+    // Due to spec, /A...... in message text could be used with compressed and uncompressed positions.
+    // But if you encode altitude in compressed position: course/speed (i.e. 090/012) may not be added to message text
+    // -> if we need (or wish to have always) course/speed, compression is always for peed, and altitude is part of the message text
+
+    boolean may_send_alt_compressed = true;
+    if (always_send_cseSpd_AND_altitude || !altitude_ratio) {
+                                           // ^altitude ratio == 0 means 'never altitude'
+         // ^always_send_cseSpd_AND_altitude means, we have to go to the compressed-speed-section, regardle of the alt-ratio
+         // because altitude could be added to compressed speed, but not: speed to compressed altitude.
+         // We go there even for thes special case of altitude_ratio == 100.
+      may_send_alt_compressed = false;
+    } else if (!time_to_add_alt && altitude_ratio < 100) {
+                                 // ^altitude ratio == 100 means 'always altitude', except if always_send_cseSpd_AND_altitude is configured (checked 3 lines aboce)
+                // ^no time to add altitude -> set may_send_alt_compressed to false
+      may_send_alt_compressed = false;
+    } else {
+      if (altitude_ratio < 100) {
+        if (!cseSpd_isValid && !altitude_isValid)
+          may_send_alt_compressed = false;
+        else if (cseSpd_isValid && (sp_flags & SP_ENFORCE_COURSE))
+          may_send_alt_compressed = false;
+        // else: time_to_add_alt is true -> keep may_send_alt_compressed true
+      } // else: altitude ratio == 100 means 'always altitude'
     }
 
     outString += aprsSymbolTable;
@@ -469,22 +533,33 @@ out_relay_path:
     outString += aprsSymbol;
 
 
-    if (showAltitudeInsideCompressedPosition && time_to_add_alt) {
-      Talt = gps.altitude.feet();
-      if (Talt < 0) Talt = 0;
-      else if (Talt > 15270967) Talt = 15270967; /* 1.002** (90*91+90-1) */
-      ax25_base91enc(helper_base91, 2, (uint32_t) (log1p(Talt) / 0.001998));
-      								/* ^ math.log1p(1.002-1) */
-      outString += helper_base91[0];
-      outString += helper_base91[1];
+    if (may_send_alt_compressed) {
+
+      if (altitude_isValid) {
+        Talt = gps.altitude.feet();
+        if (Talt < 0) Talt = 0;
+        else if (Talt > 15270967) Talt = 15270967; /* 1.002** (90*91+90-1) */
+        ax25_base91enc(helper_base91, 2, (uint32_t) (log1p(Talt) / 0.001998));
+        /* ^ math.log1p(1.002-1) */
+        outString += helper_base91[0];
+        outString += helper_base91[1];
+      } else {
+        outString += "  ";
+      }
       outString += "X";
+
     } else {
-      ax25_base91enc(helper_base91, 1, (uint32_t) Tcourse / 4);
-      outString += helper_base91[0];
-      if (Tspeed > 1018) Tspeed = 1018; /* 1.08**90 */
-      ax25_base91enc(helper_base91, 1, (uint32_t) (log1p(Tspeed) / 0.07696));
-      								   /* ^ math.log1p(1.08-1) */
-      outString += helper_base91[0];
+
+      if (cseSpd_isValid) {
+        ax25_base91enc(helper_base91, 1, (uint32_t) Tcourse / 4);
+        outString += helper_base91[0];
+        if (Tspeed > 1018) Tspeed = 1018; /* 1.08**90 */
+        ax25_base91enc(helper_base91, 1, (uint32_t) (log1p(Tspeed) / 0.07696));
+        /* ^ math.log1p(1.08-1) */
+        outString += helper_base91[0];
+      } else {
+        outString += "  ";
+      }
       outString += "H";
 
       if (time_to_add_alt) {
@@ -529,7 +604,7 @@ out_relay_path:
     }
   }
 
-  if(showBattery){
+  if (showBattery && (BattVolts > 1.0 || InpVolts > 1.0)){
     outString += " Batt=";
     outString += String((BattVolts > 1.0 ? BattVolts : InpVolts), 2);
     outString += ("V");
@@ -587,7 +662,8 @@ void send_to_aprsis(String s)
 }
 #endif
 
-void sendpacket(boolean force_fixed){
+
+void sendpacket(uint8_t sp_flags){
   if (sendpacket_was_called_twice)
     return;
   #ifdef BUZZER
@@ -595,7 +671,7 @@ void sendpacket(boolean force_fixed){
     buzzer(melody, sizeof(melody)/sizeof(int));
   #endif
   batt_read();
-  prepareAPRSFrame(force_fixed);
+  prepareAPRSFrame(sp_flags);
   if (lora_tx_enabled && tx_own_beacon_from_this_device_or_fromKiss__to_frequencies) {
     if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies % 2)
       loraSend(txPower, lora_freq, lora_speed, outString);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
@@ -609,6 +685,7 @@ void sendpacket(boolean force_fixed){
   sendpacket_was_called_twice = true;
 }
 
+
 /**
  * Send message as APRS LoRa packet
  * @param lora_LTXPower
@@ -620,7 +697,7 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, const Strin
   if (!lora_tx_enabled)
     return;
 #ifdef T_BEAM_V1_0
-   axp.setPowerOutPut(AXP192_LDO2, AXP202_ON);                           // switch LoRa chip on
+  axp.setPowerOutPut(AXP192_LDO2, AXP202_ON);                           // switch LoRa chip on
 #endif
 
   int messageSize = min(message.length(), sizeof(lora_TXBUFF) - 1);
@@ -671,7 +748,7 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, const Strin
     // flush cache. just to be sure, so that no cross-digi-qrg packet comes in the input-buffer of the main qrg.
     // With no buffer / length called, recvAPRS directly calls clearRxBuf()
     rf95.recvAPRS(0, 0);
-  } 
+  }
   if (lora_SPEED != lora_speed_rx_curr)
     lora_set_speed(lora_speed_rx_curr);
 #ifdef T_BEAM_V1_0
@@ -682,17 +759,19 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, const Strin
 #endif
 }
 
+
 void batt_read(){
 #ifdef T_BEAM_V1_0
   BattVolts = axp.getBattVoltage()/1000;
   InpVolts = axp.getVbusVoltage()/1000;
 #elif T_BEAM_V0_7
-  BattVolts = (((float)analogRead(35) / 8192.0) * 2.0 * 3.3 * (1100.0 / 1000.0))+0.41;    // fixed thanks to Luca IU2FRL 
+  BattVolts = (((float)analogRead(35) / 8192.0) * 2.0 * 3.3 * (1100.0 / 1000.0))+0.41;    // fixed thanks to Luca IU2FRL
   //BattVolts = adc1_get_raw(ADC1_CHANNEL_7)/1000;
 #else
   BattVolts = analogRead(35)*7.221/4096;
 #endif
 }
+
 
 void writedisplaytext(String HeaderTxt, String Line1, String Line2, String Line3, String Line4, String Line5) {
   batt_read();
@@ -701,18 +780,18 @@ void writedisplaytext(String HeaderTxt, String Line1, String Line2, String Line3
     if (BattVolts < 3.5 && BattVolts > 3.3){
       #ifdef T_BEAM_V1_0
         # ifdef ENABLE_LED_SIGNALING
-        axp.setChgLEDMode(AXP20X_LED_BLINK_4HZ);
+          axp.setChgLEDMode(AXP20X_LED_BLINK_4HZ);
         #endif
       #endif
     } else if (BattVolts <= 3.3) {
       #ifdef T_BEAM_V1_0
         axp.setChgLEDMode(AXP20X_LED_OFF);
-        //axp.shutdown(); <-we need fix this 
+        //axp.shutdown(); <-we need fix this
         axp.shutdown();
       #endif
     }
   }
-  #endif
+#endif
   display.clearDisplay();
   display.setTextColor(WHITE);
   display.setTextSize(2);
@@ -731,48 +810,168 @@ void writedisplaytext(String HeaderTxt, String Line1, String Line2, String Line3
   display.println(Line5);
   if (!enabled_oled){                         // disable oled
     display.dim(true);
-  }   
+  }
   display.display();
-  time_to_refresh = millis() + showRXTime;
+  // if oled is continuosly on, refresh every second (DL3EL)
+  if (oled_timeout == 0) {
+    time_to_refresh = millis() + 1000;
+  } else {
+    time_to_refresh = millis() + showRXTime;
+  }
+  // save last display output for blinker
+  OledHdr = HeaderTxt;
+  OledLine1 = Line1;
+  OledLine2 = Line2;
+  OledLine3 = Line3;
+  OledLine4 = Line4;
+  OledLine5 = Line5;
 }
+
+
+void display_blinker() {
+  static uint32_t blinker_icon_time_next_toggle = 0L;
+  static boolean blinker_icon_on = false;   // toggles Tickers visibility
+
+  if (millis() < blinker_icon_time_next_toggle)
+    return;
+
+  //blinker_icon_time_next_toggle = millis() + 1000;
+  blinker_icon_time_next_toggle = millis() + (oled_timeout == 0 ? 1000 : showRXTime);
+  display.clearDisplay();
+  display.setTextColor(WHITE);
+  display.setTextSize(1);
+  display.setCursor(0,0);
+  if (blinker_icon_on) {
+    display.println(" ");
+    blinker_icon_on = false;
+  } else {
+    display.println(".");
+    blinker_icon_on = true;
+  }
+  // restore display
+  display.setTextSize(2);
+  display.setCursor(0,0);
+  display.println(OledHdr);
+  display.setTextSize(1);
+  display.setCursor(0,16);
+  display.println(OledLine1);
+  display.setCursor(0,26);
+  display.println(OledLine2);
+  display.setCursor(0,36);
+  display.println(OledLine3);
+  display.setCursor(0,46);
+  display.println(OledLine4);
+  display.setCursor(0,56);
+  display.println(OledLine5);
+  display.display();
+}
+
+
+String getSpeedCourseAlti() {
+  // muss noch umgebaut werden, so dass die Daten wie speed im loop() geholt werden (DL3EL)
+  // TODO: Web configurable output in speed km/h and height m; or speed mph and height ft, or speed kn (sm/h) and height ft
+  String sca = "";
+  String dalt = "";
+
+  if (gps_state == true && gps_isValid) {
+    int  dalt_int = max(-99999, min(999999, (int ) gps.altitude.meters()));
+    dalt = dalt + String(dalt_int) + "m ";
+    sca = String(gps_speed_kmph) + "km/h " + String(gps.course.deg(), 1) + "\xF7 " + dalt;
+  } else {
+    sca = "--km/h --\xF7 --m";
+  }
+  return sca;
+}
+
 
 String getSatAndBatInfo() {
   String line5;
-  if(gps_state == true){
-    if(InpVolts > 4){
-      line5 = "SAT: " + String(gps.satellites.value()) + "  BAT: " + String(BattVolts, 1) + "V*";
-    }else{
-      line5 = "SAT: " + String(gps.satellites.value()) + "  BAT: " + String(BattVolts, 2) + "V";
+
+  if (gps_state == true)
+    line5 = "S:" + String(gps.satellites.value()) + "/" + int(gps.hdop.hdop());
+  else
+    line5 = "S:-/-";
+#ifdef T_BEAM_V1_0
+  int b_out_c = (int ) axp.getBattDischargeCurrent();
+  int b_in_c = (int ) axp.getBattChargeCurrent();
+  if (b_out_c == 0 && b_in_c == 0) {
+    line5 = line5 + " P:" + String(InpVolts, 2) + "V";
+  } else {
+#else
+    {
+#endif
+      line5 = line5 + " B:" + String(BattVolts, 2) + "V";
     }
-  }else{
-    if(InpVolts > 4){
-      line5 = "SAT: X  BAT: " + String(BattVolts, 1) + "V*";
-    }else{
-      line5 = "SAT: X  BAT: " + String(BattVolts, 2) + "V";
+#ifdef T_BEAM_V1_0
+    String charge = "";
+
+    if (b_out_c > 0) {
+      charge = "-" + String(b_out_c);
+    } else {
+      if (b_in_c > 0) {
+        charge = String(b_in_c);
+    } else {
+        charge = "-" + String((int ) axp.getVbusCurrent());
+      }
     }
-    
-  }
-  #if defined(ENABLE_BLUETOOTH) && defined(KISS_PROTOCOL)
-    if (SerialBT.hasClient()){
-      line5 += "BT";
+    line5 = line5 + "/" + charge + "mA";
+#endif
+#if defined(ENABLE_BLUETOOTH) && defined(KISS_PROTOCOL)
+    if (SerialBT.hasClient()) {
+      line5 += " BT";
     }
-  #endif
-  return line5;
+#endif
+    return line5;
 }
+
+void fillDisplayLine1() {
+  // OledLine1_time = gps_time_s;
+  if (dont_send_own_position_packets || !lora_tx_enabled) {
+    OledLine1s = " never TX";
+  } else {
+    if (fixed_beacon_enabled) {
+      OledLine1s = " FB:" +String((next_fixed_beacon-millis()) / 1000) + "s";
+    } else {
+      OledLine1s = " SB:" + String(((lastTX+nextTX)-millis())/1000) + "s";
+      // next line will be used when debugging gps-output for smoothening km/h in oled
+      //OledLine1s = OledLine1 + String(((lastTX+nextTX)-millis())/1000)+"s "+ String(lastTxdistance);
+    }
+  }
+  OledLine1 = gps_time_s + OledLine1s;
+}
+
+void fillDisplayLines3to5() {
+  static uint32_t ratelimit_until = 0L;
+
+  if (millis() < ratelimit_until)
+    return;
+  ratelimit_until = millis() + (oled_timeout == 0 ? 1000 : showRXTime);
+  OledLine3 = aprsLatPreset + " " + aprsLonPreset + " " + aprsPresetShown;
+  OledLine4 = getSpeedCourseAlti();
+  OledLine5 = getSatAndBatInfo();
+}
+
 
 void displayInvalidGPS() {
   char *nextTxInfo;
+  uint32_t gpsage;
+  String gpsage_p = "";
   if (!gps_state){
     nextTxInfo = (char*)"(TX) GPS DISABLED";
   } else {
     nextTxInfo = (char*)"(TX) at valid GPS";
   }
-  if (t_last_smart_beacon_sent) {
-    writedisplaytext(" " + Tcall, nextTxInfo, "LAT: nv " + aprsLatPreset, "LON: nv " + aprsLonPreset, "SPD: ---  CRS: ---", getSatAndBatInfo());
-  } else {
-    writedisplaytext(" " + Tcall, nextTxInfo, "LAT: not valid", "LON: not valid", "SPD: ---  CRS: ---", getSatAndBatInfo());
-  }
+  fillDisplayLines3to5();
+  // show GPS age (only if last retrieval was invalid)
+  gpsage = gps.location.age()/1000;
+  gpsage_p = String(gpsage) + "s" ;
+  gpsage_p = (gpsage > 60)? String(gpsage/60) + "m" : gpsage_p;
+  gpsage_p = (gpsage > 3600)? String(gpsage/3600) + "h" : gpsage_p;
+  gpsage_p = (gpsage > 86400)? String(gpsage/86400) + "d" : gpsage_p;
+  gpsage_p = (gpsage > 4000000)? "never recvd" : gpsage_p;
+  writedisplaytext(" " + Tcall, nextTxInfo, "GPS age: " + gpsage_p, OledLine3, OledLine4, OledLine5);
 }
+
 
 #if defined(KISS_PROTOCOL)
 /**
@@ -864,7 +1063,8 @@ String prepareCallsign(const String& callsign){
         String telemetryParamsNames = String(":") + Tcall_message + ":PARM.B Volt,B In,B Out,AC V,AC C";
         String telemetryUnitNames = String(":") + Tcall_message + ":UNIT.mV,mA,mA,mV,mA";
         String telemetryEquations = String(":") + Tcall_message + ":EQNS.0,5.1,3000,0,10,0,0,10,0,0,28,3000,0,10,0";
-        String telemetryData = String("T#") + tel_sequence_str + "," + String(b_volt) + "," + String(b_in_c) + "," + String(b_out_c) + "," + String(ac_volt) + "," + String(ac_c) + ",00000000";
+        //String telemetryData = String("T#") + tel_sequence_str + "," + String(b_volt) + "," + String(b_in_c) + "," + String(b_out_c) + "," + String(ac_volt) + "," + String(ac_c) + ",00000000";
+        String telemetryData = String("T#") + tel_sequence_str + "," + String(b_volt) + "," + String(b_in_c) + "," + String(b_out_c) + "," + String(ac_volt) + "," + String(ac_c);
         String telemetryBase = "";
         telemetryBase += Tcall + ">" + MY_APRS_DEST_IDENTIFYER + tel_path_str + ":";
         Serial.print(telemetryBase);
@@ -889,7 +1089,7 @@ String prepareCallsign(const String& callsign){
         }
         preferences.putUInt(PREF_TNC_SELF_TELEMETRY_SEQ, tel_sequence);
       #endif
-    }  
+    }
   }
 #endif
 
@@ -926,7 +1126,7 @@ void setup(){
   #endif
 
 // This section loads values from saved preferences,
-// if available. 
+// if available.
 // https://randomnerdtutorials.com/esp32-save-data-permanently-preferences/
 
   #ifdef ENABLE_PREFERENCES
@@ -1097,18 +1297,19 @@ void setup(){
       preferences.putBool(PREF_APRS_SHOW_ALTITUDE, showAltitude);
     }
     showAltitude = preferences.getBool(PREF_APRS_SHOW_ALTITUDE);
-    if (!preferences.getBool(PREF_APRS_SHOW_ALTITUDE_INSIDE_COMPRESSED_POSITION_INIT)){
-      preferences.putBool(PREF_APRS_SHOW_ALTITUDE_INSIDE_COMPRESSED_POSITION_INIT, true);
-      preferences.putBool(PREF_APRS_SHOW_ALTITUDE_INSIDE_COMPRESSED_POSITION, showAltitudeInsideCompressedPosition);
-    }
-    showAltitudeInsideCompressedPosition = preferences.getBool(PREF_APRS_SHOW_ALTITUDE_INSIDE_COMPRESSED_POSITION);
+
     if (!preferences.getBool(PREF_APRS_ALTITUDE_RATIO_INIT)){
       preferences.putBool(PREF_APRS_ALTITUDE_RATIO_INIT, true);
       // preferences.putInt(PREF_APRS_ALTITUDE_RATIO, altitude_ratio); // until SHOW_ALTITUDE is obsolete, commented out
       preferences.putInt(PREF_APRS_ALTITUDE_RATIO, showAltitude ? 100 : 0);
     }
     altitude_ratio = preferences.getInt(PREF_APRS_ALTITUDE_RATIO);
-    
+
+    if (!preferences.getBool(PREF_APRS_ALWAYS_SEND_CSE_SPEED_AND_ALTITUDE_INIT)){
+      preferences.putBool(PREF_APRS_ALWAYS_SEND_CSE_SPEED_AND_ALTITUDE_INIT, true);
+      preferences.putBool(PREF_APRS_ALWAYS_SEND_CSE_SPEED_AND_ALTITUDE, always_send_cseSpd_AND_altitude);
+    }
+    always_send_cseSpd_AND_altitude = preferences.getBool(PREF_APRS_ALWAYS_SEND_CSE_SPEED_AND_ALTITUDE);
 
     if (!preferences.getBool(PREF_APRS_GPS_EN_INIT)){
       preferences.putBool(PREF_APRS_GPS_EN_INIT, true);
@@ -1170,14 +1371,14 @@ void setup(){
       preferences.putString(PREF_APRS_LATITUDE_PRESET, LATITUDE_PRESET);
     }
     aprsLatPreset = preferences.getString(PREF_APRS_LATITUDE_PRESET, "");
-    LatShownP = aprsLonPreset;
+    //LatShownP = aprsLonPreset;
 
     if (!preferences.getBool(PREF_APRS_LONGITUDE_PRESET_INIT)){
       preferences.putBool(PREF_APRS_LONGITUDE_PRESET_INIT, true);
       preferences.putString(PREF_APRS_LONGITUDE_PRESET, LONGITUDE_PRESET);
     }
     aprsLonPreset = preferences.getString(PREF_APRS_LONGITUDE_PRESET, "");
-    LongShownP = aprsLonPreset;
+    //LongShownP = aprsLonPreset;
 
     if (!preferences.getBool(PREF_APRS_SENDER_BLACKLIST_INIT)){
       preferences.putBool(PREF_APRS_SENDER_BLACKLIST_INIT, true);
@@ -1316,7 +1517,7 @@ void setup(){
       preferences.putBool(PREF_DEV_CPU_FREQ_INIT, true);
       preferences.putInt(PREF_DEV_CPU_FREQ, adjust_cpuFreq_to);
     }
-    adjust_cpuFreq_to = preferences.getInt(PREF_DEV_CPU_FREQ); 
+    adjust_cpuFreq_to = preferences.getInt(PREF_DEV_CPU_FREQ);
 
 
 // APRSIS settings
@@ -1415,7 +1616,7 @@ void setup(){
     pinMode(BUTTON, INPUT_PULLUP);
   #endif
   digitalWrite(TXLED, LOW);                                               // turn blue LED off
-  
+
   Wire.begin(I2C_SDA, I2C_SCL);
 
   #ifdef T_BEAM_V1_0
@@ -1439,7 +1640,7 @@ void setup(){
     axp.adc1Enable(0xfe, true);
     axp.adc2Enable(0x80, true);
     axp.setChgLEDMode(AXP20X_LED_OFF);
-    axp.setPowerOutPut(AXP192_DCDC1, AXP202_ON);                          // oled do not turn off     
+    axp.setPowerOutPut(AXP192_DCDC1, AXP202_ON);                          // oled do not turn off
   #endif
   // can reduce cpu power consumtion up to 20 %
   if (adjust_cpuFreq_to > 0)
@@ -1503,12 +1704,12 @@ void setup(){
   #endif
   batt_read();
   writedisplaytext("LoRa-APRS","","Init:","ADC OK!","BAT: "+String(BattVolts,2),"");
-  
+
   // if we are fill-in or wide2 digi, we listen only on configured main frequency
   lora_speed_rx_curr = (rx_on_frequencies  != 2 || lora_digipeating_mode > 1) ? lora_speed : lora_speed_cross_digi;
   lora_set_speed(lora_speed_rx_curr);
   Serial.printf("LoRa Speed:\t%lu\n", lora_speed_rx_curr);
-  
+
   lora_freq_rx_curr = (rx_on_frequencies  != 2 || lora_digipeating_mode > 1) ? lora_freq : lora_freq_cross_digi;
   rf95.setFrequency(lora_freq_rx_curr);
   Serial.printf("LoRa FREQ:\t%f\n", lora_freq_rx_curr);
@@ -1603,6 +1804,8 @@ void setup(){
 
   esp_task_wdt_init(120, true); //enable panic so ESP32 restarts
   esp_task_wdt_add(NULL); //add current thread to WDT watch
+
+  lastTxdistance  = 0;
 }
 
 void enableOled() {
@@ -1743,7 +1946,7 @@ int is_call_blacklisted(const char *frame_start) {
       p = q;
     }
   }
-  
+
   return 0;
 }
 
@@ -1813,7 +2016,7 @@ char *encode_snr_rssi_in_path()
     (snr >= 0 ? snr : -snr) % 10,
     (-rssi / 10) + (rssi > -100 ? '0' : 'A'),
     (-rssi) % 10);
- 
+
   return buf;
 }
 
@@ -2010,7 +2213,7 @@ void handle_lora_frame_for_lora_digipeating(const char *received_frame, const ch
   // wide1-digi case
   if (lora_digipeating_mode == 2) {
     const char *p = strchr(received_frame, '>');
-    const char *q = strchr(received_frame, ','); // digis, optional 
+    const char *q = strchr(received_frame, ','); // digis, optional
     const char *r = strchr(received_frame, '*');
     const char *header_end = strchr(received_frame, ':');
     // we hear an packet, digipeated from another digipeater (same source call, digipeated flag '*' in header)
@@ -2262,12 +2465,15 @@ String create_long_aprs(const char *delimiter, RawDegrees lng) {
 void loop() {
 
   esp_task_wdt_reset();
- 
+
   if (reboot_interval && millis() > reboot_interval) {
     ESP.restart();
   }
 
   sendpacket_was_called_twice = false;
+
+  // Ticker blinks upper left corner to indicate system is running
+  display_blinker();
 
   if(digitalRead(BUTTON)==LOW && key_up == true){
     key_up = false;
@@ -2279,68 +2485,200 @@ void loop() {
         if (!tempOled && enabled_oled) {
           enableOled(); // turn ON OLED temporary
         } else {
-          if(gps_state == true && gps.location.isValid()){
-              writedisplaytext("((MAN TX))","SSID: " + infoApName,"IP: " + infoApAddr,"","","");
-              sendpacket(0);
-          }else{
-              writedisplaytext("((FIX TX))","SSID: " + infoApName,"IP: " + infoApAddr,"","","");
-              sendpacket(1);
+          fillDisplayLines3to5();
+          if (gps_state == true && gps_isValid) {
+#ifdef ENABLE_WIFI
+            writedisplaytext("((MAN TX))","SSID: " + infoApName,"IP: " + infoApAddr, OledLine3, OledLine4, OledLine5);
+#else
+            writedisplaytext("((MAN TX))","","","","","");
+#endif
+            sendpacket(SP_POS_GPS);
+          } else {
+#ifdef ENABLE_WIFI
+            writedisplaytext("((FIX TX))","SSID: " + infoApName,"IP: " + infoApAddr, OledLine3, OledLine4, OledLine5);
+#else
+            writedisplaytext("((FIX TX))","","","","","");
+#endif
+            sendpacket(SP_POS_FIXED);
           }
+          // reset timer for automatic fixed beacon after manual beacon
+          next_fixed_beacon = millis() + fix_beacon_interval;
         }
         key_up = true;
       }
     }
   }
 
-  // Show informations on WiFi Status
-  if (apConnected) {
-    enableOled(); // turn ON OLED temporary
-    writedisplaytext(" ((WiFi))","WiFi Client Mode","SSID: " + infoApName, "Pass: ********", "IP: " + infoApAddr, getSatAndBatInfo());
-    apConnected=false;
-  } else if (apEnabled) {
-    enableOled(); // turn ON OLED temporary
-    writedisplaytext(" ((WiFi))","WiFi AP Mode","SSID: " + infoApName, "Pass: " + infoApPass, "IP: " + infoApAddr, getSatAndBatInfo());
-    apEnabled=false;
+  if (gps.time.isValid() && gps.time.age() < 500) {
+    if (gps.time.isUpdated()) {
+      static int8_t t_hour_adjust_next = -1;
+      // Time to adjust time?
+      if (t_hour_adjust_next == -1 || t_hour_adjust_next == gps.time.hour()) {
+        struct tm t;
+        time_t t_of_day;
+        t.tm_year = gps.date.year()-1900;
+        t.tm_mon = gps.date.month()-1;	// Month, 0 - jan
+        t.tm_mday = gps.date.day();	// Day of the month
+        t.tm_hour = gps.time.hour();
+        t.tm_min =  gps.time.minute();
+        t.tm_sec = gps.time.second();
+        t_of_day = mktime(&t);
+        int epoch_time = t_of_day;
+        timeval epoch = {epoch_time, 0};
+        const timeval *tv = &epoch;
+        settimeofday(tv, NULL);
+        t_hour_adjust_next = (t.tm_hour + 1) % 24;
+        // full date & time, currently only time is implemented
+        // sprintf(gps_time_s,"%02d:%02d:%02d %02d.%02d.%04d",gps.time.hour(),gps.time.minute(),gps.time.second(),gps.date.day(),gps.date.month(),gps.date.year());
+        sprintf(gps_time_s, "%02d:%02d:%02d", t.tm_hour, t.tm_min, t.tm_sec);
+      }
+    }
   }
+
+  // LatShownP  = gg-mm.dd[N|S]
+  // aprsLatPreset = ggmm.dd[N|S]
+  boolean gps_isValid_oldState = gps_isValid;
+  gps_isValid = false;
+  if (gps_state && gps.hdop.hdop() < 8) {
+    if (gps.speed.isValid() && gps.speed.age() < 10000) {
+      if (gps.speed.isUpdated())
+        gps_speed_kmph = gps.speed.kmph();
+    } // else: assume we still move with last speed
+    }
+    if (gps.location.isValid() && gps.location.age() < 10000) {
+
+      gps_isValid = true;
+
+      if (gps.location.isUpdated()) {
+        static uint32_t ratelimit_until = 0L;
+
+        // to smoothen the speed, the distance between pos is calculated on gps retrieval. (DL3EL)
+        //LatShownP = create_lat_aprs("-", gps.location.rawLat());
+        //LongShownP = create_long_aprs("-", gps.location.rawLng());
+        // save last valid position as new fixed location
+
+        // aprs resolution is 1sm/100 = 1852m/100 = 18.52m
+        // Updating this every 200ms is enough for getting this resolution at speed of 18.52*3.6*5 = 333.36km/h.
+        // aprsLatPreset and aprsLonPreset are used for displaying. The transmission uses the true value.
+        if (millis() >  ratelimit_until) {
+          aprsLatPreset = create_lat_aprs("", gps.location.rawLat());
+          aprsLonPreset = create_long_aprs("", gps.location.rawLng());
+          aprsPresetShown = "";
+          ratelimit_until = millis() + 200;
+         }
+      }
+
+#ifdef notdef
+      static uint32_t lastTxdistance_millis = 0;
+      // code has no function, as currently gps_speed_kmph_oled is not used in getSpeedCourseAlti
+      if ((millis()-lastTxdistance_millis) > 1000) {
+        static double lastTxLat       = 0.0;
+        static double lastTxLng       = 0.0;
+        double currLat = gps.location.lat();
+        double currLng = gps.location.lng();
+        double dist = TinyGPSPlus::distanceBetween(currLat, currLng, lastTxLat, lastTxLng);
+        // test code to smoothen km/h in oled, does not work, because of weird data from gps. Has to be looked at
+        // get GPS Data, if valid and mark accordingly
+        if (dist > 15 || (millis()-lastTxdistance_millis) > 3*60*10000) {
+          lastTxLat = currLat;
+          lastTxLng = currLng;
+          gps_speed_kmph_oled = gps_speed_kmph;
+          lastTxdistance_millis = millis();
+        } else {
+          gps_speed_kmph_oled = 0;
+        }
+      }
+#endif
+  }
+  if (gps_isValid != gps_isValid_oldState) {
+    // String functions are cpu consuming. We adust string aprsPresetShown only if we changed status.
+    if (!gps_isValid) {
+      // update to the old values
+      gps_speed_kmph = gps.speed.kmph();
+      aprsLatPreset = create_lat_aprs("", gps.location.rawLat());
+      aprsLonPreset = create_long_aprs("", gps.location.rawLng());
+      aprsPresetShown = "p";
+    } else {
+      aprsPresetShown = "";
+    }
+  } else if (!gps_isValid) {
+    // isValid change of previous run, and still invalid
+    gps_speed_kmph = 0;
+    gps_speed_kmph_oled = 0;
+  }
+
+
+#ifdef	ENABLE_WIFI
+  // Show informations on WiFi Status, only once after state change
+  if (wifi_connection_status_prev != wifi_connection_status) {
+    enableOled(); // turn ON OLED temporary
+    if (wifi_connection_status == WIFI_CONNECTED_TO_AP) {
+      writedisplaytext(" ((WiFi))","WiFi Client Mode","SSID: " + infoApName, "Pass: ********", "IP: " + infoApAddr, getSatAndBatInfo());
+    } else if (wifi_connection_status == WIFI_SEARCHING_FOR_AP) {
+      writedisplaytext(" ((WiFi))","WiFi Client Mode","SSID: " + infoApName, "Not in sight!", "IP: none", getSatAndBatInfo());
+    } else if (wifi_connection_status == WIFI_RUNNING_AS_AP) {
+      writedisplaytext(" ((WiFi))","WiFi AP Mode","SSID: " + infoApName, "Pass: " + infoApPass, "IP: " + infoApAddr, getSatAndBatInfo());
+    } else {
+      writedisplaytext(" ((WiFi))","WiFi off","SSID: " + infoApName, "Pass: " + infoApPass, "IP: " + infoApAddr, getSatAndBatInfo());
+    }
+    wifi_connection_status_prev = wifi_connection_status;
+  }
+#endif
 
   if (manBeacon) {
     // Manually sending beacon from html page
     enableOled();
+    fillDisplayLines3to5();
+#ifdef	ENABLE_WIFI
+    writedisplaytext("((WEB TX))","SSID: " + infoApName,"IP: " + infoApAddr, OledLine3, OledLine4, OledLine5);
+#else
     writedisplaytext("((WEB TX))","","","","","");
-    sendpacket(0);
+#endif
+    sendpacket(SP_POS_GPS);
     manBeacon=false;
   }
   // Only wake up OLED when necessary, note that DIM is to turn OFF the backlight
   if (enabled_oled) {
-    if (oled_timeout>0) {
+    if (oled_timeout > 0) {
       display.dim(!tempOled);
     } else {
       // If timeout is 0 keep OLED awake
       display.dim(false);
     }
-  } 
+  }
 
-  if (tempOled && millis()>= oled_timer) {
+  if (tempOled && oled_timeout > 0 && millis() >= oled_timer) {
     tempOled = false; // After some time reset backlight
   }
 
-  if(digitalRead(BUTTON)==LOW && key_up == false && millis() >= time_delay && t_lock == false){
+  if (digitalRead(BUTTON)==LOW && key_up == false && millis() >= time_delay && t_lock == false) {
     // enable OLED
     enableOled();
     //---------------
     t_lock = true;
-      if(gps_state){
+    if (gps_state){
         gps_state = false;
         #ifdef T_BEAM_V1_0
           axp.setPowerOutPut(AXP192_LDO3, AXP202_OFF);                 // GPS OFF
         #endif
-        writedisplaytext("((GPSOFF))","","","","","");
+#ifdef	ENABLE_WIFI
+        OledLine2 = "Wifi: ";
+        if (wifi_connection_status == WIFI_RUNNING_AS_AP) {
+          OledLine2 = (enable_webserver)? OledLine2 + "AP" : OledLine2 + "dis";
+        } else if (wifi_connection_status == WIFI_SEARCHING_FOR_AP) {
+          OledLine2 = (enable_webserver)? OledLine2 + "cli" : OledLine2 + "dis";
+        } else {
+          OledLine2 = (enable_webserver)? OledLine2 + "CLI" : OledLine2 + "dis";
+        }
+        OledLine2 = (webserverStarted)? OledLine2 + " & run" : OledLine2 + " & stopped";
+#endif
+        writedisplaytext("((GPSOFF))","",OledLine2,"","","");
         next_fixed_beacon = millis() + fix_beacon_interval;
         fixed_beacon_enabled = true;
         #ifdef ENABLE_PREFERENCES
           preferences.putBool(PREF_APRS_GPS_EN, false);
         #endif
-      }else{
+   } else {
         // If (!webserverStarted):  start webserver and start GPS
         // If (webserverStarted):   only start GPS
         gps_state = true;
@@ -2373,7 +2711,7 @@ void loop() {
 #endif
       }
   }
-  
+
   if(digitalRead(BUTTON)==HIGH && !key_up){
     key_up = true;
     t_lock = false;
@@ -2412,11 +2750,12 @@ void loop() {
   // smartbeaconing also ensures correct next_fixed_beacon time
   if (!dont_send_own_position_packets && millis() >= next_fixed_beacon &&
          (fixed_beacon_enabled ||
-           (t_last_smart_beacon_sent && (!gps_state || !gps.location.isValid())) ) ) {
+           (t_last_smart_beacon_sent && (!gps_state || !gps_isValid)) ) ) {
       enableOled(); // enable OLED
       next_fixed_beacon = millis() + fix_beacon_interval;
-      writedisplaytext("((AUT TX))", "", "", "", "", "");
-      sendpacket(1);
+      fillDisplayLines3to5();
+      writedisplaytext("((AUT TX))", "", "fixed", OledLine3, OledLine4, OledLine5);
+      sendpacket(SP_POS_FIXED);
   }
 
   #ifdef T_BEAM_V1_0
@@ -2503,7 +2842,7 @@ void loop() {
 	      if (wide_hop && wide_hop < header_end && wide_hop != q && *(wide_hop-1) != '*')
 	        add_our_call = false;
 	      if (add_our_call) {
-	        for (;;) { 
+	        for (;;) {
 	          if (!wide_hop || wide_hop > header_end) {
 		    wide_hop = 0;
 		    break;
@@ -2512,11 +2851,11 @@ void loop() {
 	          if (wide_hop[6] == '-' && wide_hop[7] != '1')
 	            break;
 		  wide_hop = strstr(wide_hop+8, ",WIDE");
-                } 
+                }
 	      }
 	      if (!wide_hop)
 	        add_our_call = false;
-	      else { 
+	      else {
 	        // Is our callsign in the path? -> Fine. But only if repeated-bit is set.
 	        char *our_call = strstr(p+1, Tcall.c_str());
 	        if (our_call && our_call < header_end && *(our_call-1) == ',' && our_call[Tcall.length()] == '*')
@@ -2544,7 +2883,7 @@ void loop() {
 	}
 #endif
 
-	if (lora_tx_enabled) {
+        if (lora_tx_enabled) {
           if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies % 2)
             loraSend(txPower, lora_freq, lora_speed, String(data));  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
           if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies > 1 && lora_digipeating_mode > 1 && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq)
@@ -2552,7 +2891,7 @@ void loop() {
           enableOled(); // enable OLED
           writedisplaytext("((KISSTX))","","","","","");
           time_to_refresh = millis() + showRXTime;
-	}
+        }
 
 out:
         delete TNC2DataFrame;
@@ -2606,7 +2945,6 @@ out:
 
         //int rssi = rf95.lastSNR();
         //Serial.println(rssi);
-        enableOled(); // enable OLED
 
 	char *header_end = strchr(received_frame, ':');
 	char *digipeatedflag = strchr(received_frame, '*');
@@ -2660,7 +2998,10 @@ out:
 #endif
 
     #ifdef SHOW_RX_PACKET                                                 // only show RX packets when activitated in config
+        enableOled(); // enable OLED
+        // delete first empty line, as the display does not show the last line correctly
         writedisplaytext("  ((RX))", "", loraReceivedFrameString, "", "", "");
+        time_to_refresh = millis() + showRXTime;
         #ifdef ENABLE_WIFI
           sendToWebList(loraReceivedFrameString, bg_rf95rssi_to_rssi(rf95.lastRssi()), bg_rf95snr_to_snr(rf95.lastSNR()));
         #endif
@@ -2689,7 +3030,9 @@ out:
 	    q = strstr(lora_TXBUFF_for_digipeating, ",NOGATE");
 	    if (!q || q > strchr(lora_TXBUFF_for_digipeating, ':')) {
               loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, String(lora_TXBUFF_for_digipeating));  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
+              enableOled(); // enable OLED
               writedisplaytext("  ((TX cross-digi))", "", String(lora_TXBUFF_for_digipeating), "", "", "");
+              time_to_refresh = millis() + showRXTime;
 #ifdef KISS_PROTOCOL
 	      s = add_element_to_path(lora_TXBUFF_for_digipeating, "GATE");
 	      sendToTNC(s ? String(s) : lora_TXBUFF_for_digipeating);
@@ -2785,38 +3128,40 @@ invalid_packet:
     time_lora_automaic_cr_adoption_rx_measurement_window = millis() - (5*60*1000L/2L);
   }
 
+  boolean display_was_updated = false;
   // Send position, if not requested to do not ;) But enter this part if user likes our LA/LON/SPD/CRS to be displayed on his screen ('!gps_allow_sleep_while_kiss' caused 'gps_state false')
   if (!gps_state && (!dont_send_own_position_packets || !lora_tx_enabled))
     goto behind_position_tx;
 
 
-  average_speed[point_avg_speed] = gps.speed.kmph();   // calculate smart beaconing
+  average_speed[point_avg_speed] = gps.speed.kmph();   // calculate smart beaconing. Even a not-updated old speed is ok here.
   ++point_avg_speed;
   if (point_avg_speed>4) {
     point_avg_speed=0;
   }
 
   average_speed_final = (average_speed[0]+average_speed[1]+average_speed[2]+average_speed[3]+average_speed[4])/5;
-  average_course[point_avg_course] = gps.course.deg();   // calculate smart beaconing course
-  ++point_avg_course;
+  if (gps.course.isValid() && gps.course.age() < 10000) {
+    average_course[point_avg_course] = gps.course.deg();   // calculate smart beaconing course
+    ++point_avg_course;
 
-  if (point_avg_course>(ANGLE_AVGS-1)) {
-    point_avg_course=0;
-    avg_c_y = 0;
-    avg_c_x = 0;
-    for (int i=0;i<ANGLE_AVGS;i++) {
-      avg_c_y += sin(average_course[i]/180*3.1415);
-      avg_c_x += cos(average_course[i]/180*3.1415);
-    }
-    new_course = atan2f(avg_c_y,avg_c_x)*180/3.1415;
-    if (new_course < 0) {
+    if (point_avg_course>(ANGLE_AVGS-1)) {
+      point_avg_course=0;
+      avg_c_y = 0;
+      avg_c_x = 0;
+      for (int i=0;i<ANGLE_AVGS;i++) {
+        avg_c_y += sin(average_course[i]/180*3.1415);
+        avg_c_x += cos(average_course[i]/180*3.1415);
+      }
+      new_course = atan2f(avg_c_y,avg_c_x)*180/3.1415;
+      if (new_course < 0) {
         new_course=360+new_course;
       }
-    // tooo much false positives
-    // Only in 30s interval and if we did not announce turn in last round.
-    // Algo from Kenwood SB Docu. Considered values should be int.
-    // algo is: (int ) ((int )sb_angle + 10 * turn_slope / (int ) mph). In km/h, we have (int ) ((int ) ab_angle + 16 *turn_slope / (int ) mph)
-    if (nextTX > 1 && (millis()-lastTX) > (sb_turn_time*1000L) && average_speed_final >= sb_min_speed) {
+      // too much false positives
+      // Only in 30s interval and if we did not announce turn in last round.
+      // Algo from Kenwood SB Docu. Considered values should be int.
+      // algo is: (int ) ((int )sb_angle + 10 * turn_slope / (int ) mph). In km/h, we have (int ) ((int ) ab_angle + 16 *turn_slope / (int ) mph)
+      if (nextTX > 1 && (millis()-lastTX) > (sb_turn_time*1000L) && average_speed_final >= sb_min_speed) {
         // cave: average_speed_final must not be 0 (division by zero). Becuse sb_min_speed may be configured as zero, check above is not enough
         int int_average_speed_final = (int ) average_speed_final;
         if (int_average_speed_final < 1) int_average_speed_final = 1;
@@ -2835,16 +3180,17 @@ invalid_packet:
               nextTX = 1;
             }
           }
+        }
       }
+      old_course = new_course;
     }
-    old_course = new_course;
   }
 
   if ((millis()<sb_max_interval)&&(lastTX == 0)) {
     nextTX = 0;
   }
 
-  // No course change (indicator nextTX==1)? Recomputei nextTX
+  // No course change (indicator nextTX==1)? Recompute nextTX
   if (nextTX > 1 && millis()-lastTX >= sb_min_interval) {
 #ifdef SB_ALGO_KENWOOD
     if (average_speed_final < sb_min_speed)
@@ -2867,23 +3213,15 @@ invalid_packet:
     // now, nextTX is <= sb_min_interval
   }
 
-  // LatShownP  = gg-mm.dd[N|S]
-  // aprsLatPreset = ggmm.dd[N|S]
-  if (gps.location.isValid() && gps.location.age() < 2000) {
-    LatShownP = create_lat_aprs("-", gps.location.rawLat());
-    LongShownP = create_long_aprs("-", gps.location.rawLng());
-    //save last valid position as new fixed location
-    aprsLatPreset = create_lat_aprs("", gps.location.rawLat());
-    aprsLonPreset = create_long_aprs("", gps.location.rawLng());
-  }
-
   // rate limit to 20s in SF12 CR4/5 aka lora_speed 300; 5s in lora_speed 1200 (SF9 CR4/7). -> 1200/lora_speed*5 seconds == 6000000 / lora_speed ms
   // If special case nextTX <= 1: we already enforced rate-limiting (see course computation)
   if (!fixed_beacon_enabled && !dont_send_own_position_packets && lora_tx_enabled && (lastTX+nextTX) < millis() && (nextTX <= 1 || (millis()-lastTX) >= (6000000L / lora_speed ))) {
-    if (gps.location.age() < 2000) {
+    if (gps_isValid) {
       enableOled(); // enable OLED
-      writedisplaytext(" ((TX))","","LAT: "+LatShownP,"LON: "+LongShownP,"SPD: "+String(gps.speed.kmph(),1)+"  CRS: "+String(gps.course.deg(),1),getSatAndBatInfo());
-      sendpacket(0);
+      //writedisplaytext(" ((TX))","","LAT: "+LatShownP,"LON: "+LongShownP,"SPD: "+String(gps.speed.kmph(),1)+"  CRS: "+String(gps.course.deg(),1),getSatAndBatInfo());
+      fillDisplayLines3to5();
+      writedisplaytext(" ((TX))","",OledLine2,OledLine3,OledLine4,OledLine5);
+      sendpacket(SP_POS_GPS | (nextTX == 1 ? SP_ENFORCE_COURSE : 0));
       // for fixed beacon (if we loose gps fix, we'll send our last position in fix_beacon_interval)
       next_fixed_beacon = millis() + fix_beacon_interval;
       t_last_smart_beacon_sent = millis();
@@ -2894,17 +3232,38 @@ invalid_packet:
         displayInvalidGPS();
       }
     }
-  } else {
-    if (millis() > time_to_refresh){
-      if (gps.location.age() < 2000) {
-        writedisplaytext(" "+Tcall,"Time to TX: "+ (dont_send_own_position_packets || !lora_tx_enabled) ? "never" : (fixed_beacon_enabled ? String((next_fixed_beacon-millis()) / 1000) : (String(((lastTX+nextTX)-millis())/1000)+"sec")),"LAT: "+LatShownP,"LON: "+LongShownP,"SPD: "+String(gps.speed.kmph())+"  CRS: "+String(gps.course.deg(),1),getSatAndBatInfo());
-      } else {
-        displayInvalidGPS();
-      }
-    }
+    display_was_updated = true;
   }
 
 behind_position_tx:
+
+  if (!display_was_updated) {
+    if (millis() > time_to_refresh){
+      if (gps_isValid) {
+        OledHdr = " "+Tcall;
+        fillDisplayLine1();
+#ifdef	ENABLE_WIFI
+        OledLine2 = "WiFi: ";
+        if (wifi_connection_status == WIFI_RUNNING_AS_AP) {
+          OledLine2 = (enable_webserver)? OledLine2 + "AP" : OledLine2 + "dis";
+        } else if (wifi_connection_status == WIFI_SEARCHING_FOR_AP) {
+          OledLine2 = (enable_webserver)? OledLine2 + "cli" : OledLine2 + "dis";
+        } else {
+          OledLine2 = (enable_webserver)? OledLine2 + "CLI" : OledLine2 + "dis";
+        }
+        OledLine2 = (webserverStarted)? OledLine2 + " & run" : OledLine2 + " & stopped";
+        fillDisplayLines3to5();
+        writedisplaytext(OledHdr,OledLine1,OledLine2,OledLine3,OledLine4,OledLine5);
+#endif
+      } else {
+        displayInvalidGPS();
+      }
+    } else {
+      // OledLine1 = gps_time + OledLine1s;
+      fillDisplayLine1();
+    }
+  }
+
 
   #if defined(ENABLE_TNC_SELF_TELEMETRY) && defined(KISS_PROTOCOL)
     if (nextTelemetryFrame < millis()){
