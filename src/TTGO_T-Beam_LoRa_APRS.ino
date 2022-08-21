@@ -31,6 +31,7 @@
 #endif
 #ifdef ENABLE_WIFI
   #include "taskWebServer.h"
+  String wifi_info;                // saving wifi info (CLI|AP|dis) for Oled
 #endif
 
 // oled address
@@ -220,13 +221,14 @@ String outString="";                      //The new Output String with GPS Conve
 
 //Oled Display (DL3EL)
 // to implement the blinking ticker, we have to save the content of the OLED. Also the preparation of output to OLED is done via these variables
-String OledHdr = "";
-String OledLine1 = "";
-String OledLine2 = "";
-String OledLine3 = "";
-String OledLine4 = "";
-String OledLine5 = "";
-String OledLine1s = "";;
+// Lines in "normal" display (no rx or tx or keypress)
+String OledHdr = "";      // Callsign
+String OledLine1 = "";    // localtime + uptime
+String OledLine2 = "";    // WebServer Info (CLI|AP|dis), next beacon (SB|FB), GPS Age (if > 2s)
+String OledLine3 = "";    // Position
+String OledLine4 = "";    // speed, course, altitude
+String OledLine5 = "";    // sat info, batt info
+int OLED_refresh = 1000;
 
 #if defined(ENABLE_TNC_SELF_TELEMETRY) && defined(KISS_PROTOCOL)
   time_t nextTelemetryFrame;
@@ -814,7 +816,7 @@ void writedisplaytext(String HeaderTxt, String Line1, String Line2, String Line3
   display.display();
   // if oled is continuosly on, refresh every second (DL3EL)
   if (oled_timeout == 0) {
-    time_to_refresh = millis() + 1000;
+    time_to_refresh = millis() + OLED_refresh;
   } else {
     time_to_refresh = millis() + showRXTime;
   }
@@ -827,28 +829,23 @@ void writedisplaytext(String HeaderTxt, String Line1, String Line2, String Line3
   OledLine5 = Line5;
 }
 
+// in refresh_display umbenannt werden
+void display_refresh1s() {
+  static uint32_t display_next_refresh = 0L;
+  static struct tm timeinfo; 
 
-void display_blinker() {
-  static uint32_t blinker_icon_time_next_toggle = 0L;
-  static boolean blinker_icon_on = false;   // toggles Tickers visibility
-
-  if (millis() < blinker_icon_time_next_toggle)
+  if (millis() < display_next_refresh)
     return;
-
-  //blinker_icon_time_next_toggle = millis() + 1000;
-  blinker_icon_time_next_toggle = millis() + (oled_timeout == 0 ? 1000 : showRXTime);
+  
+  display_next_refresh = millis() + OLED_refresh;
+// einmal Sekunde soll die Uhrzeit aktualisiert werden
+  if (getLocalTime(&timeinfo)) {
+    strftime(gps_time_s, sizeof(gps_time_s), "%H:%M:%S", &timeinfo);
+  }
+  fillDisplayLine1(); //update time & uptime
+  
   display.clearDisplay();
   display.setTextColor(WHITE);
-  display.setTextSize(1);
-  display.setCursor(0,0);
-  if (blinker_icon_on) {
-    display.println(" ");
-    blinker_icon_on = false;
-  } else {
-    display.println(".");
-    blinker_icon_on = true;
-  }
-  // restore display
   display.setTextSize(2);
   display.setCursor(0,0);
   display.println(OledHdr);
@@ -864,6 +861,7 @@ void display_blinker() {
   display.setCursor(0,56);
   display.println(OledLine5);
   display.display();
+
 }
 
 
@@ -925,19 +923,71 @@ String getSatAndBatInfo() {
 }
 
 void fillDisplayLine1() {
-  // OledLine1_time = gps_time_s;
-  if (dont_send_own_position_packets || !lora_tx_enabled) {
-    OledLine1s = " never TX";
+//  static String OledLine1s = "";
+// OledLine1_time = gps_time_s;
+//  OledLine1s = " Up:" + String(millis()/1000/60) + "m";
+
+  static uint32_t old_time = 0L;
+  uint32_t t = millis() / 1000;
+  char s_uptime[9];  // room for 49d17:02 + \0 -> 9 bytes
+
+  // > 49d 17h 2min? millis-overflow -> mark it
+  if (t < old_time)
+    old_time = ~0;
+
+  if (old_time == ~0) {
+    sprintf(s_uptime, ">49d");
   } else {
-    if (fixed_beacon_enabled) {
-      OledLine1s = " FB:" +String((next_fixed_beacon-millis()) / 1000) + "s";
-    } else {
-      OledLine1s = " SB:" + String(((lastTX+nextTX)-millis())/1000) + "s";
-      // next line will be used when debugging gps-output for smoothening km/h in oled
-      //OledLine1s = OledLine1 + String(((lastTX+nextTX)-millis())/1000)+"s "+ String(lastTxdistance);
-    }
+    int d = (t / 60 / 60 / 24);
+    int h = ((t / 60 / 60) % 24);
+    int m = ((t / 60) % 60);
+    if (d)
+      sprintf(s_uptime, "%dd%2.2d:%2.2d", d, h, m);
+    else
+      sprintf(s_uptime, "%2.2d:%2.2d", h, m);
+    old_time = t;
   }
-  OledLine1 = gps_time_s + OledLine1s;
+  OledLine1 = gps_time_s;
+  OledLine1 = OledLine1 + " Up " + s_uptime;
+}
+
+void fillDisplayLine2() {
+
+#ifdef	ENABLE_WIFI
+        wifi_info = "WiFi";
+        if (wifi_connection_status == WIFI_RUNNING_AS_AP) {
+          wifi_info = (enable_webserver)? wifi_info + "-AP" : wifi_info + ":off";
+        } else if (wifi_connection_status == WIFI_SEARCHING_FOR_AP) {
+          wifi_info = (enable_webserver)? wifi_info + "-cli" : wifi_info + ":off";
+        } else {
+          wifi_info = (enable_webserver)? wifi_info + "-CLI" : wifi_info + ":off";
+        }
+#else        
+        wifi_info = "";
+#endif
+ulong nexttx = 0L;
+
+  if (dont_send_own_position_packets || !lora_tx_enabled) {
+    OledLine2 = wifi_info + " never TX";
+  } else {
+    if (gps_isValid) {
+      if (fixed_beacon_enabled) {
+        OledLine2 = wifi_info+ " FB:" +String((next_fixed_beacon-millis()) / 1000) + "s";
+      } else {
+        nexttx = ((lastTX+nextTX)-millis())/1000;
+// do not send SB Info on very first tx, wrong value, cannot find the reason
+        if (nexttx > 400000) {
+          OledLine2 = wifi_info;
+        } else {
+          OledLine2 = wifi_info + " SB:" + String(nexttx) + "s";
+        // next line will be used when debugging gps-output for smoothening km/h in oled
+        //OledLine1s = OledLine1 + String(((lastTX+nextTX)-millis())/1000)+"s "+ String(lastTxdistance);
+        }
+      }
+    } else {
+      OledLine2 = wifi_info;
+      }
+    }
 }
 
 void fillDisplayLines3to5() {
@@ -953,23 +1003,23 @@ void fillDisplayLines3to5() {
 
 
 void displayInvalidGPS() {
-  char *nextTxInfo;
   uint32_t gpsage;
   String gpsage_p = "";
+  fillDisplayLine1();
   if (!gps_state){
-    nextTxInfo = (char*)"(TX) GPS DISABLED";
+    OledLine2 = wifi_info + " GPS dis";
   } else {
-    nextTxInfo = (char*)"(TX) at valid GPS";
+//  show GPS age (only if last retrieval was invalid)
+    gpsage = gps.location.age()/1000;
+    gpsage_p = String(gpsage) + "s" ;
+    gpsage_p = (gpsage > 60)? String(gpsage/60) + "m" : gpsage_p;
+    gpsage_p = (gpsage > 3600)? String(gpsage/3600) + "h" : gpsage_p;
+    gpsage_p = (gpsage > 86400)? String(gpsage/86400) + "d" : gpsage_p;
+    gpsage_p = (gpsage > 4000000)? " no GPS fix" : " GPS age:" + gpsage_p;
+    OledLine2 = wifi_info + gpsage_p;
   }
   fillDisplayLines3to5();
-  // show GPS age (only if last retrieval was invalid)
-  gpsage = gps.location.age()/1000;
-  gpsage_p = String(gpsage) + "s" ;
-  gpsage_p = (gpsage > 60)? String(gpsage/60) + "m" : gpsage_p;
-  gpsage_p = (gpsage > 3600)? String(gpsage/3600) + "h" : gpsage_p;
-  gpsage_p = (gpsage > 86400)? String(gpsage/86400) + "d" : gpsage_p;
-  gpsage_p = (gpsage > 4000000)? "never recvd" : gpsage_p;
-  writedisplaytext(" " + Tcall, nextTxInfo, "GPS age: " + gpsage_p, OledLine3, OledLine4, OledLine5);
+  writedisplaytext(Tcall, OledLine1, OledLine2, OledLine3, OledLine4, OledLine5);
 }
 
 
@@ -1652,8 +1702,9 @@ void setup(){
 
   #ifdef ENABLE_PREFERENCES
     if (clear_preferences == 2){
-      writedisplaytext("LoRa-APRS","","","Factory reset","","");
-      delay(1000);
+      String buildnr = BUILD_NUMBER;
+      writedisplaytext("LoRa-APRS","by DL9SAU & DL3EL","Build:" + String(BUILD_NUMBER),"Factory reset","","");
+      delay(2000);
       //#ifdef T_BEAM_V1_0
         if(digitalRead(BUTTON)==LOW){
           clear_preferences = 3;
@@ -1794,8 +1845,10 @@ void setup(){
   }
 
   writedisplaytext("LoRa-APRS","","Init:","FINISHED OK!","   =:-)   ","");
-  writedisplaytext("","","","","","");
+//  writedisplaytext("","","","","","");
   time_to_refresh = millis() + showRXTime;
+  fillDisplayLine1();
+  fillDisplayLine2();
   displayInvalidGPS();
   digitalWrite(TXLED, HIGH);
 
@@ -2473,7 +2526,10 @@ void loop() {
   sendpacket_was_called_twice = false;
 
   // Ticker blinks upper left corner to indicate system is running
-  display_blinker();
+  // only when OLED is on
+  if (tempOled) {
+    display_refresh1s();
+  }  
 
   if(digitalRead(BUTTON)==LOW && key_up == true){
     key_up = false;
@@ -2490,14 +2546,14 @@ void loop() {
 #ifdef ENABLE_WIFI
             writedisplaytext("((MAN TX))","SSID: " + infoApName,"IP: " + infoApAddr, OledLine3, OledLine4, OledLine5);
 #else
-            writedisplaytext("((MAN TX))","","","","","");
+            writedisplaytext("((MAN TX))","","",OledLine3, OledLine4, OledLine5);
 #endif
             sendpacket(SP_POS_GPS);
           } else {
 #ifdef ENABLE_WIFI
             writedisplaytext("((FIX TX))","SSID: " + infoApName,"IP: " + infoApAddr, OledLine3, OledLine4, OledLine5);
 #else
-            writedisplaytext("((FIX TX))","","","","","");
+            writedisplaytext("((FIX TX))","","",OledLine3, OledLine4, OledLine5);
 #endif
             sendpacket(SP_POS_FIXED);
           }
@@ -2528,12 +2584,11 @@ void loop() {
         const timeval *tv = &epoch;
         settimeofday(tv, NULL);
         t_hour_adjust_next = (t.tm_hour + 1) % 24;
-        // full date & time, currently only time is implemented
-        // sprintf(gps_time_s,"%02d:%02d:%02d %02d.%02d.%04d",gps.time.hour(),gps.time.minute(),gps.time.second(),gps.date.day(),gps.date.month(),gps.date.year());
-        sprintf(gps_time_s, "%02d:%02d:%02d", t.tm_hour, t.tm_min, t.tm_sec);
       }
     }
   }
+
+// time is now taken from system time and updates once per second in display_blinker
 
   // LatShownP  = gg-mm.dd[N|S]
   // aprsLatPreset = ggmm.dd[N|S]
@@ -2544,50 +2599,50 @@ void loop() {
       if (gps.speed.isUpdated())
         gps_speed_kmph = gps.speed.kmph();
     } // else: assume we still move with last speed
-    }
-    if (gps.location.isValid() && gps.location.age() < 10000) {
+  }
+  if (gps.location.isValid() && gps.location.age() < 10000) {
 
-      gps_isValid = true;
+    gps_isValid = true;
 
-      if (gps.location.isUpdated()) {
-        static uint32_t ratelimit_until = 0L;
+    if (gps.location.isUpdated()) {
+      static uint32_t ratelimit_until = 0L;
 
-        // to smoothen the speed, the distance between pos is calculated on gps retrieval. (DL3EL)
-        //LatShownP = create_lat_aprs("-", gps.location.rawLat());
-        //LongShownP = create_long_aprs("-", gps.location.rawLng());
-        // save last valid position as new fixed location
+      // to smoothen the speed, the distance between pos is calculated on gps retrieval. (DL3EL)
+      //LatShownP = create_lat_aprs("-", gps.location.rawLat());
+      //LongShownP = create_long_aprs("-", gps.location.rawLng());
+      // save last valid position as new fixed location
 
-        // aprs resolution is 1sm/100 = 1852m/100 = 18.52m
-        // Updating this every 200ms is enough for getting this resolution at speed of 18.52*3.6*5 = 333.36km/h.
-        // aprsLatPreset and aprsLonPreset are used for displaying. The transmission uses the true value.
-        if (millis() >  ratelimit_until) {
-          aprsLatPreset = create_lat_aprs("", gps.location.rawLat());
-          aprsLonPreset = create_long_aprs("", gps.location.rawLng());
-          aprsPresetShown = "";
-          ratelimit_until = millis() + 200;
-         }
+      // aprs resolution is 1sm/100 = 1852m/100 = 18.52m
+      // Updating this every 200ms is enough for getting this resolution at speed of 18.52*3.6*5 = 333.36km/h.
+      // aprsLatPreset and aprsLonPreset are used for displaying. The transmission uses the true value.
+      if (millis() >  ratelimit_until) {
+        aprsLatPreset = create_lat_aprs("", gps.location.rawLat());
+        aprsLonPreset = create_long_aprs("", gps.location.rawLng());
+        aprsPresetShown = "";
+        ratelimit_until = millis() + 200;
       }
+    }
 
 #ifdef notdef
-      static uint32_t lastTxdistance_millis = 0;
-      // code has no function, as currently gps_speed_kmph_oled is not used in getSpeedCourseAlti
-      if ((millis()-lastTxdistance_millis) > 1000) {
-        static double lastTxLat       = 0.0;
-        static double lastTxLng       = 0.0;
-        double currLat = gps.location.lat();
-        double currLng = gps.location.lng();
-        double dist = TinyGPSPlus::distanceBetween(currLat, currLng, lastTxLat, lastTxLng);
-        // test code to smoothen km/h in oled, does not work, because of weird data from gps. Has to be looked at
-        // get GPS Data, if valid and mark accordingly
-        if (dist > 15 || (millis()-lastTxdistance_millis) > 3*60*10000) {
-          lastTxLat = currLat;
-          lastTxLng = currLng;
-          gps_speed_kmph_oled = gps_speed_kmph;
-          lastTxdistance_millis = millis();
-        } else {
-          gps_speed_kmph_oled = 0;
-        }
+    static uint32_t lastTxdistance_millis = 0;
+    // code has no function, as currently gps_speed_kmph_oled is not used in getSpeedCourseAlti
+    if ((millis()-lastTxdistance_millis) > 1000) {
+      static double lastTxLat       = 0.0;
+      static double lastTxLng       = 0.0;
+      double currLat = gps.location.lat();
+      double currLng = gps.location.lng();
+      double dist = TinyGPSPlus::distanceBetween(currLat, currLng, lastTxLat, lastTxLng);
+      // test code to smoothen km/h in oled, does not work, because of weird data from gps. Has to be looked at
+      // get GPS Data, if valid and mark accordingly
+      if (dist > 15 || (millis()-lastTxdistance_millis) > 3*60*10000) {
+        lastTxLat = currLat;
+        lastTxLng = currLng;
+        gps_speed_kmph_oled = gps_speed_kmph;
+        lastTxdistance_millis = millis();
+      } else {
+        gps_speed_kmph_oled = 0;
       }
+    }
 #endif
   }
   if (gps_isValid != gps_isValid_oldState) {
@@ -2619,9 +2674,12 @@ void loop() {
     } else if (wifi_connection_status == WIFI_RUNNING_AS_AP) {
       writedisplaytext(" ((WiFi))","WiFi AP Mode","SSID: " + infoApName, "Pass: " + infoApPass, "IP: " + infoApAddr, getSatAndBatInfo());
     } else {
-      writedisplaytext(" ((WiFi))","WiFi off","SSID: " + infoApName, "Pass: " + infoApPass, "IP: " + infoApAddr, getSatAndBatInfo());
+//      writedisplaytext(" ((WiFi))","WiFi off","SSID: " + infoApName, "Pass: " + infoApPass, "IP: " + infoApAddr, getSatAndBatInfo());
+      writedisplaytext(" ((WiFi))","WiFi off","press key long","to enable","", getSatAndBatInfo());
     }
     wifi_connection_status_prev = wifi_connection_status;
+//  initial fill of line2
+    fillDisplayLine2();
   }
 #endif
 
@@ -2632,7 +2690,7 @@ void loop() {
 #ifdef	ENABLE_WIFI
     writedisplaytext("((WEB TX))","SSID: " + infoApName,"IP: " + infoApAddr, OledLine3, OledLine4, OledLine5);
 #else
-    writedisplaytext("((WEB TX))","","","","","");
+    writedisplaytext("((WEB TX))","","",OledLine3, OledLine4, OledLine5);
 #endif
     sendpacket(SP_POS_GPS);
     manBeacon=false;
@@ -2656,60 +2714,25 @@ void loop() {
     enableOled();
     //---------------
     t_lock = true;
-    if (gps_state){
-        gps_state = false;
-        #ifdef T_BEAM_V1_0
-          axp.setPowerOutPut(AXP192_LDO3, AXP202_OFF);                 // GPS OFF
-        #endif
+//  re-enable webserver, if was set to off.
 #ifdef	ENABLE_WIFI
-        OledLine2 = "Wifi: ";
-        if (wifi_connection_status == WIFI_RUNNING_AS_AP) {
-          OledLine2 = (enable_webserver)? OledLine2 + "AP" : OledLine2 + "dis";
-        } else if (wifi_connection_status == WIFI_SEARCHING_FOR_AP) {
-          OledLine2 = (enable_webserver)? OledLine2 + "cli" : OledLine2 + "dis";
-        } else {
-          OledLine2 = (enable_webserver)? OledLine2 + "CLI" : OledLine2 + "dis";
-        }
-        OledLine2 = (webserverStarted)? OledLine2 + " & run" : OledLine2 + " & stopped";
-#endif
-        writedisplaytext("((GPSOFF))","",OledLine2,"","","");
-        next_fixed_beacon = millis() + fix_beacon_interval;
-        fixed_beacon_enabled = true;
-        #ifdef ENABLE_PREFERENCES
-          preferences.putBool(PREF_APRS_GPS_EN, false);
-        #endif
-   } else {
-        // If (!webserverStarted):  start webserver and start GPS
-        // If (webserverStarted):   only start GPS
-        gps_state = true;
-        #ifdef T_BEAM_V1_0
-          axp.setPowerOutPut(AXP192_LDO3, AXP202_ON);
-        #endif
-        writedisplaytext("((GPS ON))","","","","","");                // GPS ON
-        fixed_beacon_enabled = false;
-        #ifdef ENABLE_PREFERENCES
-          preferences.putBool(PREF_APRS_GPS_EN, true);
-        #endif
-        // hack: re-enable webserver, if was set to off.
-#ifdef	ENABLE_WIFI
-        if (!webserverStarted) {
-          enable_webserver = 1;
-#ifdef ENABLE_PREFERENCES
-          preferences.putInt(PREF_WIFI_ENABLE, enable_webserver);
-#endif
+    if (!webserverStarted) {
+      enable_webserver = 1;
 #if defined(LORA32_21) && defined(ENABLE_BLUETOOTH)
-          // lora32_21 hardware bug: btt and wifi are mutual exclusive
-          SerialBT.end();
-          delay(100);
+      // lora32_21 hardware bug: btt and wifi are mutual exclusive
+      SerialBT.end();
+      delay(100);
 #endif
-          webServerCfg = {.callsign = Tcall};
-          xTaskCreate(taskWebServer, "taskWebServer", 12000, (void*)(&webServerCfg), 1, nullptr);
-          webserverStarted = true;
-          writedisplaytext("LoRa-APRS","","Init:","WiFi task started","   =:-)   ","");
-          delay(1500);
-        }
+      webServerCfg = {.callsign = Tcall};
+      xTaskCreate(taskWebServer, "taskWebServer", 12000, (void*)(&webServerCfg), 1, nullptr);
+      webserverStarted = true;
+      writedisplaytext("LoRa-APRS","","Init:","WiFi task started","long press to ","stop again");
+      delay(1500);
+    } else {
+      writedisplaytext("LoRa-APRS","","Reboot:","to stop WiFi","   =:-)   ","");
+      ESP.restart();
+    }  
 #endif
-      }
   }
 
   if(digitalRead(BUTTON)==HIGH && !key_up){
@@ -2790,97 +2813,97 @@ void loop() {
 
 	// Frame comes from same call as ours and is a position report?
         if (!strncmp(data, Tcall.c_str(), Tcall.length()) && data[Tcall.length()] == '>') {
-	  char *p = strchr(data, ':');
-	  p++;
-	  if (*p == '!' || *p == '=' || *p == '/' || *p == '@' || *p == '\'' || *p == '`' || *p == '[' || *p == '$') {
+          char *p = strchr(data, ':');
+          p++;
+          if (*p == '!' || *p == '=' || *p == '/' || *p == '@' || *p == '\'' || *p == '`' || *p == '[' || *p == '$') {
             time_last_own_position_via_kiss_received = time_last_frame_via_kiss_received;
-	    if (!acceptOwnPositionReportsViaKiss)
-	      goto out; // throw away this frame.
-	    was_own_position_packet = true;
-            if (!dont_send_own_position_packets) {
-	      gps_state_before_autochange = gps_state;
-	      if (gps_allow_sleep_while_kiss) {
+            if (!acceptOwnPositionReportsViaKiss)
+              goto out; // throw away this frame.
+              was_own_position_packet = true;
+              if (!dont_send_own_position_packets) {
+                gps_state_before_autochange = gps_state;
+                if (gps_allow_sleep_while_kiss) {
 #ifdef T_BEAM_V1_0
-	        if (gps_state)
-	          axp.setPowerOutPut(AXP192_LDO3, AXP202_OFF);                           // switch off GPS
+                  if (gps_state)
+                    axp.setPowerOutPut(AXP192_LDO3, AXP202_OFF);                           // switch off GPS
 #endif
-	        gps_state = false;
-	      }
-	      dont_send_own_position_packets = true;
+                  gps_state = false;
+                }
+                dont_send_own_position_packets = true;
 	      // TODO: there are also tcp kiss devices. Instead of 'kiss_client_came_via_bluetooth', we should mark it in a session struct where we can iterate through
 #ifdef ENABLE_BLUETOOTH
-	      if (SerialBT.hasClient())
-	        kiss_client_came_via_bluetooth = true;
+                if (SerialBT.hasClient())
+                  kiss_client_came_via_bluetooth = true;
 #endif
-	    }
-	  } else if (*p == ':')
-	    time_last_own_text_message_via_kiss_received = millis();
+              }
+            } else if (*p == ':')
+                    time_last_own_text_message_via_kiss_received = millis();
         } else {
-	  if (lora_digipeating_mode > 1) {
-            const char *p = strchr(data, '>');
-            const char *q = strchr(data, ',');
-            const char *r = strchr(data, '*');
-            const char *header_end = strchr(data, ':');
-	    // packet (sender not our call) came via kiss and we gate it to lora? If we are a configured as a digipeater,
-	    // and our gated packet will be repeated, then we have avoid repeating it again, by adding our call to the digi path.
-	    // Example: DL9SAU>APRS,WIDE1-1,WIDE2-1. If we gate it and a fill-in-digi hears it, if becomes DL9SAU>APRS,DL1AAA,WIDE1*,WIDE2-1.
-	    // If we are a wide-digi, we see that packet and don't find our callsign in the path, we would repeat it.
-	    // => We should add our callsign to path, with the following exceptions:
-	    //   1. if sender is our call (already checked above);
-	    //   2. if we are not a digipeater and user has a software like aprsdroid and sends packets with another ssid (-> even we are not in the
-	    // path, there's no risk, we will not repeat it - as said, we are not configured as a repeater).
-	    //   3. DEST-call-addressing with one hop ("DST-1")
-	    //   4. In case of WIDE1 or WIDE2-1 (== with one hop left).
-	    // We assure bufffer has enough room for our call ",CALL*"
-	    if (q > header_end) q = 0;
-	    if (r > header_end) r = 0;
-	    if (p && header_end > p) {
-	      boolean add_our_call = true;
-	      // Has the path only one hop or less left (WIDE1-1 or WIDEn or WiDEn* or WIDEn*,WIDEn-1 or WIDEn-1)?
-	      // Also check for digicall,WIDE1-1;  digicall*,WIDE1-1 is ok.   Pos ',' before wide is != q (q is first ',' in ..>APRS,DIGICALL,WIDE2-1)
-	      char *wide_hop = strstr(data, ",WIDE");
-	      if (wide_hop && wide_hop < header_end && wide_hop != q && *(wide_hop-1) != '*')
-	        add_our_call = false;
-	      if (add_our_call) {
-	        for (;;) {
-	          if (!wide_hop || wide_hop > header_end) {
-		    wide_hop = 0;
-		    break;
-		  }
-	          // pos 5 is number, pos 6 is '-', pos 7 are left digis
-	          if (wide_hop[6] == '-' && wide_hop[7] != '1')
-	            break;
-		  wide_hop = strstr(wide_hop+8, ",WIDE");
+            if (lora_digipeating_mode > 1) {
+              const char *p = strchr(data, '>');
+              const char *q = strchr(data, ',');
+              const char *r = strchr(data, '*');
+              const char *header_end = strchr(data, ':');
+              // packet (sender not our call) came via kiss and we gate it to lora? If we are a configured as a digipeater,
+              // and our gated packet will be repeated, then we have avoid repeating it again, by adding our call to the digi path.
+              // Example: DL9SAU>APRS,WIDE1-1,WIDE2-1. If we gate it and a fill-in-digi hears it, if becomes DL9SAU>APRS,DL1AAA,WIDE1*,WIDE2-1.
+              // If we are a wide-digi, we see that packet and don't find our callsign in the path, we would repeat it.
+              // => We should add our callsign to path, with the following exceptions:
+              //   1. if sender is our call (already checked above);
+              //   2. if we are not a digipeater and user has a software like aprsdroid and sends packets with another ssid (-> even we are not in the
+              // path, there's no risk, we will not repeat it - as said, we are not configured as a repeater).
+              //   3. DEST-call-addressing with one hop ("DST-1")
+              //   4. In case of WIDE1 or WIDE2-1 (== with one hop left).
+              // We assure bufffer has enough room for our call ",CALL*"
+              if (q > header_end) q = 0;
+              if (r > header_end) r = 0;
+              if (p && header_end > p) {
+                boolean add_our_call = true;
+                // Has the path only one hop or less left (WIDE1-1 or WIDEn or WiDEn* or WIDEn*,WIDEn-1 or WIDEn-1)?
+                // Also check for digicall,WIDE1-1;  digicall*,WIDE1-1 is ok.   Pos ',' before wide is != q (q is first ',' in ..>APRS,DIGICALL,WIDE2-1)
+                char *wide_hop = strstr(data, ",WIDE");
+                if (wide_hop && wide_hop < header_end && wide_hop != q && *(wide_hop-1) != '*')
+                  add_our_call = false;
+                if (add_our_call) {
+                  for (;;) {
+                    if (!wide_hop || wide_hop > header_end) {
+                      wide_hop = 0;
+                      break;
+                    }
+                    // pos 5 is number, pos 6 is '-', pos 7 are left digis
+                    if (wide_hop[6] == '-' && wide_hop[7] != '1')
+                      break;
+                    wide_hop = strstr(wide_hop+8, ",WIDE");
+                  }
+                } 
+                if (!wide_hop)
+                  add_our_call = false;
+                else {
+                  // Is our callsign in the path? -> Fine. But only if repeated-bit is set.
+                  char *our_call = strstr(p+1, Tcall.c_str());
+                  if (our_call && our_call < header_end && *(our_call-1) == ',' && our_call[Tcall.length()] == '*')
+                    add_our_call = false;
                 }
-	      }
-	      if (!wide_hop)
-	        add_our_call = false;
-	      else {
-	        // Is our callsign in the path? -> Fine. But only if repeated-bit is set.
-	        char *our_call = strstr(p+1, Tcall.c_str());
-	        if (our_call && our_call < header_end && *(our_call-1) == ',' && our_call[Tcall.length()] == '*')
-		  add_our_call = false;
-	      }
 
-	      if (add_our_call) {
-		char *s = add_element_to_path(data, Tcall.c_str());
-	        if (s) data = s;
-	      }
-	    }
-	  }
-	}
+                if (add_our_call) {
+                  char *s = add_element_to_path(data, Tcall.c_str());
+                  if (s) data = s;
+                }
+              }
+            }
+        }
 
 #if defined(ENABLE_WIFI)
-	if (!was_own_position_packet || tx_own_beacon_from_this_device_or_fromKiss__to_aprsis) {
-	  // No word "NOGATE" or "RFONLY" in header? -> may be sent to aprs-is
-	  char *q = strstr(data, ",NOGATE");
-	  if (!q || q > strchr(data, ':')) {
-	    q = strstr(data, ",RFONLY");
-	    if (!q || q > strchr(data, ':')) {
-	      send_to_aprsis(*TNC2DataFrame);
-	    }
-	  }
-	}
+        if (!was_own_position_packet || tx_own_beacon_from_this_device_or_fromKiss__to_aprsis) {
+          // No word "NOGATE" or "RFONLY" in header? -> may be sent to aprs-is
+          char *q = strstr(data, ",NOGATE");
+          if (!q || q > strchr(data, ':')) {
+            q = strstr(data, ",RFONLY");
+            if (!q || q > strchr(data, ':')) {
+              send_to_aprsis(*TNC2DataFrame);
+            }
+          }
+        }
 #endif
 
         if (lora_tx_enabled) {
@@ -2924,82 +2947,81 @@ out:
     }
 
     if (lora_rx_enabled && lora_rx_data_available) {
-       if(lora_rx_data_available) {
+      if(lora_rx_data_available) {
         char *s = 0;
         loraReceivedFrameString = "";
         for (int i=0 ; i < loraReceivedLength ; i++) {
           loraReceivedFrameString += (char) lora_RXBUFF[i];
         }
-	const char *received_frame = loraReceivedFrameString.c_str();
+        const char *received_frame = loraReceivedFrameString.c_str();
 
-	// valid packet?
-	if (!packet_is_valid(received_frame)) {
-	  goto invalid_packet;
-	}
+        // valid packet?
+        if (!packet_is_valid(received_frame)) {
+          goto invalid_packet;
+        }
 
         int blacklisted = is_call_blacklisted(received_frame);
-	// don't even automaticaly adapt CR for spammers
-	if (blacklisted) {
-	  goto call_invalid_or_blacklisted;
-	}
+        // don't even automaticaly adapt CR for spammers
+        if (blacklisted) {
+          goto call_invalid_or_blacklisted;
+        }
 
         //int rssi = rf95.lastSNR();
         //Serial.println(rssi);
 
-	char *header_end = strchr(received_frame, ':');
-	char *digipeatedflag = strchr(received_frame, '*');
-	if (digipeatedflag && digipeatedflag > header_end)
-	  digipeatedflag = 0;
-	char *q;
+        char *header_end = strchr(received_frame, ':');
+        char *digipeatedflag = strchr(received_frame, '*');
+        if (digipeatedflag && digipeatedflag > header_end)
+          digipeatedflag = 0;
+        char *q;
 
         uint8_t our_packet = 0; // 1: from us. 2: digipeated by us
-	// not our own digipeated call?
-	if (loraReceivedFrameString.startsWith(Tcall + '>'))
-	  our_packet = 1;
-	if (((s = strstr(received_frame, (',' + Tcall + '*').c_str())) || (s = strstr(received_frame, (',' + Tcall + ',').c_str()))) && s < header_end) {
-	  // in path: exact call match and digipeated flag present and we have repeated it (pos behind start of our call?
-	  if (digipeatedflag && digipeatedflag > s)
-	    our_packet |= 2;
-	}
+        // not our own digipeated call?
+        if (loraReceivedFrameString.startsWith(Tcall + '>'))
+          our_packet = 1;
+        if (((s = strstr(received_frame, (',' + Tcall + '*').c_str())) || (s = strstr(received_frame, (',' + Tcall + ',').c_str()))) && s < header_end) {
+          // in path: exact call match and digipeated flag present and we have repeated it (pos behind start of our call?
+          if (digipeatedflag && digipeatedflag > s)
+            our_packet |= 2;
+        }
 
-	// CR adaption: because only for SF12 different CR levels have been defined, we unfortunately cannot deal with SF < 12.
-	// In most cases, only useful for normal users, not for WIDE1 or WIDE2 digis. But there may exist good reasons; thus we don't enforce.
-	if (lora_automatic_cr_adaption && lora_speed <= 300L) {
-	  // not our own digipeated call?
-	  if (! (our_packet & 1)) {
-	    lora_automaic_cr_adoption_rf_transmissions_heard_in_timeslot++;
-	    // was digipeated? -> there was another rf transmission
-	    if (digipeatedflag && !(our_packet & 2))
-	      lora_automaic_cr_adoption_rf_transmissions_heard_in_timeslot++;
-	  }
-	}
+        // CR adaption: because only for SF12 different CR levels have been defined, we unfortunately cannot deal with SF < 12.
+        // In most cases, only useful for normal users, not for WIDE1 or WIDE2 digis. But there may exist good reasons; thus we don't enforce.
+        if (lora_automatic_cr_adaption && lora_speed <= 300L) {
+          // not our own digipeated call?
+          if (! (our_packet & 1)) {
+            lora_automaic_cr_adoption_rf_transmissions_heard_in_timeslot++;
+            // was digipeated? -> there was another rf transmission
+            if (digipeatedflag && !(our_packet & 2))
+              lora_automaic_cr_adoption_rf_transmissions_heard_in_timeslot++;
+          }
+        }
 
-	// User sends ",Q" in path? He likes at the first digi to add snr/rssi to path
-	uint8_t user_demands_trace = ( ((q = strstr(received_frame, ",Q,")) || (q = strstr(received_frame, ",Q:"))) && q < header_end) ? 1 : 0;
-	// User sends ",QQ"' in path? He likes all digis to add snr/rssi to path
-	if (((q = strstr(received_frame, ",QQ,")) || (q = strstr(received_frame, ",QQ:"))) && q < header_end)
-	  user_demands_trace = 2;
+        // User sends ",Q" in path? He likes at the first digi to add snr/rssi to path
+        uint8_t user_demands_trace = ( ((q = strstr(received_frame, ",Q,")) || (q = strstr(received_frame, ",Q:"))) && q < header_end) ? 1 : 0;
+        // User sends ",QQ"' in path? He likes all digis to add snr/rssi to path
+        if (((q = strstr(received_frame, ",QQ,")) || (q = strstr(received_frame, ",QQ:"))) && q < header_end)
+          user_demands_trace = 2;
 
-#if defined(ENABLE_WIFI)
-	if (aprsis_enabled && !our_packet && !blacklisted) {
-	  // No word "NOGATE" or "RFONLY" in header? -> may be sent to aprs-is
-	  q = strstr(received_frame, ",NOGATE");
-	  if (!q || q > header_end) {
-	    q = strstr(received_frame, ",RFONLY");
-	    if (!q || q > header_end) {
-	      s = 0;
-	      if (((lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_APRSIS) || user_demands_trace > 1) ||
-	          (!digipeatedflag && ((lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_APRSIS__ONLY_IF_HEARD_DIRECT) || user_demands_trace == 1)) )
-	        s = append_element_to_path(received_frame, rssi_for_path);
-	      send_to_aprsis(s ? String(s) : loraReceivedFrameString);
-	    }
-	  }
-	}
+ #if defined(ENABLE_WIFI)
+        if (aprsis_enabled && !our_packet && !blacklisted) {
+          // No word "NOGATE" or "RFONLY" in header? -> may be sent to aprs-is
+          q = strstr(received_frame, ",NOGATE");
+          if (!q || q > header_end) {
+            q = strstr(received_frame, ",RFONLY");
+            if (!q || q > header_end) {
+              s = 0;
+              if (((lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_APRSIS) || user_demands_trace > 1) ||
+              (!digipeatedflag && ((lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_APRSIS__ONLY_IF_HEARD_DIRECT) || user_demands_trace == 1)) )
+                s = append_element_to_path(received_frame, rssi_for_path);
+              send_to_aprsis(s ? String(s) : loraReceivedFrameString);
+            }
+          }
+        }
 #endif
 
     #ifdef SHOW_RX_PACKET                                                 // only show RX packets when activitated in config
         enableOled(); // enable OLED
-        // delete first empty line, as the display does not show the last line correctly
         writedisplaytext("  ((RX))", "", loraReceivedFrameString, "", "", "");
         time_to_refresh = millis() + showRXTime;
         #ifdef ENABLE_WIFI
@@ -3007,45 +3029,45 @@ out:
         #endif
         syslog_log(LOG_INFO, String("Received LoRa: '") + loraReceivedFrameString + "', RSSI:" + bg_rf95rssi_to_rssi(rf95.lastRssi()) + ", SNR: " + bg_rf95snr_to_snr(rf95.lastSNR()));
     #endif
-        #ifdef KISS_PROTOCOL
+    #ifdef KISS_PROTOCOL
 	s = 0;
-	if (((lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_KISS) || user_demands_trace > 1) ||
-	    (!digipeatedflag && ((lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_KISS__ONLY_IF_HEARD_DIRECT) || user_demands_trace == 1)) )
+        if (((lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_KISS) || user_demands_trace > 1) ||
+        (!digipeatedflag && ((lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_KISS__ONLY_IF_HEARD_DIRECT) || user_demands_trace == 1)) )
 
-	  s = kiss_add_snr_rssi_to_path_at_position_without_digippeated_flag ? append_element_to_path(received_frame, rssi_for_path) : add_element_to_path(received_frame, rssi_for_path);
-	sendToTNC(s ? String(s) : loraReceivedFrameString);
-        #endif
+          s = kiss_add_snr_rssi_to_path_at_position_without_digippeated_flag ? append_element_to_path(received_frame, rssi_for_path) : add_element_to_path(received_frame, rssi_for_path);
+        sendToTNC(s ? String(s) : loraReceivedFrameString);
+    #endif
 
-	// Are we configured as lora digi? Are we listening on the main frequency?
-	if (lora_tx_enabled && lora_digipeating_mode > 0 && !our_packet && !blacklisted && lora_freq_rx_curr == lora_freq) {
-	  uint32_t time_lora_TXBUFF_for_digipeating_was_filled_prev = time_lora_TXBUFF_for_digipeating_was_filled;
-	  if (((lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_RF) || user_demands_trace > 1) ||
-	         (!digipeatedflag && ((lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_RF__ONLY_IF_HEARD_DIRECT) || user_demands_trace == 1)) )
+        // Are we configured as lora digi? Are we listening on the main frequency?
+        if (lora_tx_enabled && lora_digipeating_mode > 0 && !our_packet && !blacklisted && lora_freq_rx_curr == lora_freq) {
+          uint32_t time_lora_TXBUFF_for_digipeating_was_filled_prev = time_lora_TXBUFF_for_digipeating_was_filled;
+          if (((lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_RF) || user_demands_trace > 1) ||
+	        (!digipeatedflag && ((lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_RF__ONLY_IF_HEARD_DIRECT) || user_demands_trace == 1)) )
             handle_lora_frame_for_lora_digipeating(received_frame, rssi_for_path);
-	  else
+          else
             handle_lora_frame_for_lora_digipeating(received_frame, NULL);
-	  // new frame in digipeating queue? cross-digi freq enabled and freq set? Send without delay.
+          // new frame in digipeating queue? cross-digi freq enabled and freq set? Send without delay.
           if (*lora_TXBUFF_for_digipeating && lora_cross_digipeating_mode > 0 && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq && time_lora_TXBUFF_for_digipeating_was_filled > time_lora_TXBUFF_for_digipeating_was_filled_prev) {
-	    // word 'NOGATE' part of the header? Don't gate it
-	    q = strstr(lora_TXBUFF_for_digipeating, ",NOGATE");
-	    if (!q || q > strchr(lora_TXBUFF_for_digipeating, ':')) {
+            // word 'NOGATE' part of the header? Don't gate it
+            q = strstr(lora_TXBUFF_for_digipeating, ",NOGATE");
+            if (!q || q > strchr(lora_TXBUFF_for_digipeating, ':')) {
               loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, String(lora_TXBUFF_for_digipeating));  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
               enableOled(); // enable OLED
               writedisplaytext("  ((TX cross-digi))", "", String(lora_TXBUFF_for_digipeating), "", "", "");
               time_to_refresh = millis() + showRXTime;
 #ifdef KISS_PROTOCOL
-	      s = add_element_to_path(lora_TXBUFF_for_digipeating, "GATE");
-	      sendToTNC(s ? String(s) : lora_TXBUFF_for_digipeating);
+              s = add_element_to_path(lora_TXBUFF_for_digipeating, "GATE");
+              sendToTNC(s ? String(s) : lora_TXBUFF_for_digipeating);
 #endif
-	    }
-	  }
-	}
+            }
+          }
+        }
       }
     } else {
       // rx disabled. guess blind
      lora_automaic_cr_adoption_rf_transmissions_heard_in_timeslot++;
     }
-call_invalid_or_blacklisted:
+    call_invalid_or_blacklisted:
 invalid_packet:
     #ifdef T_BEAM_V1_0
       #ifdef ENABLE_LED_SIGNALING
@@ -3219,6 +3241,8 @@ invalid_packet:
     if (gps_isValid) {
       enableOled(); // enable OLED
       //writedisplaytext(" ((TX))","","LAT: "+LatShownP,"LON: "+LongShownP,"SPD: "+String(gps.speed.kmph(),1)+"  CRS: "+String(gps.course.deg(),1),getSatAndBatInfo());
+      fillDisplayLine1();
+      fillDisplayLine2();
       fillDisplayLines3to5();
       writedisplaytext(" ((TX))","",OledLine2,OledLine3,OledLine4,OledLine5);
       sendpacket(SP_POS_GPS | (nextTX == 1 ? SP_ENFORCE_COURSE : 0));
@@ -3240,26 +3264,16 @@ behind_position_tx:
   if (!display_was_updated) {
     if (millis() > time_to_refresh){
       if (gps_isValid) {
-        OledHdr = " "+Tcall;
+        OledHdr = Tcall;
         fillDisplayLine1();
-#ifdef	ENABLE_WIFI
-        OledLine2 = "WiFi: ";
-        if (wifi_connection_status == WIFI_RUNNING_AS_AP) {
-          OledLine2 = (enable_webserver)? OledLine2 + "AP" : OledLine2 + "dis";
-        } else if (wifi_connection_status == WIFI_SEARCHING_FOR_AP) {
-          OledLine2 = (enable_webserver)? OledLine2 + "cli" : OledLine2 + "dis";
-        } else {
-          OledLine2 = (enable_webserver)? OledLine2 + "CLI" : OledLine2 + "dis";
-        }
-        OledLine2 = (webserverStarted)? OledLine2 + " & run" : OledLine2 + " & stopped";
+        fillDisplayLine2();
         fillDisplayLines3to5();
         writedisplaytext(OledHdr,OledLine1,OledLine2,OledLine3,OledLine4,OledLine5);
-#endif
       } else {
         displayInvalidGPS();
       }
     } else {
-      // OledLine1 = gps_time + OledLine1s;
+// refresh  time 
       fillDisplayLine1();
     }
   }
