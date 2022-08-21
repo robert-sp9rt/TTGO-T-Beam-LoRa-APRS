@@ -2819,25 +2819,27 @@ void loop() {
             time_last_own_position_via_kiss_received = time_last_frame_via_kiss_received;
             if (!acceptOwnPositionReportsViaKiss)
               goto out; // throw away this frame.
-              was_own_position_packet = true;
-              if (!dont_send_own_position_packets) {
-                gps_state_before_autochange = gps_state;
-                if (gps_allow_sleep_while_kiss) {
+            was_own_position_packet = true;
+            if (!dont_send_own_position_packets) {
+              gps_state_before_autochange = gps_state;
+              if (gps_allow_sleep_while_kiss) {
 #ifdef T_BEAM_V1_0
-                  if (gps_state)
-                    axp.setPowerOutPut(AXP192_LDO3, AXP202_OFF);                           // switch off GPS
+                if (gps_state)
+                  axp.setPowerOutPut(AXP192_LDO3, AXP202_OFF);                           // switch off GPS
 #endif
-                  gps_state = false;
-                }
-                dont_send_own_position_packets = true;
-	      // TODO: there are also tcp kiss devices. Instead of 'kiss_client_came_via_bluetooth', we should mark it in a session struct where we can iterate through
-#ifdef ENABLE_BLUETOOTH
-                if (SerialBT.hasClient())
-                  kiss_client_came_via_bluetooth = true;
-#endif
+                gps_state = false;
               }
-            } else if (*p == ':')
-                    time_last_own_text_message_via_kiss_received = millis();
+              dont_send_own_position_packets = true;
+              // TODO: there are also tcp kiss devices. Instead of 'kiss_client_came_via_bluetooth', we should mark it in a session struct where we can iterate through
+#ifdef ENABLE_BLUETOOTH
+              if (SerialBT.hasClient())
+                kiss_client_came_via_bluetooth = true;
+#endif
+            }
+          } else if (*p == ':') {
+            time_last_own_text_message_via_kiss_received = millis();
+          }
+
         } else {
             if (lora_digipeating_mode > 1) {
               const char *p = strchr(data, '>');
@@ -2973,6 +2975,7 @@ out:
         char *digipeatedflag = strchr(received_frame, '*');
         if (digipeatedflag && digipeatedflag > header_end)
           digipeatedflag = 0;
+
         char *q;
 
         uint8_t our_packet = 0; // 1: from us. 2: digipeated by us
@@ -3012,9 +3015,9 @@ out:
             if (!q || q > header_end) {
               s = 0;
               if (((lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_APRSIS) || user_demands_trace > 1) ||
-              (!digipeatedflag && ((lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_APRSIS__ONLY_IF_HEARD_DIRECT) || user_demands_trace == 1)) )
+                  (!digipeatedflag && ((lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_APRSIS__ONLY_IF_HEARD_DIRECT) || user_demands_trace == 1)) )
                 s = append_element_to_path(received_frame, rssi_for_path);
-              send_to_aprsis(s ? String(s) : loraReceivedFrameString);
+                send_to_aprsis(s ? String(s) : loraReceivedFrameString);
             }
           }
         }
@@ -3032,7 +3035,7 @@ out:
     #ifdef KISS_PROTOCOL
 	s = 0;
         if (((lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_KISS) || user_demands_trace > 1) ||
-        (!digipeatedflag && ((lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_KISS__ONLY_IF_HEARD_DIRECT) || user_demands_trace == 1)) )
+            (!digipeatedflag && ((lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_KISS__ONLY_IF_HEARD_DIRECT) || user_demands_trace == 1)) )
 
           s = kiss_add_snr_rssi_to_path_at_position_without_digippeated_flag ? append_element_to_path(received_frame, rssi_for_path) : add_element_to_path(received_frame, rssi_for_path);
         sendToTNC(s ? String(s) : loraReceivedFrameString);
