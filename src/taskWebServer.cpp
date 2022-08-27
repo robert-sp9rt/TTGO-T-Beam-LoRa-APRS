@@ -24,11 +24,12 @@ extern bool manBeacon;
 extern uint8_t WIFI_DISABLED;
 extern uint8_t WIFI_SEARCHING_FOR_AP;
 extern uint8_t WIFI_CONNECTED_TO_AP;
-extern const uint8_t WIFI_RUNNING_AS_AP;
+extern uint8_t WIFI_NOT_CONNECTED_TO_AP;
+extern int8_t WIFI_RUNNING_AS_AP;
 extern int8_t wifi_connection_status;
 extern String infoApName;
 extern String infoApPass;
-extern String infoApAddr;
+extern String infoIpAddr;
 
 extern int8_t wifi_txpwr_mode_AP;
 extern int8_t wifi_txpwr_mode_STA;
@@ -86,8 +87,10 @@ IPAddress IP_NULL(0,0,0,0);
 IPAddress IP_SUBNET_NULL(0,0,0,0);
 IPAddress IP_GATEWAY_NULL(0,0,0,0);
 
-
 uint8_t wifi_ssid_length = 0;
+
+boolean wifi_do_not_failback_to_mode_AP = false;
+
 
 WebServer server(80);
 #ifdef KISS_PROTOCOL
@@ -817,18 +820,30 @@ void restart_AP_or_STA(void) {
   String wifi_password = preferences.getString(PREF_WIFI_PASSWORD, "");
   String wifi_ssid = preferences.getString(PREF_WIFI_SSID, "");
   apPassword = preferences.getString(PREF_AP_PASSWORD, "");
+  static boolean mode_sta_once_successfully_connected = false;
+
+  infoApName = "[not connected]";
+  infoApPass = "";
+  infoIpAddr = "0.0.0.0";
+
+  WiFi.disconnect();
+  WiFi.softAPdisconnect();
+
   // 8 characters is requirements for WPA2
   if (apPassword.length() < 8) {
     apPassword = defApPassword;
   }
   wifi_ssid_length = wifi_ssid.length();
   if (wifi_ssid_length == 0){
-    wifi_connection_status = WIFI_RUNNING_AS_AP;
+start_soft_AP:
+    Serial.println("Starting AP");
     WiFi.softAP(apSSID.c_str(), apPassword.c_str());
+    wifi_connection_status = WIFI_RUNNING_AS_AP;
     esp_wifi_set_max_tx_power(wifi_txpwr_mode_AP);
   } else {
     int retryWifi = 0;
     WiFi.begin(wifi_ssid.c_str(), wifi_password.length() ? wifi_password.c_str() : nullptr);
+    WiFi.setAutoReconnect(true);
     Serial.println("Connecting to " + wifi_ssid);
     // Set power:  minimum 8 (2dBm) (max 80 (20dBm))
     // https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/network/esp_wifi.html
@@ -836,68 +851,72 @@ void restart_AP_or_STA(void) {
     // We'll use "min", "low", "mid", "high", "max" -> 2dBm (1.5mW) -> 8, 11dBm (12mW) -> 44, 15dBm (32mW) -> 60, 18dBm (63mW) ->72, 20dBm (100mW) ->80
     esp_wifi_set_max_tx_power(wifi_txpwr_mode_STA);
     wifi_connection_status = WIFI_SEARCHING_FOR_AP;
+
+    Serial.print("Searching for AP..");
     while (WiFi.status() != WL_CONNECTED) {
       esp_task_wdt_reset();
-      Serial.print("Not connected: ");
       Serial.println((int)WiFi.status());
-      Serial.print("Retry: ");
+      Serial.print("Retry..");
       Serial.println(retryWifi);
-      vTaskDelay(500/portTICK_PERIOD_MS);
-      retryWifi += 1;
-      if (retryWifi > 60) {
-        WiFi.softAP(apSSID.c_str(), apPassword.c_str());
-        wifi_connection_status = WIFI_RUNNING_AS_AP;
-        Serial.println("Unable to connect to to wifi. Starting AP");
-        Serial.print("SSID: ");
-        Serial.print(apSSID.c_str());
-        Serial.print(" Password: ");
-        Serial.println(apPassword.c_str());
-        esp_wifi_set_max_tx_power(wifi_txpwr_mode_AP);
-        break;
+      if (retryWifi > 60 && mode_sta_once_successfully_connected && !wifi_do_not_failback_to_mode_AP) {
+        esp_task_wdt_reset();
+        goto start_soft_AP;
       }
+      retryWifi += 1;
+      vTaskDelay(500/portTICK_PERIOD_MS);
     }
     esp_task_wdt_reset();
 
-    //Serial.print("WiFi Mode: ");
-    //Serial.println(WiFi.getMode());
-    if (WiFi.getMode() == 3){
-      Serial.println("Running AP. IP: " + WiFi.softAPIP().toString());
-      wifi_connection_status = WIFI_RUNNING_AS_AP;
-      infoApName = apSSID.c_str();
-      infoApPass = apSSID.c_str();
-      infoApAddr = WiFi.softAPIP().toString();
-    } else if (WiFi.getMode() == 1) {
-      // Save some battery
-      //WiFi.setSleep(true);
-      esp_wifi_set_ps(WIFI_PS_MAX_MODEM);
-      Serial.println("Connected. IP: " + WiFi.localIP().toString());
-      wifi_connection_status = WIFI_CONNECTED_TO_AP;
-      infoApName = wifi_ssid.c_str();
-      infoApPass = wifi_password.c_str();
-      infoApAddr = WiFi.localIP().toString();
-    } else {
-      Serial.println("WiFi Mode: " + WiFi.getMode());
-    }
-
-    String ntp_server = preferences.getString(PREF_NTP_SERVER, "");
-    if (ntp_server.isEmpty()) {
-      if (infoApAddr.startsWith("44."))
-        ntp_server = "ntp.hc.r1.ampr.org";
-      else
-        ntp_server = "pool.ntp.org";
-    }
-    configTime(0, 0, ntp_server.c_str());
-    #ifdef ENABLE_SYSLOG
-      struct tm timeinfo{};
-      if(!getLocalTime(&timeinfo)){
-        syslog_log(LOG_WARNING, "Failed to obtain time");
-      } else {
-        char buf[64];
-        strftime(buf, 64, "%A, %B %d %Y %H:%M:%S", &timeinfo);
-        syslog_log(LOG_INFO, String("Time: ") + String(buf));
-      }
-    #endif
   }
+  //Serial.print("WiFi Mode: ");
+  //Serial.println(WiFi.getMode());
+  if (WiFi.getMode() == 3){
+    Serial.println("Running AP. IP: " + WiFi.softAPIP().toString());
+    wifi_connection_status = WIFI_RUNNING_AS_AP;
+    infoApName = apSSID.c_str();
+    infoApPass = apSSID.c_str();
+    infoIpAddr = WiFi.softAPIP().toString();
+  } else if (WiFi.getMode() == 1) {
+    // Save some battery
+    //WiFi.setSleep(true);
+    esp_wifi_set_ps(WIFI_PS_MAX_MODEM);
+    Serial.println("Connected. IP: " + WiFi.localIP().toString());
+    #ifdef ENABLE_SYSLOG
+      if (WiFi.getMode() == 1 && WiFi.status() == WL_CONNECTED)
+        syslog_log(LOG_INFO, "Connected. IP: " + WiFi.localIP().toString());
+    #endif
+    infoApName = wifi_ssid.c_str();
+    infoApPass = wifi_password.c_str();
+    if (WiFi.status() == WL_CONNECTED) {
+      mode_sta_once_successfully_connected = true;
+      wifi_connection_status = WIFI_CONNECTED_TO_AP;
+      infoIpAddr = WiFi.localIP().toString();
+    } else {
+      wifi_connection_status = WIFI_NOT_CONNECTED_TO_AP;
+    }
+  } else {
+    Serial.println("WiFi Mode: " + WiFi.getMode());
+    wifi_connection_status = WIFI_DISABLED;
+  }
+
+  String ntp_server = preferences.getString(PREF_NTP_SERVER, "");
+  if (ntp_server.isEmpty()) {
+    if (infoIpAddr.startsWith("44."))
+      ntp_server = "ntp.hc.r1.ampr.org";
+    else
+      ntp_server = "pool.ntp.org";
+  }
+  configTime(0, 0, ntp_server.c_str());
+  #ifdef ENABLE_SYSLOG
+    struct tm timeinfo{};
+    if(!getLocalTime(&timeinfo)){
+      syslog_log(LOG_WARNING, "Failed to obtain time");
+    } else {
+      char buf[64];
+      strftime(buf, 64, "%A, %B %d %Y %H:%M:%S", &timeinfo);
+      syslog_log(LOG_INFO, String("Time: ") + String(buf));
+    }
+  #endif
   esp_task_wdt_reset();
 }
 
@@ -1025,16 +1044,10 @@ void restart_AP_or_STA(void) {
     if (WiFi.getMode() == 1 && (WiFi.status() != WL_CONNECTED || WiFi.localIP() == IP_NULL || WiFi.subnetMask() == IP_SUBNET_NULL || WiFi.gatewayIP() == IP_GATEWAY_NULL)) {
       static uint32_t last_connection_attempt = millis();
       if (millis() - last_connection_attempt > 20000L) {
-        wifi_connection_status = WIFI_SEARCHING_FOR_AP;
-        WiFi.disconnect();
         esp_task_wdt_reset();
-        WiFi.reconnect();
+        restart_AP_or_STA();
         esp_task_wdt_reset();
         last_connection_attempt = millis();
- #ifdef ENABLE_SYSLOG
-        if (WiFi.getMode() == 1 && WiFi.status() == WL_CONNECTED)
-          syslog_log(LOG_INFO, "Connected. IP: " + WiFi.localIP().toString());
- #endif
       }
       if (WiFi.status() != WL_CONNECTED) {
          // 500ms for reconnect should be enough, ant not too often (power consumption).. Or, if we did not try to reconnect, this value is also fine
@@ -1042,7 +1055,6 @@ void restart_AP_or_STA(void) {
          continue;
       }
     } else if (WiFi.getMode() == 3 && wifi_ssid_length > 0 && millis() - webserver_started > 5*60*1000L && WiFi.softAPgetStationNum() == 0) {
-      wifi_connection_status = WIFI_SEARCHING_FOR_AP;
       restart_AP_or_STA();
       webserver_started = millis();
       continue;

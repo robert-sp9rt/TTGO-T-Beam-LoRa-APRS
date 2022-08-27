@@ -304,12 +304,13 @@ bool manBeacon = false;
 int8_t WIFI_DISABLED = 0;
 int8_t WIFI_SEARCHING_FOR_AP = 1;
 int8_t WIFI_CONNECTED_TO_AP = 2;
-int8_t WIFI_RUNNING_AS_AP = 4;
+int8_t WIFI_NOT_CONNECTED_TO_AP = 4;
+int8_t WIFI_RUNNING_AS_AP = 8;
 int8_t wifi_connection_status = WIFI_DISABLED;
 int8_t wifi_connection_status_prev = -1;
 String infoApName = "";
 String infoApPass = "";
-String infoApAddr = "";
+String infoIpAddr = "";
 
 #define ANGLE_AVGS 3                  // angle averaging - x times
 float average_course[ANGLE_AVGS];
@@ -2544,14 +2545,14 @@ void loop() {
           fillDisplayLines3to5();
           if (gps_state == true && gps_isValid) {
 #ifdef ENABLE_WIFI
-            writedisplaytext("((MAN TX))","SSID: " + infoApName,"IP: " + infoApAddr, OledLine3, OledLine4, OledLine5);
+            writedisplaytext("((MAN TX))","SSID: " + infoApName,"IP: " + infoIpAddr, OledLine3, OledLine4, OledLine5);
 #else
             writedisplaytext("((MAN TX))","","",OledLine3, OledLine4, OledLine5);
 #endif
             sendpacket(SP_POS_GPS);
           } else {
 #ifdef ENABLE_WIFI
-            writedisplaytext("((FIX TX))","SSID: " + infoApName,"IP: " + infoApAddr, OledLine3, OledLine4, OledLine5);
+            writedisplaytext("((FIX TX))","SSID: " + infoApName,"IP: " + infoIpAddr, OledLine3, OledLine4, OledLine5);
 #else
             writedisplaytext("((FIX TX))","","",OledLine3, OledLine4, OledLine5);
 #endif
@@ -2668,13 +2669,13 @@ void loop() {
   if (wifi_connection_status_prev != wifi_connection_status) {
     enableOled(); // turn ON OLED temporary
     if (wifi_connection_status == WIFI_CONNECTED_TO_AP) {
-      writedisplaytext(" ((WiFi))","WiFi Client Mode","SSID: " + infoApName, "Pass: ********", "IP: " + infoApAddr, getSatAndBatInfo());
+      writedisplaytext(" ((WiFi))","WiFi Client Mode","SSID: " + infoApName, "Pass: ********", "IP: " + infoIpAddr, getSatAndBatInfo());
     } else if (wifi_connection_status == WIFI_SEARCHING_FOR_AP) {
       writedisplaytext(" ((WiFi))","WiFi Client Mode","SSID: " + infoApName, "Not in sight!", "IP: none", getSatAndBatInfo());
     } else if (wifi_connection_status == WIFI_RUNNING_AS_AP) {
-      writedisplaytext(" ((WiFi))","WiFi AP Mode","SSID: " + infoApName, "Pass: " + infoApPass, "IP: " + infoApAddr, getSatAndBatInfo());
+      writedisplaytext(" ((WiFi))","WiFi AP Mode","SSID: " + infoApName, "Pass: " + infoApPass, "IP: " + infoIpAddr, getSatAndBatInfo());
     } else {
-//      writedisplaytext(" ((WiFi))","WiFi off","SSID: " + infoApName, "Pass: " + infoApPass, "IP: " + infoApAddr, getSatAndBatInfo());
+//      writedisplaytext(" ((WiFi))","WiFi off","SSID: " + infoApName, "Pass: " + infoApPass, "IP: " + infoIpAddr, getSatAndBatInfo());
       writedisplaytext(" ((WiFi))","WiFi off","press key long","to enable","", getSatAndBatInfo());
     }
     wifi_connection_status_prev = wifi_connection_status;
@@ -2688,7 +2689,7 @@ void loop() {
     enableOled();
     fillDisplayLines3to5();
 #ifdef	ENABLE_WIFI
-    writedisplaytext("((WEB TX))","SSID: " + infoApName,"IP: " + infoApAddr, OledLine3, OledLine4, OledLine5);
+    writedisplaytext("((WEB TX))","SSID: " + infoApName,"IP: " + infoIpAddr, OledLine3, OledLine4, OledLine5);
 #else
     writedisplaytext("((WEB TX))","","",OledLine3, OledLine4, OledLine5);
 #endif
