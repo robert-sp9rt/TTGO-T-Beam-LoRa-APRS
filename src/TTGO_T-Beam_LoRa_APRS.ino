@@ -361,6 +361,7 @@ int rx_on_frequencies = 1;			// RX freq. Only if lora_digipeating_mode < 2 (we a
 
 bool acceptOwnPositionReportsViaKiss = true;		// true: Switches off local beacons as long as a kiss device is sending positions with our local callsign. false: filters out position packets with own callsign coming from kiss (-> do not send to LoRa).
 boolean gps_allow_sleep_while_kiss = true;		// user has a kiss device attached via kiss which sends positions with own call, we don't need our gps to be turned on -> We pause sending positions by ourself (neither fixed nor smart beaconing). Except: user has a display attached to this tracker, he'll will be able to see his position because our gps does not go to sleep (-> set this to false). Why sleep? Energy saving
+boolean wifi_do_failback_to_mode_AP = true;		// Allow failback to mode AP after once connected successfully connected (after boot) to configured remote AP. Disable for igates, where you don't need your tracker to be a hotspot. You like to enable, if you use your tracker portable and it should automatically be wifi client to your home network, and be AP if you are outside.
 
 #ifdef KISS_PROTOCOL
 // do not configure
@@ -1205,6 +1206,12 @@ void setup(){
       preferences.putBool(PREF_GPSSERVER_ENABLE, gpsServer_enabled);
     }
     gpsServer_enabled = preferences.getBool(PREF_GPSSERVER_ENABLE);
+
+    if (!preferences.getBool(PREF_WIFI_STA_ALLOW_FAILBACK_TO_MODE_AP_AFTER_ONCE_CONNECTED_INIT)){
+      preferences.putBool(PREF_WIFI_STA_ALLOW_FAILBACK_TO_MODE_AP_AFTER_ONCE_CONNECTED_INIT, true);
+      preferences.putBool(PREF_WIFI_STA_ALLOW_FAILBACK_TO_MODE_AP_AFTER_ONCE_CONNECTED, wifi_do_failback_to_mode_AP);
+    }
+    wifi_do_failback_to_mode_AP = preferences.getBool(PREF_WIFI_STA_ALLOW_FAILBACK_TO_MODE_AP_AFTER_ONCE_CONNECTED);
 
     if (!preferences.getBool(PREF_WIFI_TXPWR_MODE_AP_INIT)){
       preferences.putBool(PREF_WIFI_TXPWR_MODE_AP_INIT, true);

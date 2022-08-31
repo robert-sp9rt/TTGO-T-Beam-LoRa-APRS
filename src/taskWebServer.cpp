@@ -37,6 +37,10 @@ extern int8_t wifi_txpwr_mode_STA;
 extern bool tncServer_enabled;
 extern bool gpsServer_enabled;
 
+
+extern boolean wifi_do_failback_to_mode_AP;
+
+
 // For APRS-IS connection
 extern String to_aprsis_data;
 extern boolean aprsis_enabled;
@@ -56,6 +60,10 @@ extern String aprsLonPreset;
 extern String aprsPresetShown;
 String curPos;
 // last line of display, Sat & Batt Info
+extern String OledLine1;
+extern String OledLine2;
+extern String OledLine3;
+extern String OledLine4;
 extern String OledLine5;
 
 extern char src_call_blacklist;
@@ -65,8 +73,12 @@ std::list <tReceivedPacketData*> receivedPackets;
 const int MAX_RECEIVED_LIST_SIZE = 50;
 
 String apSSID = "";
-String apPassword;
+String apPassword = "";
 String defApPassword = "xxxxxxxxxx";
+String wifi_password = "";
+String wifi_ssid = "";
+uint8_t wifi_ssid_length = 0;
+
 
 // needed for aprsis igate functionality
 String aprsis_status = "Disconnected";
@@ -86,10 +98,6 @@ extern void loraSend(byte, float, ulong, const String &);
 IPAddress IP_NULL(0,0,0,0);
 IPAddress IP_SUBNET_NULL(0,0,0,0);
 IPAddress IP_GATEWAY_NULL(0,0,0,0);
-
-uint8_t wifi_ssid_length = 0;
-
-boolean wifi_do_not_failback_to_mode_AP = false;
 
 
 WebServer server(80);
@@ -224,6 +232,7 @@ void handle_SaveWifiCfg() {
       Serial.println("Updated AP PASS: " + server.arg(PREF_AP_PASSWORD));
     }
   }
+  preferences.putBool(PREF_WIFI_STA_ALLOW_FAILBACK_TO_MODE_AP_AFTER_ONCE_CONNECTED,  server.hasArg(PREF_WIFI_STA_ALLOW_FAILBACK_TO_MODE_AP_AFTER_ONCE_CONNECTED));
   if (server.hasArg(PREF_WIFI_TXPWR_MODE_AP)) {
     // Web chooser min, low, mid, high, max
     // We'll use "min", "low", "mid", "high", "max" -> 2dBm (1.5mW) -> 8, 11dBm (12mW) -> 44, 15dBm (32mW) -> 60, 18dBm (63mW) ->72, 20dBm (100mW) ->80
@@ -286,6 +295,7 @@ void handle_Cfg() {
   jsonData += String("\"") + PREF_AP_PASSWORD + "\": \"" + jsonEscape((preferences.getString(PREF_AP_PASSWORD, "").isEmpty() ? String("") : "*")) + R"(",)";
   jsonData += jsonLineFromPreferenceInt(PREF_WIFI_ENABLE);
   jsonData += jsonLineFromPreferenceString(PREF_WIFI_SSID);
+  jsonData += jsonLineFromPreferenceBool(PREF_WIFI_STA_ALLOW_FAILBACK_TO_MODE_AP_AFTER_ONCE_CONNECTED);
   jsonData += jsonLineFromPreferenceInt(PREF_WIFI_TXPWR_MODE_AP);
   jsonData += jsonLineFromPreferenceInt(PREF_WIFI_TXPWR_MODE_STA);
   jsonData += jsonLineFromPreferenceBool(PREF_TNCSERVER_ENABLE);
@@ -362,6 +372,10 @@ void handle_Cfg() {
   curPos = aprsLatPreset + " " + aprsLonPreset + " [" + (aprsPresetShown == "" ? "GPS" : aprsPresetShown) + "]";
   jsonData += jsonLineFromString("curPos", curPos.c_str());
   jsonData += jsonLineFromInt("UptimeMinutes", millis()/1000/60);
+  jsonData += jsonLineFromString("OledLine1", OledLine1.c_str());
+  jsonData += jsonLineFromString("OledLine2", OledLine2.c_str());
+  jsonData += jsonLineFromString("OledLine3", OledLine3.c_str());
+  jsonData += jsonLineFromString("OledLine4", OledLine4.c_str());
   jsonData += jsonLineFromString("OledLine5", OledLine5.c_str(), true);
 
   jsonData += "}";
@@ -369,6 +383,11 @@ void handle_Cfg() {
 }
 
 void handle_ReceivedList() {
+  // DynamicJsonDocument: heap size problem? *500 is too small (json array will be truncated if received list tends tot 50 entries;
+  // *1000 results in '{}' on TTGO t-beam (while it's correct on TTGO lora32)
+  // -> Better not rely on complex functions that may not work as expected. We already have that simple and
+  // -> ifdef notdef ;)
+#ifdef	notdef
   //PSRAMJsonDocument doc(MAX_RECEIVED_LIST_SIZE * 1000);
   DynamicJsonDocument doc(MAX_RECEIVED_LIST_SIZE * 1000);
   JsonObject root = doc.to<JsonObject>();
@@ -376,7 +395,7 @@ void handle_ReceivedList() {
   for (auto element: receivedPackets){
     char buf[64];
     strftime(buf, 64, "%Y-%m-%d %H:%M:%S", &element->rxTime);
-    auto packet_data = received.createNestedObject();
+    auto packet_data = eceived.createNestedObject();
     packet_data["time"] = String(buf);
     packet_data["packet"] = element->packet->c_str();
     packet_data["rssi"] = element->RSSI;
@@ -384,6 +403,31 @@ void handle_ReceivedList() {
   }
 
   server.send(200,"application/json", doc.as<String>());
+
+#else
+
+  String jsonData = "{\"received\":[";
+  boolean first_entry = true;
+  for (auto element: receivedPackets) {
+    char buf[64];
+    strftime(buf, 64, "%Y-%m-%d %H:%M:%S", &element->rxTime);
+    if (first_entry) {
+      jsonData += "{";
+      first_entry = false;
+    } else {
+      jsonData += ",{";
+    }
+    jsonData += jsonLineFromString("time", buf);
+    jsonData += jsonLineFromString("packet", element->packet->c_str());
+    jsonData += jsonLineFromInt("rssi", element->RSSI);
+    jsonData += jsonLineFromInt("snr", element->SNR, true);
+    jsonData += "}";
+  }
+  jsonData += "]}";
+
+  server.send(200,"application/json", jsonData);
+
+#endif
 }
 
 
@@ -817,34 +861,25 @@ void handle_saveDeviceCfg(){
 
 void restart_AP_or_STA(void) {
 
-  String wifi_password = preferences.getString(PREF_WIFI_PASSWORD, "");
-  String wifi_ssid = preferences.getString(PREF_WIFI_SSID, "");
-  apPassword = preferences.getString(PREF_AP_PASSWORD, "");
   static boolean mode_sta_once_successfully_connected = false;
+  static boolean first_run = true;
+  boolean start_soft_ap = first_run ? true : false;
+  first_run = false;
 
-  infoApName = "[not connected]";
-  infoApPass = "";
-  infoIpAddr = "0.0.0.0";
+  if (wifi_ssid_length > 0) {
 
-  WiFi.disconnect();
-  WiFi.softAPdisconnect();
-
-  // 8 characters is requirements for WPA2
-  if (apPassword.length() < 8) {
-    apPassword = defApPassword;
-  }
-  wifi_ssid_length = wifi_ssid.length();
-  if (wifi_ssid_length == 0){
-start_soft_AP:
-    Serial.println("Starting AP");
-    WiFi.softAP(apSSID.c_str(), apPassword.c_str());
-    wifi_connection_status = WIFI_RUNNING_AS_AP;
-    esp_wifi_set_max_tx_power(wifi_txpwr_mode_AP);
-  } else {
     int retryWifi = 0;
+    infoApName = "[not connected]";
+    infoApPass = "";
+    infoIpAddr = "0.0.0.0";
+
+    start_soft_ap = false;
+
+    WiFi.disconnect();
+    WiFi.softAPdisconnect();
+    WiFi.mode(WIFI_STA);
     WiFi.begin(wifi_ssid.c_str(), wifi_password.length() ? wifi_password.c_str() : nullptr);
     WiFi.setAutoReconnect(true);
-    Serial.println("Connecting to " + wifi_ssid);
     // Set power:  minimum 8 (2dBm) (max 80 (20dBm))
     // https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/network/esp_wifi.html
     // Mapping Table {Power, max_tx_power} = {{8, 2}, {20, 5}, {28, 7}, {34, 8}, {44, 11}, {52, 13}, {56, 14}, {60, 15}, {66, 16}, {72, 18}, {80, 20}}.
@@ -858,45 +893,65 @@ start_soft_AP:
       Serial.println((int)WiFi.status());
       Serial.print("Retry..");
       Serial.println(retryWifi);
-      if (retryWifi > 60 && mode_sta_once_successfully_connected && !wifi_do_not_failback_to_mode_AP) {
+      if (retryWifi > 60) {
         esp_task_wdt_reset();
-        goto start_soft_AP;
+        if (!mode_sta_once_successfully_connected || wifi_do_failback_to_mode_AP) {
+          start_soft_ap = true;
+        }
+        break;
       }
       retryWifi += 1;
       vTaskDelay(500/portTICK_PERIOD_MS);
     }
     esp_task_wdt_reset();
-
+  } else {
+    // may start soft AP, if not already running as AP
+    if (WiFi.getMode() == WIFI_MODE_STA) {
+      start_soft_ap = true;
+    }
   }
-  //Serial.print("WiFi Mode: ");
-  //Serial.println(WiFi.getMode());
-  if (WiFi.getMode() == 3){
-    Serial.println("Running AP. IP: " + WiFi.softAPIP().toString());
+
+  if (start_soft_ap) {
+    WiFi.disconnect();
+    WiFi.softAPdisconnect();
+    WiFi.mode(WIFI_AP);
+
+    Serial.println("Starting AP");
+    WiFi.softAP(apSSID.c_str(), apPassword.c_str());
     wifi_connection_status = WIFI_RUNNING_AS_AP;
+    esp_wifi_set_max_tx_power(wifi_txpwr_mode_AP);
+
+    Serial.println("Running AP. IP: " + WiFi.softAPIP().toString());
+    #ifdef ENABLE_SYSLOG
+        syslog_log(LOG_INFO, "Running AP: SSID: " + apSSID, ". IP: " + WiFi.softAPIP().toString());
+    #endif
     infoApName = apSSID.c_str();
     infoApPass = apSSID.c_str();
     infoIpAddr = WiFi.softAPIP().toString();
-  } else if (WiFi.getMode() == 1) {
+    wifi_connection_status = WIFI_RUNNING_AS_AP;
+
+  } else if (WiFi.getMode() == WIFI_MODE_STA) {
     // Save some battery
     //WiFi.setSleep(true);
     esp_wifi_set_ps(WIFI_PS_MAX_MODEM);
     Serial.println("Connected. IP: " + WiFi.localIP().toString());
     #ifdef ENABLE_SYSLOG
-      if (WiFi.getMode() == 1 && WiFi.status() == WL_CONNECTED)
+      if (WiFi.getMode() == WIFI_MODE_STA && WiFi.status() == WL_CONNECTED)
         syslog_log(LOG_INFO, "Connected. IP: " + WiFi.localIP().toString());
     #endif
     infoApName = wifi_ssid.c_str();
     infoApPass = wifi_password.c_str();
     if (WiFi.status() == WL_CONNECTED) {
       mode_sta_once_successfully_connected = true;
-      wifi_connection_status = WIFI_CONNECTED_TO_AP;
       infoIpAddr = WiFi.localIP().toString();
+      wifi_connection_status = WIFI_CONNECTED_TO_AP;
     } else {
       wifi_connection_status = WIFI_NOT_CONNECTED_TO_AP;
     }
   } else {
     Serial.println("WiFi Mode: " + WiFi.getMode());
     wifi_connection_status = WIFI_DISABLED;
+    return;
   }
 
   String ntp_server = preferences.getString(PREF_NTP_SERVER, "");
@@ -917,6 +972,19 @@ start_soft_AP:
       syslog_log(LOG_INFO, String("Time: ") + String(buf));
     }
   #endif
+
+  server.stop();
+  server.begin();
+  #ifdef KISS_PROTOCOL
+    if (tncServer_enabled) {
+      tncServer.stop();
+      tncServer.begin();
+    }
+  #endif
+  if (gpsServer_enabled) {
+    gpsServer.stop();
+    gpsServer.begin();
+  }
   esp_task_wdt_reset();
 }
 
@@ -976,23 +1044,25 @@ start_soft_AP:
   esp_task_wdt_init(120, true); //enable panic so ESP32 restarts
   esp_task_wdt_add(NULL); //add current thread to WDT watch
 
-  restart_AP_or_STA();
+  wifi_password = preferences.getString(PREF_WIFI_PASSWORD, "");
+  wifi_ssid = preferences.getString(PREF_WIFI_SSID, "");
+  wifi_ssid_length = wifi_ssid.length();
+  apPassword = preferences.getString(PREF_AP_PASSWORD, "");
+  // 8 characters is requirements for WPA2
+  if (apPassword.length() < 8) {
+    apPassword = defApPassword;
+  }
+
+
  #ifdef ENABLE_SYSLOG
    syslog.server(SYSLOG_IP, 514);
    syslog.deviceHostname(webServerCfg->callsign.c_str());
    syslog.appName("TTGO");
    syslog.defaultPriority(LOG_KERN);
-   if (WiFi.getMode() == 1 && WiFi.status() == WL_CONNECTED)
-     syslog_log(LOG_INFO, "Connected. IP: " + WiFi.localIP().toString());
  #endif
 
-  server.begin();
-  #ifdef KISS_PROTOCOL
-    if (tncServer_enabled)
-      tncServer.begin();
-  #endif
-  if (gpsServer_enabled)
-    gpsServer.begin();
+  restart_AP_or_STA();
+
   if (MDNS.begin(webServerCfg->callsign.c_str())) {
     MDNS.setInstanceName(webServerCfg->callsign + " TTGO LoRa APRS TNC " + TXFREQ + "MHz");
     MDNS.addService("http", "tcp", 80);
@@ -1000,6 +1070,7 @@ start_soft_AP:
       MDNS.addService("kiss-tnc", "tcp", NETWORK_TNC_PORT);
     #endif
   }
+
 
   webListReceivedQueue = xQueueCreate(4,sizeof(tReceivedPacketData *));
   tReceivedPacketData *receivedPacketData = nullptr;
@@ -1041,22 +1112,27 @@ start_soft_AP:
     esp_task_wdt_reset();
 
     // Mode STA and connection lost? -> reconnect. Or when dhcp renew failed?
-    if (WiFi.getMode() == 1 && (WiFi.status() != WL_CONNECTED || WiFi.localIP() == IP_NULL || WiFi.subnetMask() == IP_SUBNET_NULL || WiFi.gatewayIP() == IP_GATEWAY_NULL)) {
-      static uint32_t last_connection_attempt = millis();
-      if (millis() - last_connection_attempt > 20000L) {
-        esp_task_wdt_reset();
+    if (WiFi.getMode() == WIFI_MODE_STA) {
+      if (WiFi.status() != WL_CONNECTED || WiFi.localIP() == IP_NULL || WiFi.subnetMask() == IP_SUBNET_NULL || WiFi.gatewayIP() == IP_GATEWAY_NULL) {
+        static uint32_t last_connection_attempt = millis();
+        if (millis() - last_connection_attempt > 20000L) {
+          esp_task_wdt_reset();
+          restart_AP_or_STA();
+          webserver_started = millis();
+          esp_task_wdt_reset();
+          last_connection_attempt = millis();
+        }
+        if (WiFi.status() != WL_CONNECTED) {
+           // 500ms for reconnect should be enough, ant not too often (power consumption).. Or, if we did not try to reconnect, this value is also fine
+           delay(500);
+           continue;
+        }
+      }
+    } else {
+      if (wifi_ssid_length > 0 && millis() - webserver_started > 60*1000L && WiFi.softAPgetStationNum() < 1) {
         restart_AP_or_STA();
-        esp_task_wdt_reset();
-        last_connection_attempt = millis();
+        webserver_started = millis();
       }
-      if (WiFi.status() != WL_CONNECTED) {
-         // 500ms for reconnect should be enough, ant not too often (power consumption).. Or, if we did not try to reconnect, this value is also fine
-         delay(500);
-         continue;
-      }
-    } else if (WiFi.getMode() == 3 && wifi_ssid_length > 0 && millis() - webserver_started > 5*60*1000L && WiFi.softAPgetStationNum() == 0) {
-      restart_AP_or_STA();
-      webserver_started = millis();
       continue;
     }
 
@@ -1082,7 +1158,7 @@ start_soft_AP:
 
     if (aprsis_enabled) {
       boolean err = true;
-      if (WiFi.getMode() == 1) {
+      if (WiFi.getMode() == WIFI_MODE_STA) {
         if (WiFi.status() != WL_CONNECTED) { aprsis_status = "Error: no internet"; goto on_err; } else { if (aprsis_status == "Error: no internet") aprsis_status = "Internet available"; }
         if (!aprs_is_client.connected() && t_connect_apprsis_again < millis()) {
           aprsis_status = "Connecting";
