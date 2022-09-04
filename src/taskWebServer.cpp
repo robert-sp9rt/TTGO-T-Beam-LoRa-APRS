@@ -923,7 +923,7 @@ void restart_AP_or_STA(void) {
 
     Serial.println("Running AP. IP: " + WiFi.softAPIP().toString());
     #ifdef ENABLE_SYSLOG
-        syslog_log(LOG_INFO, "Running AP: SSID: " + apSSID, ". IP: " + WiFi.softAPIP().toString());
+        syslog_log(LOG_INFO, "Running AP: SSID: " + apSSID + ". IP: " + WiFi.softAPIP().toString());
     #endif
     infoApName = apSSID.c_str();
     infoApPass = apSSID.c_str();
