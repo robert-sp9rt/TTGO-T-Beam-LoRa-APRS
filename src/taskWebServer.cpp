@@ -58,7 +58,6 @@ extern boolean lora_tx_enabled;
 extern String aprsLatPreset;
 extern String aprsLonPreset;
 extern String aprsPresetShown;
-String curPos;
 // last line of display, Sat & Batt Info
 extern String OledLine1;
 extern String OledLine2;
@@ -290,6 +289,7 @@ void handle_Restore() {
 }
 
 void handle_Cfg() {
+  String s;
   String jsonData = "{";
   jsonData += String("\"") + PREF_WIFI_PASSWORD + "\": \"" + jsonEscape((preferences.getString(PREF_WIFI_PASSWORD, "").isEmpty() ? String("") : "*")) + R"(",)";
   jsonData += String("\"") + PREF_AP_PASSWORD + "\": \"" + jsonEscape((preferences.getString(PREF_AP_PASSWORD, "").isEmpty() ? String("") : "*")) + R"(",)";
@@ -369,13 +369,14 @@ void handle_Cfg() {
   jsonData += jsonLineFromInt("FreeSketchSpace", ESP.getFreeSketchSpace());
   jsonData += jsonLineFromInt("PSRAMSize", ESP.getPsramSize());
   jsonData += jsonLineFromInt("PSRAMFree", ESP.getFreePsram());
-  curPos = aprsLatPreset + " " + aprsLonPreset + " [" + (aprsPresetShown == "" ? "GPS" : aprsPresetShown) + "]";
-  jsonData += jsonLineFromString("curPos", curPos.c_str());
+  s = aprsLatPreset + " " + aprsLonPreset + " [" + (aprsPresetShown == "" ? "GPS" : aprsPresetShown) + "]";
+  jsonData += jsonLineFromString("curPos", s.c_str());
   jsonData += jsonLineFromInt("UptimeMinutes", millis()/1000/60);
   jsonData += jsonLineFromString("OledLine1", OledLine1.c_str());
   jsonData += jsonLineFromString("OledLine2", OledLine2.c_str());
   jsonData += jsonLineFromString("OledLine3", OledLine3.c_str());
-  jsonData += jsonLineFromString("OledLine4", OledLine4.c_str());
+  s = String(OledLine4); s.replace("\xF7", "°");
+  jsonData += jsonLineFromString("OledLine4", s.c_str());
   jsonData += jsonLineFromString("OledLine5", OledLine5.c_str(), true);
 
   jsonData += "}";
