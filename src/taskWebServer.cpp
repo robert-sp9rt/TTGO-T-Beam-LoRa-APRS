@@ -975,6 +975,7 @@ void restart_AP_or_STA(void) {
 
   server.stop();
   server.begin();
+
   #ifdef KISS_PROTOCOL
     if (tncServer_enabled) {
       tncServer.stop();
@@ -1122,18 +1123,12 @@ void restart_AP_or_STA(void) {
           esp_task_wdt_reset();
           last_connection_attempt = millis();
         }
-        if (WiFi.status() != WL_CONNECTED) {
-           // 500ms for reconnect should be enough, ant not too often (power consumption).. Or, if we did not try to reconnect, this value is also fine
-           delay(500);
-           continue;
-        }
       }
     } else {
       if (wifi_ssid_length > 0 && millis() - webserver_started > 60*1000L && WiFi.softAPgetStationNum() < 1) {
         restart_AP_or_STA();
         webserver_started = millis();
       }
-      continue;
     }
 
     server.handleClient();
