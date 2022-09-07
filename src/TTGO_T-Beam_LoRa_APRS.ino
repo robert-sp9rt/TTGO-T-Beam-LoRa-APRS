@@ -3062,7 +3062,7 @@ out:
           sendToWebList(loraReceivedFrameString, bg_rf95rssi_to_rssi(rf95.lastRssi()), bg_rf95snr_to_snr(rf95.lastSNR()));
         #endif
         #ifdef ENABLE_SYSLOG
-          String loraReceivedFrameString_syslog  = String(loraReceivedFrameString());
+          String loraReceivedFrameString_syslog = String(loraReceivedFrameString);
           loraReceivedFrameString_syslog.trim();
           for (char i = 0; i < 0x20; i++) {
             loraReceivedFrameString_syslog.replace(String(i), "_");
