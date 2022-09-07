@@ -234,9 +234,6 @@ int OLED_refresh = 1000;
   time_t nextTelemetryFrame;
 #endif
 
-//byte arrays
-byte  lora_TXBUFF[BG_RF95_MAX_MESSAGE_LEN];      //buffer for packet to send
-byte  lora_RXBUFF[BG_RF95_MAX_MESSAGE_LEN];      //buffer for packet to send
 
 //byte Variables
 byte  lora_TXStart;          //start of packet data in TXbuff
@@ -403,8 +400,6 @@ static const adc_unit_t unit = ADC_UNIT_1;
   AXP20X_Class axp;
 #endif
 
-// checkRX
-uint8_t loraReceivedLength = sizeof(lora_RXBUFF);
 
 // Singleton instance of the radio driver
 BG_RF95 rf95(18, 26);        // TTGO T-Beam has NSS @ Pin 18 and Interrupt IO @ Pin26
@@ -415,6 +410,9 @@ char blacklist_calls[256] = "";
 // initialize OLED display
 #define OLED_RESET 16         // not used
 Adafruit_SSD1306 display(128, 64, &Wire, OLED_RESET);
+
+
+xSemaphoreHandle sema_lora_chip;
 
 
 // + FUNCTIONS-----------------------------------------------------------+//
@@ -700,15 +698,6 @@ void sendpacket(uint8_t sp_flags){
 void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, const String &message) {
   if (!lora_tx_enabled)
     return;
-#ifdef T_BEAM_V1_0
-  axp.setPowerOutPut(AXP192_LDO2, AXP202_ON);                           // switch LoRa chip on
-#endif
-
-  int messageSize = min(message.length(), sizeof(lora_TXBUFF) - 1);
-  message.toCharArray((char*)lora_TXBUFF, messageSize + 1, 0);
-  lora_set_speed(lora_SPEED);
-  rf95.setFrequency(lora_FREQ);
-  rf95.setTxPower(lora_LTXPower);
 
   // kind of csma/cd. TODO: better approach: add to a tx-queue
   // in SF12: preamble + lora header = 663.552 -> we wait 1300ms for check if lora-chip is in decoding
@@ -724,9 +713,16 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, const Strin
   if (lora_speed  == 610) wait_for_signal = 250;
   else if (lora_speed  == 1200) wait_for_signal = 125;
 
+
+  // sema lock for lora chip operations
+  if (xSemaphoreTake(sema_lora_chip, 10) != pdTRUE)
+    esp_task_wdt_reset();
+
   randomSeed(millis());
+
   int n;
   for (n = 0; n < 30; n++) {
+    esp_task_wdt_reset();
     delay(wait_for_signal);
     if (rf95.SignalDetected()) {
       continue;
@@ -736,6 +732,19 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, const Strin
       break;
     }
   }
+
+  esp_task_wdt_reset();
+#ifdef T_BEAM_V1_0
+  axp.setPowerOutPut(AXP192_LDO2, AXP202_ON);                           // switch LoRa chip on
+#endif
+
+  //byte array
+  byte  lora_TXBUFF[BG_RF95_MAX_MESSAGE_LEN];      //buffer for packet to send
+  int messageSize = min(message.length(), sizeof(lora_TXBUFF) - 1);
+  message.toCharArray((char*)lora_TXBUFF, messageSize + 1, 0);
+  lora_set_speed(lora_SPEED);
+  rf95.setFrequency(lora_FREQ);
+  rf95.setTxPower(lora_LTXPower);
 
   #ifdef ENABLE_LED_SIGNALING
     digitalWrite(TXLED, LOW);
@@ -761,6 +770,9 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, const Strin
   if (! (lora_rx_enabled || lora_digipeating_mode > 0  || SerialBT.hasClient()) )
     axp.setPowerOutPut(AXP192_LDO2, AXP202_OFF);                           // switch LoRa chip off
 #endif
+  // release lock
+  xSemaphoreGive(sema_lora_chip);
+
 }
 
 
@@ -1051,6 +1063,8 @@ void sendToWebList(const String& TNC2FormatedFrame, const int RSSI, const int SN
     auto *receivedPacketData = new tReceivedPacketData();
     receivedPacketData->packet = new String();
     receivedPacketData->packet->concat(TNC2FormatedFrame);
+    // strip EOL
+    receivedPacketData->packet->trim();
     receivedPacketData->RSSI = RSSI;
     receivedPacketData->SNR = SNR;
     getLocalTime(&receivedPacketData->rxTime);
@@ -1867,6 +1881,8 @@ void setup(){
   esp_task_wdt_add(NULL); //add current thread to WDT watch
 
   lastTxdistance  = 0;
+
+  sema_lora_chip = xSemaphoreCreateBinary();
 }
 
 void enableOled() {
@@ -2932,7 +2948,9 @@ out:
     }
   #endif
 
-  if (rf95.waitAvailableTimeout(100)) {
+  // sema lock for lora chip operations
+  if (xSemaphoreTake(sema_lora_chip, 100) == pdTRUE) {
+   if (rf95.waitAvailableTimeout(100)) {
     #ifdef T_BEAM_V1_0
       #ifdef ENABLE_LED_SIGNALING
         axp.setChgLEDMode(AXP20X_LED_LOW_LEVEL);
@@ -2944,8 +2962,13 @@ out:
     #endif
 
     // we need to read the received packt, even if rx is set to disable. else rf95.waitAvailableTimeout(100) will always show, data is available
-    loraReceivedLength = sizeof(lora_RXBUFF);                           // reset max length before receiving!
+    //byte array
+    byte  lora_RXBUFF[BG_RF95_MAX_MESSAGE_LEN];      //buffer for packet to send
+    uint8_t loraReceivedLength = sizeof(lora_RXBUFF); // (implicit ) reset max length before receiving!
     boolean lora_rx_data_available = rf95.recvAPRS(lora_RXBUFF, &loraReceivedLength);
+    // release lock here. We read the data from the lora chip. And we may call later loraSend (which should not be blocked by ourself)
+    xSemaphoreGive(sema_lora_chip);
+
     const char *rssi_for_path = encode_snr_rssi_in_path();
 
     // always needed (even if rx is disabled)
@@ -3038,7 +3061,14 @@ out:
         #ifdef ENABLE_WIFI
           sendToWebList(loraReceivedFrameString, bg_rf95rssi_to_rssi(rf95.lastRssi()), bg_rf95snr_to_snr(rf95.lastSNR()));
         #endif
-        syslog_log(LOG_INFO, String("Received LoRa: '") + loraReceivedFrameString + "', RSSI:" + bg_rf95rssi_to_rssi(rf95.lastRssi()) + ", SNR: " + bg_rf95snr_to_snr(rf95.lastSNR()));
+        #ifdef ENABLE_SYSLOG
+          String loraReceivedFrameString_syslog  = String(loraReceivedFrameString());
+          loraReceivedFrameString_syslog.trim();
+          for (char i = 0; i < 0x20; i++) {
+            loraReceivedFrameString_syslog.replace(String(i), "_");
+          }
+          syslog_log(LOG_INFO, String("Received LoRa: '") + loraReceivedFrameString_syslog + "', RSSI:" + bg_rf95rssi_to_rssi(rf95.lastRssi()) + ", SNR: " + bg_rf95snr_to_snr(rf95.lastSNR()));
+        #endif
     #endif
     #ifdef KISS_PROTOCOL
 	s = 0;
@@ -3087,7 +3117,12 @@ invalid_packet:
     #else
       ; // make compiler happy
     #endif
+   } else {
+     // release lock
+     xSemaphoreGive(sema_lora_chip);
+   }
   }
+  
   if (lora_rx_enabled && rx_on_frequencies == 3 && lora_digipeating_mode < 2) {
     static uint8_t slot_table[9][10] = {
       { 0, 1, 1, 1, 1, 1, 1, 1, 1, 1 }, // 1:9

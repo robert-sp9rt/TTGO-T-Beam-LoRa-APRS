@@ -125,11 +125,11 @@ void sendGzipHeader() { server.sendHeader("Content-Encoding", "gzip"); }
 String jsonEscape(String s){
     s.replace("\\", "\\\\");
     s.replace("\"", "\\\"");
-    s.replace("\x7f", "\\\x7f");
-    for(char i = 0; i < 0x1f; i++){
-        s.replace(String(i), "\\" + String((char)i));
+    s.replace("\x7f", "_");
+    for (char i = 0; i < 0x20; i++) {
+      s.replace(String(i), "_");
     }
-  return s;
+    return s;
 }
 
 String jsonLineFromPreferenceString(const char *preferenceName, bool last=false){
