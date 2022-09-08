@@ -215,8 +215,6 @@ boolean always_send_cseSpd_AND_altitude = false;
 #endif
 
 // Variables and Constants
-String loraReceivedFrameString = "";      //data on buff is copied to this string
-String Outputstring = "";
 String outString="";                      //The new Output String with GPS Conversion RAW
 
 //Oled Display (DL3EL)
@@ -2981,11 +2979,27 @@ out:
 
     if (lora_rx_enabled && lora_rx_data_available) {
       if(lora_rx_data_available) {
+        String loraReceivedFrameString;      //data on buff is copied to this string
+        String loraReceivedFrameString_for_logging;      //data on buff is copied to this string
         char *s = 0;
-        loraReceivedFrameString = "";
+
         for (int i=0 ; i < loraReceivedLength ; i++) {
           loraReceivedFrameString += (char) lora_RXBUFF[i];
+          #if defined(ENABLE_WIFI) || defined(ENABLE_SYSLOG)
+            if (lora_RXBUFF[i] >= 0x20) {
+              loraReceivedFrameString_for_logging += (char) lora_RXBUFF[i];
+            } else {
+              // In real world, we saw a packet with message text that ended with "\0". This confused the String function,
+              // esp. when logging (syslog, mheard webList)
+              char buf[7]; // room for "<0x01>" + \0 == 7
+              sprintf(buf, "<0x%2.2x>", (unsigned char ) lora_RXBUFF[i]);
+              loraReceivedFrameString_for_logging += String(buf);
+            }
+          #endif
         }
+
+        loraReceivedFrameString_for_logging.trim();
+
         const char *received_frame = loraReceivedFrameString.c_str();
 
         // valid packet?
@@ -3059,16 +3073,11 @@ out:
         writedisplaytext("  ((RX))", "", loraReceivedFrameString, "", "", "");
         time_to_refresh = millis() + showRXTime;
         #ifdef ENABLE_WIFI
-          sendToWebList(loraReceivedFrameString, bg_rf95rssi_to_rssi(rf95.lastRssi()), bg_rf95snr_to_snr(rf95.lastSNR()));
+          sendToWebList(loraReceivedFrameString_for_logging, bg_rf95rssi_to_rssi(rf95.lastRssi()), bg_rf95snr_to_snr(rf95.lastSNR()));
         #endif
-        #ifdef ENABLE_SYSLOG
-          String loraReceivedFrameString_syslog = String(loraReceivedFrameString);
-          loraReceivedFrameString_syslog.trim();
-          for (char i = 0; i < 0x20; i++) {
-            loraReceivedFrameString_syslog.replace(String(i), "_");
-          }
-          syslog_log(LOG_INFO, String("Received LoRa: '") + loraReceivedFrameString_syslog + "', RSSI:" + bg_rf95rssi_to_rssi(rf95.lastRssi()) + ", SNR: " + bg_rf95snr_to_snr(rf95.lastSNR()));
-        #endif
+    #endif
+    #if defined(ENABLE_SYSLOG) && defined(ENABLE_WIFI) // unfortunately, on this plattform we only have IP if we have WIFI
+        syslog_log(LOG_INFO, String("Received LoRa: '") + loraReceivedFrameString_for_logging + "', RSSI:" + bg_rf95rssi_to_rssi(rf95.lastRssi()) + ", SNR: " + bg_rf95snr_to_snr(rf95.lastSNR()));
     #endif
     #ifdef KISS_PROTOCOL
 	s = 0;
