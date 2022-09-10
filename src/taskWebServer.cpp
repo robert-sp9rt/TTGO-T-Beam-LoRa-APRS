@@ -123,19 +123,28 @@ void sendCacheHeader() { server.sendHeader("Cache-Control", "max-age=3600"); }
 void sendGzipHeader() { server.sendHeader("Content-Encoding", "gzip"); }
 
 String jsonEscape(String s){
-    s.replace("\\", "\\\\");
-    s.replace("\"", "\\\"");
-    s.replace("\x7f", "<0x7f>");
-    for (char i = 0; i < 0x20; i++) {
-      if (s.indexOf(i) > -1) {
-        char buf[7]; // room for "<0x01>" + \0 == 7
-        sprintf(buf, "<0x%2.2x>", i);
-        do {
-          s.replace(String(i), buf);
-        } while (s.indexOf(i) > -1);
+    const char *p = s.c_str();
+    String s_out;
+
+    for (; *p; p++) {
+      char buf[7] = ""; // room for "<0x01>" + \0 == 7
+      switch (*p) {
+      case '\\':
+        strcpy(buf, "\\\\");
+        break;
+      case '\"':
+        strcpy(buf, "\\\"");
+        break;
+      default:
+        if (*p < 0x20 || *p == '\x7f') {
+          sprintf(buf, "<0x%2.2x>", *p);
+        } else {
+          sprintf(buf, "%c", *p);
+        }
       }
+      s_out += String(buf);
     }
-    return s;
+    return s_out;
 }
 
 String jsonLineFromPreferenceString(const char *preferenceName, bool last=false){
