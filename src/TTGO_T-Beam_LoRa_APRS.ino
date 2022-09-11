@@ -410,7 +410,11 @@ char blacklist_calls[256] = "";
 Adafruit_SSD1306 display(128, 64, &Wire, OLED_RESET);
 
 
+#ifdef IF_SEMAS_WOULD_WORK
 xSemaphoreHandle sema_lora_chip;
+#else
+volatile boolean sema_lora_chip = false;
+#endif
 
 
 // + FUNCTIONS-----------------------------------------------------------+//
@@ -711,10 +715,22 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, const Strin
   if (lora_speed  == 610) wait_for_signal = 250;
   else if (lora_speed  == 1200) wait_for_signal = 125;
 
-
+{ char buf[512]; sprintf(buf, "DL9SAU-12>DL9SAU-12:>debug lora tx called"); sendToTNC(String(buf)); }
   // sema lock for lora chip operations
-  if (xSemaphoreTake(sema_lora_chip, 10) != pdTRUE)
+#ifdef IF_SEMAS_WOULD_WORK
+  while (xSemaphoreTake(sema_lora_chip, 10) != pdTRUE)
     esp_task_wdt_reset();
+#else
+  int i = 0;
+  while (sema_lora_chip) {
+    delay(10);
+    if ((i++ % 100) == 0)
+      esp_task_wdt_reset();
+  }
+  sema_lora_chip = true;
+#endif
+
+{ char buf[512]; sprintf(buf, "DL9SAU-12>DL9SAU-12:>debug lora tx sema taken"); sendToTNC(String(buf)); }
 
   randomSeed(millis());
 
@@ -730,6 +746,7 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, const Strin
       break;
     }
   }
+{ char buf[512]; sprintf(buf, "DL9SAU-12>DL9SAU-12:>debug lora tx tx now"); sendToTNC(String(buf)); }
 
   esp_task_wdt_reset();
 #ifdef T_BEAM_V1_0
@@ -765,11 +782,16 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, const Strin
 #ifdef T_BEAM_V1_0
   // if lora_rx is disabled, but  ONLY if lora_digipeating_mode == 0 AND no SerialBT.hasClient is connected,
   // we can savely go to sleep
-  if (! (lora_rx_enabled || lora_digipeating_mode > 0  || SerialBT.hasClient()) )
+  if (! (lora_rx_enabled || lora_digipeating_mode > 0 || SerialBT.hasClient()) )
     axp.setPowerOutPut(AXP192_LDO2, AXP202_OFF);                           // switch LoRa chip off
 #endif
   // release lock
+#ifdef IF_SEMAS_WOULD_WORK
   xSemaphoreGive(sema_lora_chip);
+#else
+  sema_lora_chip = false;
+#endif
+{ char buf[512]; sprintf(buf, "DL9SAU-12>DL9SAU-12:>debug lora sema given"); sendToTNC(String(buf)); }
 
 }
 
@@ -977,7 +999,6 @@ void fillDisplayLine2() {
 #else        
         wifi_info = "";
 #endif
-ulong nexttx = 0L;
 
   if (dont_send_own_position_packets || !lora_tx_enabled) {
     OledLine2 = wifi_info + " never TX";
@@ -986,8 +1007,8 @@ ulong nexttx = 0L;
       if (fixed_beacon_enabled) {
         OledLine2 = wifi_info+ " FB:" +String((next_fixed_beacon-millis()) / 1000) + "s";
       } else {
-        nexttx = ((lastTX+nextTX)-millis())/1000;
-// do not send SB Info on very first tx, wrong value, cannot find the reason
+        ulong nexttx = ((lastTX+nextTX)-millis())/1000;
+        // do not send SB Info on very first tx, wrong value, cannot find the reason
         if (nexttx > 400000) {
           OledLine2 = wifi_info;
         } else {
@@ -1880,7 +1901,11 @@ void setup(){
 
   lastTxdistance  = 0;
 
+#ifdef IF_SEMAS_WOULD_WORK
   sema_lora_chip = xSemaphoreCreateBinary();
+#else
+  sema_lora_chip = false;
+#endif
 }
 
 void enableOled() {
@@ -2947,7 +2972,12 @@ out:
   #endif
 
   // sema lock for lora chip operations
+#ifdef IF_SEMAS_WOULD_WORK
   if (xSemaphoreTake(sema_lora_chip, 100) == pdTRUE) {
+#else
+  if (!sema_lora_chip) {
+    sema_lora_chip = true;
+#endif
    if (rf95.waitAvailableTimeout(100)) {
     #ifdef T_BEAM_V1_0
       #ifdef ENABLE_LED_SIGNALING
@@ -2965,7 +2995,11 @@ out:
     uint8_t loraReceivedLength = sizeof(lora_RXBUFF); // (implicit ) reset max length before receiving!
     boolean lora_rx_data_available = rf95.recvAPRS(lora_RXBUFF, &loraReceivedLength);
     // release lock here. We read the data from the lora chip. And we may call later loraSend (which should not be blocked by ourself)
+#ifdef IF_SEMAS_WOULD_WORK
     xSemaphoreGive(sema_lora_chip);
+#else
+    sema_lora_chip = false;
+#endif
 
     const char *rssi_for_path = encode_snr_rssi_in_path();
 
@@ -2978,7 +3012,6 @@ out:
     }
 
     if (lora_rx_enabled && lora_rx_data_available) {
-      if(lora_rx_data_available) {
         String loraReceivedFrameString;      //data on buff is copied to this string
         String loraReceivedFrameString_for_logging;      //data on buff is copied to this string
         char *s = 0;
@@ -3112,7 +3145,6 @@ out:
             }
           }
         }
-      }
     } else {
       // rx disabled. guess blind
      lora_automaic_cr_adoption_rf_transmissions_heard_in_timeslot++;
@@ -3126,9 +3158,6 @@ invalid_packet:
     #else
       ; // make compiler happy
     #endif
-   } else {
-     // release lock
-     xSemaphoreGive(sema_lora_chip);
    }
   }
   

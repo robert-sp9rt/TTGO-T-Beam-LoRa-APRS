@@ -509,10 +509,6 @@
                   <input type="text" name="curPos" id="curPos" readonly title="Current Postition of device [P if preset; p, if gps is invalid and used as temporary preset]">
                 </div>
                 <div>
-                  <label for="UptimeMinutes">Uptime of Device [min]</label>
-                  <input type="text" name="UptimeMinutes" id="UptimeMinutes" readonly title="uptime device in minutes">
-                </div>
-                <div>
                   <label for="OledLine5">Satellite & Batt Info</label>
                   <input type="text" name="OledLine5" id="OledLine5" readonly title="Satellite (#Sats/HDOP) [more sats are good, lowest HDOP is best. Should be < 8], and Batt Info [B means Battery; P means external pwr. Positive current is battery-charge-current, while prefixed with 'B', and battery voltage shown.]">
                 </div>
@@ -526,6 +522,8 @@
                   <label for="OledLine2">OledLine2</label>
                   <input type="text" name="OledLine2" id="OledLine2" readonly title="OledLine2">
                 </div>
+            </div>
+            <div class="grid-container quarters">
                 <div>
                   <label for="OledLine3">OledLine3</label>
                   <input type="text" name="OledLine3" id="OledLine3" readonly title="OledLine3">
@@ -533,6 +531,12 @@
                 <div>
                   <label for="OledLine4">OledLine4</label>
                   <input type="text" name="OledLine4" id="OledLine4" readonly title="OledLine4">
+                </div>
+            </div>
+            <div class="grid-container quarters">
+                <div>
+                  <label for="UptimeMinutes">Uptime of Device [min]</label>
+                  <input type="text" name="UptimeMinutes" id="UptimeMinutes" readonly title="uptime device in minutes">
                 </div>
             </div>
             <div class="grid-container full">
