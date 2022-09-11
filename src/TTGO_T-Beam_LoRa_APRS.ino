@@ -698,6 +698,8 @@ void sendpacket(uint8_t sp_flags){
  * @param message
  */
 void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, const String &message) {
+  int n;
+
   if (!lora_tx_enabled)
     return;
 
@@ -715,26 +717,21 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, const Strin
   if (lora_speed  == 610) wait_for_signal = 250;
   else if (lora_speed  == 1200) wait_for_signal = 125;
 
-{ char buf[512]; sprintf(buf, "DL9SAU-12>DL9SAU-12:>debug lora tx called"); sendToTNC(String(buf)); }
   // sema lock for lora chip operations
 #ifdef IF_SEMAS_WOULD_WORK
   while (xSemaphoreTake(sema_lora_chip, 10) != pdTRUE)
     esp_task_wdt_reset();
 #else
-  int i = 0;
-  while (sema_lora_chip) {
+  for (n = 0; sema_lora_chip; n++) {
     delay(10);
-    if ((i++ % 100) == 0)
+    if ((n++ % 100) == 0)
       esp_task_wdt_reset();
   }
   sema_lora_chip = true;
 #endif
 
-{ char buf[512]; sprintf(buf, "DL9SAU-12>DL9SAU-12:>debug lora tx sema taken"); sendToTNC(String(buf)); }
-
   randomSeed(millis());
 
-  int n;
   for (n = 0; n < 30; n++) {
     esp_task_wdt_reset();
     delay(wait_for_signal);
@@ -746,7 +743,6 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, const Strin
       break;
     }
   }
-{ char buf[512]; sprintf(buf, "DL9SAU-12>DL9SAU-12:>debug lora tx tx now"); sendToTNC(String(buf)); }
 
   esp_task_wdt_reset();
 #ifdef T_BEAM_V1_0
@@ -791,7 +787,6 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, const Strin
 #else
   sema_lora_chip = false;
 #endif
-{ char buf[512]; sprintf(buf, "DL9SAU-12>DL9SAU-12:>debug lora sema given"); sendToTNC(String(buf)); }
 
 }
 
