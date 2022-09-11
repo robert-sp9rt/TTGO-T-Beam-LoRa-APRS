@@ -724,7 +724,7 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, const Strin
 #else
   for (n = 0; sema_lora_chip; n++) {
     delay(10);
-    if ((n++ % 100) == 0)
+    if (!(n % 100))
       esp_task_wdt_reset();
   }
   sema_lora_chip = true;
