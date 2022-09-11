@@ -502,8 +502,12 @@
                     <label for="sh_oledtime">Display timeout [s]</label>
                     <input name="sh_oledtime" id="sh_oledtime" type="number" min="0" max="60" title="Turn OFF OLED after X seconds. Set 0 to disable (constantly active OLED has a refresh rate of 1s. Range 0 to 60.">
                 </div>
+                <div>
+                  <label for="UptimeMinutes">Uptime of Device [min]</label>
+                  <input type="text" name="UptimeMinutes" id="UptimeMinutes" readonly title="uptime device in minutes">
+                </div>
             </div>
-            <div class="grid-container quarters">
+            <div class="grid-container halves">
                 <div>
                   <label for="curPos">Current Position</label>
                   <input type="text" name="curPos" id="curPos" readonly title="Current Postition of device [P if preset; p, if gps is invalid and used as temporary preset]">
@@ -513,7 +517,7 @@
                   <input type="text" name="OledLine5" id="OledLine5" readonly title="Satellite (#Sats/HDOP) [more sats are good, lowest HDOP is best. Should be < 8], and Batt Info [B means Battery; P means external pwr. Positive current is battery-charge-current, while prefixed with 'B', and battery voltage shown.]">
                 </div>
             </div>
-            <div class="grid-container quarters">
+            <div class="grid-container halves">
                 <div>
                   <label for="OledLine1">OledLine1</label>
                   <input type="text" name="OledLine1" id="OledLine1" readonly title="OledLine1">
@@ -523,7 +527,7 @@
                   <input type="text" name="OledLine2" id="OledLine2" readonly title="OledLine2">
                 </div>
             </div>
-            <div class="grid-container quarters">
+            <div class="grid-container halves">
                 <div>
                   <label for="OledLine3">OledLine3</label>
                   <input type="text" name="OledLine3" id="OledLine3" readonly title="OledLine3">
@@ -531,12 +535,6 @@
                 <div>
                   <label for="OledLine4">OledLine4</label>
                   <input type="text" name="OledLine4" id="OledLine4" readonly title="OledLine4">
-                </div>
-            </div>
-            <div class="grid-container quarters">
-                <div>
-                  <label for="UptimeMinutes">Uptime of Device [min]</label>
-                  <input type="text" name="UptimeMinutes" id="UptimeMinutes" readonly title="uptime device in minutes">
                 </div>
             </div>
             <div class="grid-container full">

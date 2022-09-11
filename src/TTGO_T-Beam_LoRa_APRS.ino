@@ -2971,7 +2971,7 @@ out:
   if (xSemaphoreTake(sema_lora_chip, 100) == pdTRUE) {
 #else
   if (!sema_lora_chip) {
-    sema_lora_chip = true;
+   sema_lora_chip = true;
 #endif
    if (rf95.waitAvailableTimeout(100)) {
     #ifdef T_BEAM_V1_0
@@ -3144,7 +3144,7 @@ out:
       // rx disabled. guess blind
      lora_automaic_cr_adoption_rf_transmissions_heard_in_timeslot++;
     }
-    call_invalid_or_blacklisted:
+call_invalid_or_blacklisted:
 invalid_packet:
     #ifdef T_BEAM_V1_0
       #ifdef ENABLE_LED_SIGNALING
@@ -3153,6 +3153,12 @@ invalid_packet:
     #else
       ; // make compiler happy
     #endif
+   } else {
+#ifdef IF_SEMAS_WOULD_WORK
+    xSemaphoreGive(sema_lora_chip);
+#else
+    sema_lora_chip = false;
+#endif
    }
   }
   
