@@ -1002,12 +1002,12 @@ void fillDisplayLine2() {
       if (fixed_beacon_enabled) {
         OledLine2 = wifi_info+ " FB:" +String((next_fixed_beacon-millis()) / 1000) + "s";
       } else {
-        ulong nexttx = ((lastTX+nextTX)-millis())/1000;
+        ulong nextSBtx = ((lastTX+nextTX)-millis())/1000;
         // do not send SB Info on very first tx, wrong value, cannot find the reason
-        if (nexttx > 400000) {
+        if (nextSBtx > 400000) {
           OledLine2 = wifi_info;
         } else {
-          OledLine2 = wifi_info + " SB:" + String(nexttx) + "s";
+          OledLine2 = wifi_info + " SB:" + String(nextSBtx) + "s";
         // next line will be used when debugging gps-output for smoothening km/h in oled
         //OledLine1s = OledLine1 + String(((lastTX+nextTX)-millis())/1000)+"s "+ String(lastTxdistance);
         }
@@ -1021,9 +1021,11 @@ void fillDisplayLine2() {
 void fillDisplayLines3to5() {
   static uint32_t ratelimit_until = 0L;
 
+
   if (millis() < ratelimit_until)
     return;
   ratelimit_until = millis() + (oled_timeout == 0 ? 1000 : showRXTime);
+
   OledLine3 = aprsLatPreset + " " + aprsLonPreset + " " + aprsPresetShown;
   OledLine4 = getSpeedCourseAlti();
   OledLine5 = getSatAndBatInfo();
@@ -1782,9 +1784,9 @@ void setup(){
     fix_beacon_interval = sb_max_interval;
 
   writedisplaytext("LoRa-APRS","","Init:","RF95 OK!","","");
-  writedisplaytext(" "+Tcall,"","Init:","Waiting for GPS","","");
+  writedisplaytext(Tcall,"","Init:","Waiting for GPS","","");
   xTaskCreate(taskGPS, "taskGPS", 5000, nullptr, 1, nullptr);
-  writedisplaytext(" "+Tcall,"","Init:","GPS Task Created!","","");
+  writedisplaytext(Tcall,"","Init:","GPS Task Created!","","");
   #ifndef T_BEAM_V1_0
     adc1_config_width(ADC_WIDTH_BIT_12);
     adc1_config_channel_atten(ADC1_CHANNEL_7,ADC_ATTEN_DB_6);
@@ -2710,14 +2712,14 @@ void loop() {
   if (wifi_connection_status_prev != wifi_connection_status) {
     enableOled(); // turn ON OLED temporary
     if (wifi_connection_status == WIFI_CONNECTED_TO_AP) {
-      writedisplaytext(" ((WiFi))","WiFi Client Mode","SSID: " + infoApName, "Pass: ********", "IP: " + infoIpAddr, getSatAndBatInfo());
+      writedisplaytext("((WiFi))","WiFi Client Mode","SSID: " + infoApName, "Pass: ********", "IP: " + infoIpAddr, getSatAndBatInfo());
     } else if (wifi_connection_status == WIFI_SEARCHING_FOR_AP) {
-      writedisplaytext(" ((WiFi))","WiFi Client Mode","SSID: " + infoApName, "Not in sight!", "IP: none", getSatAndBatInfo());
+      writedisplaytext("((WiFi))","WiFi Client Mode","SSID: " + infoApName, "Not in sight!", "IP: none", getSatAndBatInfo());
     } else if (wifi_connection_status == WIFI_RUNNING_AS_AP) {
-      writedisplaytext(" ((WiFi))","WiFi AP Mode","SSID: " + infoApName, "Pass: " + infoApPass, "IP: " + infoIpAddr, getSatAndBatInfo());
+      writedisplaytext("((WiFi))","WiFi AP Mode","SSID: " + infoApName, "Pass: " + infoApPass, "IP: " + infoIpAddr, getSatAndBatInfo());
     } else {
-//      writedisplaytext(" ((WiFi))","WiFi off","SSID: " + infoApName, "Pass: " + infoApPass, "IP: " + infoIpAddr, getSatAndBatInfo());
-      writedisplaytext(" ((WiFi))","WiFi off","press key long","to enable","", getSatAndBatInfo());
+//      writedisplaytext("((WiFi))","WiFi off","SSID: " + infoApName, "Pass: " + infoApPass, "IP: " + infoIpAddr, getSatAndBatInfo());
+      writedisplaytext("((WiFi))","WiFi off","press key long","to enable","", getSatAndBatInfo());
     }
     wifi_connection_status_prev = wifi_connection_status;
 //  initial fill of line2
@@ -2964,7 +2966,7 @@ out:
         delete TNC2DataFrame;
       }
     }
-  #endif
+  #endif // KISS_PROTOCOL
 
   // sema lock for lora chip operations
 #ifdef IF_SEMAS_WOULD_WORK
@@ -3007,26 +3009,35 @@ out:
     }
 
     if (lora_rx_enabled && lora_rx_data_available) {
-        String loraReceivedFrameString;      //data on buff is copied to this string
-        String loraReceivedFrameString_for_logging;      //data on buff is copied to this string
+        String loraReceivedFrameString;               //data on buff is copied to this string. raw
+        String loraReceivedFrameString_for_syslog;    //data on buff is copied to this string. Non-printable characters are shown as <0xnn>. Even valid EOL \r. Syslog is for analyzing.
+        String loraReceivedFrameString_for_weblist;   //data on buff is copied to this string. Bad characters like \n and \0 are replaced by ' ' (also valid \r - aprs does not use two line messages ;); \r, \n or \0 at the end of the string are removed.
         char *s = 0;
 
         for (int i=0 ; i < loraReceivedLength ; i++) {
           loraReceivedFrameString += (char) lora_RXBUFF[i];
-          #if defined(ENABLE_WIFI) || defined(ENABLE_SYSLOG)
+          #if defined(ENABLE_WIFI)   // || defined(ENABLE_SYSLOG)
             if (lora_RXBUFF[i] >= 0x20) {
-              loraReceivedFrameString_for_logging += (char) lora_RXBUFF[i];
+              #if defined(ENABLE_SYSLOG)
+                loraReceivedFrameString_for_syslog += (char) lora_RXBUFF[i];
+              #endif
+              loraReceivedFrameString_for_weblist += (char) lora_RXBUFF[i];
             } else {
-              // In real world, we saw a packet with message text that ended with "\0". This confused the String function,
-              // esp. when logging (syslog, mheard webList)
-              char buf[7]; // room for "<0x01>" + \0 == 7
-              sprintf(buf, "<0x%2.2x>", (unsigned char ) lora_RXBUFF[i]);
-              loraReceivedFrameString_for_logging += String(buf);
+              #if defined(ENABLE_SYSLOG)
+                // In real world, we saw a packet with message text that ended with "\0". This confused the String function, esp. when logging
+                char buf[7]; // room for "<0x01>" + \0 == 7
+                sprintf(buf, "<0x%2.2x>", (unsigned char ) lora_RXBUFF[i]);
+                loraReceivedFrameString_for_syslog += String(buf);
+              #endif
+              if (lora_RXBUFF[i] == '\r' || lora_RXBUFF[i] == '\n' || lora_RXBUFF[i] == '\t' || lora_RXBUFF[i] == '\0') {
+                // replace \r, \n and \0 by ' '. aprs-unsupported multi-line-messages will become a one-liner. At the end of the stringm we'll to .trim() (remove trailing blanks)
+                loraReceivedFrameString_for_weblist += String(" ");
+              } /* else: skip */
             }
           #endif
         }
 
-        loraReceivedFrameString_for_logging.trim();
+        loraReceivedFrameString_for_weblist.trim();
 
         const char *received_frame = loraReceivedFrameString.c_str();
 
@@ -3101,11 +3112,11 @@ out:
         writedisplaytext("  ((RX))", "", loraReceivedFrameString, "", "", "");
         time_to_refresh = millis() + showRXTime;
         #ifdef ENABLE_WIFI
-          sendToWebList(loraReceivedFrameString_for_logging, bg_rf95rssi_to_rssi(rf95.lastRssi()), bg_rf95snr_to_snr(rf95.lastSNR()));
+          sendToWebList(loraReceivedFrameString_for_weblist, bg_rf95rssi_to_rssi(rf95.lastRssi()), bg_rf95snr_to_snr(rf95.lastSNR()));
         #endif
     #endif
     #if defined(ENABLE_SYSLOG) && defined(ENABLE_WIFI) // unfortunately, on this plattform we only have IP if we have WIFI
-        syslog_log(LOG_INFO, String("Received LoRa: '") + loraReceivedFrameString_for_logging + "', RSSI:" + bg_rf95rssi_to_rssi(rf95.lastRssi()) + ", SNR: " + bg_rf95snr_to_snr(rf95.lastSNR()));
+        syslog_log(LOG_INFO, String("Received LoRa: '") + loraReceivedFrameString_for_syslog + "', RSSI:" + bg_rf95rssi_to_rssi(rf95.lastRssi()) + ", SNR: " + bg_rf95snr_to_snr(rf95.lastSNR()));
     #endif
     #ifdef KISS_PROTOCOL
 	s = 0;
@@ -3329,7 +3340,7 @@ invalid_packet:
       fillDisplayLine1();
       fillDisplayLine2();
       fillDisplayLines3to5();
-      writedisplaytext(" ((TX))","",OledLine2,OledLine3,OledLine4,OledLine5);
+      writedisplaytext("  ((TX))","",OledLine2,OledLine3,OledLine4,OledLine5);
       sendpacket(SP_POS_GPS | (nextTX == 1 ? SP_ENFORCE_COURSE : 0));
       // for fixed beacon (if we loose gps fix, we'll send our last position in fix_beacon_interval)
       next_fixed_beacon = millis() + fix_beacon_interval;
