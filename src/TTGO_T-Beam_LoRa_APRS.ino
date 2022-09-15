@@ -26,6 +26,12 @@
 #include "preference_storage.h"
 #include "syslog_log.h"
 
+#define SPIFFS_used          // DL3EL
+#include "ArduinoJson.h"
+#include "SPIFFS.h"
+#include "FS.h" // SPIFFS is declared
+#define FORMAT_SPIFFS_IF_FAILED true
+
 #ifdef KISS_PROTOCOL
   #include "taskTNC.h"
 #endif
@@ -306,6 +312,10 @@ int8_t wifi_connection_status_prev = -1;
 String infoApName = "";
 String infoApPass = "";
 String infoIpAddr = "";
+#ifdef SPIFFS_used
+String safeApName = "";
+String safeApPass = "";
+#endif
 
 #define ANGLE_AVGS 3                  // angle averaging - x times
 float average_course[ANGLE_AVGS];
@@ -415,7 +425,6 @@ xSemaphoreHandle sema_lora_chip;
 #else
 volatile boolean sema_lora_chip = false;
 #endif
-
 
 // + FUNCTIONS-----------------------------------------------------------+//
 
@@ -1175,6 +1184,81 @@ String prepareCallsign(const String& callsign){
   }
 #endif
 
+#ifdef SPIFFS_used // DL3EL
+// SPIFFS Test DL3EL
+void listDir(fs::FS &fs, const char * dirname, uint8_t levels){
+// currently not use, uncomment at the end of setup() to see what is on the disk  
+   Serial.printf("Listing directory: %s\r\n", dirname);
+
+   File root = fs.open(dirname);
+   if(!root){
+      Serial.println("− failed to open directory");
+      return;
+   }
+   if(!root.isDirectory()){
+      Serial.println(" − not a directory");
+      return;
+   }
+
+   File file = root.openNextFile();
+   while(file){
+      if(file.isDirectory()){
+         Serial.print("  DIR : ");
+         Serial.println(file.name());
+         if(levels){
+            listDir(fs, file.name(), levels -1);
+         }
+      } else {
+         Serial.print("  FILE: ");
+         Serial.print(file.name());
+         Serial.print("\tSIZE: ");
+         Serial.println(file.size());
+      }
+      file = root.openNextFile();
+   }
+}
+// SPIFFS Test DL3EL
+void readFile(fs::FS &fs, const char * path){
+
+  File file = fs.open(path);
+  if(!file || file.isDirectory()){
+    Serial.println("− failed to open file for reading");
+    return;
+  }
+//https://arduinojson.org/v6/doc/upgrade/
+
+  char JSONMessage[256];
+  int n = 0;
+  file = fs.open(path);
+  while(file.available()){
+    JSONMessage[n++] = file.read();
+    if (n > 256) break;
+  }
+//  Serial.println("JSON:" + String(JSONMessage));
+   
+  StaticJsonDocument<256> JSONBuffer;                         //Memory pool
+ 
+  auto error = deserializeJson(JSONBuffer, JSONMessage);
+  if (error) {
+    Serial.print(F("deserializeJson() failed with code "));
+    Serial.println(error.c_str());
+    return;
+  }
+
+  String safeApNamex = JSONBuffer["SSID"];
+  String safeApPassx = JSONBuffer["password"];
+
+  safeApName = safeApNamex;
+  safeApPass = safeApPassx;
+  
+  Serial.print("SSID: ");
+  Serial.println(safeApName);
+  Serial.print("PW: ");
+  Serial.println(safeApPass);
+  Serial.print("Länge der Datei: " + String(n-1) + "\n");
+
+}
+#endif
 
 // + SETUP --------------------------------------------------------------+//
 void setup(){
@@ -1742,6 +1826,7 @@ void setup(){
     if (clear_preferences == 2){
       String buildnr = BUILD_NUMBER;
       writedisplaytext("LoRa-APRS","by DL9SAU & DL3EL","Build:" + String(BUILD_NUMBER),"Factory reset","","");
+      Serial.println("LoRa-APRS by DL9SAU & DL3EL Build:" + String(BUILD_NUMBER));
       delay(2000);
       //#ifdef T_BEAM_V1_0
         if(digitalRead(BUTTON)==LOW){
@@ -1903,6 +1988,24 @@ void setup(){
 #else
   sema_lora_chip = false;
 #endif
+   Serial.println("LoRa-APRS  Init: FINISHED OK!");
+   
+#ifdef SPIFFS_used // DL3EL
+// https://www.tutorialspoint.com/esp32_for_iot/esp32_for_iot_spiffs_storage.htm
+   Serial.println("LoRa-APRS Starting SPIFFS Tests");
+  // Launch SPIFFS file system  
+  
+  if(!SPIFFS.begin(FORMAT_SPIFFS_IF_FAILED)){ 
+    Serial.println("SPIFFS Mount Failed");
+  }
+  else {
+    Serial.println("SPIFFS Mount Success");
+  }
+
+//  listDir(SPIFFS, "/", 0);
+  readFile(SPIFFS, "/wifi.cfg");
+   
+#endif  
 }
 
 void enableOled() {
