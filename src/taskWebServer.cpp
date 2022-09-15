@@ -31,6 +31,10 @@ extern String infoApName;
 extern String infoApPass;
 extern String infoIpAddr;
 
+// credentials from wifi.cfg
+extern String safeApName;
+extern String safeApPass;
+
 extern int8_t wifi_txpwr_mode_AP;
 extern int8_t wifi_txpwr_mode_STA;
 
@@ -874,22 +878,8 @@ void handle_saveDeviceCfg(){
   server.send(302,"text/html", "");
 }
 
-
-void restart_AP_or_STA(void) {
-
-  static boolean mode_sta_once_successfully_connected = false;
-  static boolean first_run = true;
-  boolean start_soft_ap = first_run ? true : false;
-  first_run = false;
-
-  if (wifi_ssid_length > 0) {
-
+boolean restart_STA(boolean start_soft_ap,boolean mode_sta_once_successfully_connected) {
     int retryWifi = 0;
-    infoApName = "[not connected]";
-    infoApPass = "";
-    infoIpAddr = "0.0.0.0";
-
-    start_soft_ap = false;
 
     WiFi.disconnect();
     WiFi.softAPdisconnect();
@@ -903,13 +893,12 @@ void restart_AP_or_STA(void) {
     esp_wifi_set_max_tx_power(wifi_txpwr_mode_STA);
     wifi_connection_status = WIFI_SEARCHING_FOR_AP;
 
-    Serial.print("Searching for AP..");
+    Serial.printf("Searching for AP..%s\n",wifi_ssid.c_str());
     while (WiFi.status() != WL_CONNECTED) {
       esp_task_wdt_reset();
-      Serial.println((int)WiFi.status());
-      Serial.print("Retry..");
+      Serial.printf("WiFi Status: %d -> Retry..",(int)WiFi.status());
       Serial.println(retryWifi);
-      if (retryWifi > 60) {
+      if (retryWifi > 30) {
         esp_task_wdt_reset();
         if (!mode_sta_once_successfully_connected || wifi_do_failback_to_mode_AP) {
           start_soft_ap = true;
@@ -920,12 +909,39 @@ void restart_AP_or_STA(void) {
       vTaskDelay(500/portTICK_PERIOD_MS);
     }
     esp_task_wdt_reset();
+    return start_soft_ap;
+  }
+
+void restart_AP_or_STA(void) {
+
+  static boolean mode_sta_once_successfully_connected = false;
+  static boolean first_run = true;
+  boolean start_soft_ap = first_run ? true : false;
+  first_run = false;
+
+  if (wifi_ssid_length > 0) {
+
+    infoApName = "[not connected]";
+    infoApPass = "";
+    infoIpAddr = "0.0.0.0";
+
+    start_soft_ap = false;
+
+    start_soft_ap = restart_STA(start_soft_ap, mode_sta_once_successfully_connected);
+    if (start_soft_ap) {
+// zweiter Versuche mit der in wifi.cfg genannten SSID
+      wifi_ssid = safeApName;
+      wifi_password = safeApPass;
+      start_soft_ap = false;
+      start_soft_ap = restart_STA(start_soft_ap, mode_sta_once_successfully_connected);
+    }  
   } else {
     // may start soft AP, if not already running as AP
     if (WiFi.getMode() == WIFI_MODE_STA) {
       start_soft_ap = true;
     }
   }
+  Serial.printf("WiFi Status: %d SoftAP: %d  (AP: %s)\n",(int)WiFi.status(),start_soft_ap,wifi_ssid.c_str());
 
   if (start_soft_ap) {
     WiFi.disconnect();

@@ -1219,6 +1219,7 @@ void listDir(fs::FS &fs, const char * dirname, uint8_t levels){
 }
 // SPIFFS Test DL3EL
 void readFile(fs::FS &fs, const char * path){
+int max_file_size = 256;
 
   File file = fs.open(path);
   if(!file || file.isDirectory()){
@@ -1227,14 +1228,16 @@ void readFile(fs::FS &fs, const char * path){
   }
 //https://arduinojson.org/v6/doc/upgrade/
 
-  char JSONMessage[256];
+  char JSONMessage[max_file_size];
   int n = 0;
   file = fs.open(path);
   while(file.available()){
     JSONMessage[n++] = file.read();
-    if (n > 256) break;
+    if (n > max_file_size) break;
   }
-//  Serial.println("JSON:" + String(JSONMessage));
+  if (file.size() > max_file_size) {
+    Serial.printf("Warning, file too big: %d Byte (max: %d)\n",file.size(),max_file_size);
+  }
    
   StaticJsonDocument<256> JSONBuffer;                         //Memory pool
  
@@ -1250,12 +1253,13 @@ void readFile(fs::FS &fs, const char * path){
 
   safeApName = safeApNamex;
   safeApPass = safeApPassx;
+// ich muss den Umweg über safeApNamex wählen, weil eine driekte Zuweisung auf safeApName vom Compiler abgelehnt wird.
   
   Serial.print("SSID: ");
   Serial.println(safeApName);
   Serial.print("PW: ");
   Serial.println(safeApPass);
-  Serial.print("Länge der Datei: " + String(n-1) + "\n");
+  Serial.printf("Size: %d\n",file.size());
 
 }
 #endif
