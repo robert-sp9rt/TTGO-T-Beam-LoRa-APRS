@@ -43,6 +43,7 @@ extern bool gpsServer_enabled;
 
 
 extern boolean wifi_do_failback_to_mode_AP;
+extern String buildnr;
 
 
 // For APRS-IS connection
@@ -1194,25 +1195,28 @@ void restart_AP_or_STA(void) {
         if (WiFi.status() != WL_CONNECTED) { aprsis_status = "Error: no internet"; goto on_err; } else { if (aprsis_status == "Error: no internet") aprsis_status = "Internet available"; }
         if (!aprs_is_client.connected() && t_connect_apprsis_again < millis()) {
 	  #if defined(ENABLE_SYSLOG) && defined(ENABLE_WIFI) // unfortunately, on this plattform we only have IP if we have WIFI
-	    syslog_log(LOG_INFO, String("Connecting to '") + aprsis_host.c_str() + "'");
-	    Serial.printf("Host: %s Tries: %d\n", aprsis_host.c_str(), aprsis_connect_tries);
+	    syslog_log(LOG_INFO, String("Connecting to '") + aprsis_host.c_str() + ", tries:" + String(aprsis_connect_tries) +  "'");
 	  #endif
           aprsis_status = "Connecting";
 	  aprsis_connect_tries++;
           aprs_is_client.connect(aprsis_host.c_str(), aprsis_port);
           if (!aprs_is_client.connected()) { aprsis_status = "Error: connect failed"; goto on_err; }
           aprsis_status = "Connected. Waiting for greeting.";
-// send mesg to APRS-IS: rebooted (first connect to aprs-is
+// send mesg to APRS-IS: rebooted (first connect to aprs-is)
 	  String outString = aprsis_callsign + ">" + MY_APRS_DEST_IDENTIFYER + ":>aprs-is-connect: " + String(gps_time_s);
-	  if (aprsis_time_last_successful_connect.length() > 0) outString = outString + ", last " + aprsis_time_last_successful_connect;
+	  if (aprsis_time_last_successful_connect.length() > 0) {
+	    outString = outString + ", last " + aprsis_time_last_successful_connect;
+	  }
+	  else {
+	    outString = outString + "(Reboot[V" + buildnr + "])";
+	  }    
 	  outString = outString + ", tries " + String(aprsis_connect_tries);
 	  aprsis_time_last_successful_connect = gps_time_s;
 	  #if defined(ENABLE_SYSLOG) && defined(ENABLE_WIFI) // unfortunately, on this plattform we only have IP if we have WIFI
-	    syslog_log(LOG_INFO, String("Reboot? '") + outString + String("'"));
-	    Serial.printf("Tries: %d\n", aprsis_connect_tries);
+	    syslog_log(LOG_INFO, outString + String("'"));
 	  #endif
+	  outString = outString + "\r\n";
 	  aprsis_connect_tries = 0;
-	  aprs_is_client.print(outString);
 //
           uint32_t t_start = millis();
           while (!aprs_is_client.available() && (millis()-t_start) < 25000L) delay(100);
@@ -1235,8 +1239,9 @@ void restart_AP_or_STA(void) {
 	    if (s.indexOf(" logresp") == -1) { aprsis_status = "Error: Login denied: " + s; aprsis_status.trim(); goto on_err; }
 	    if (s.indexOf(" verified") == -1) { aprsis_status = "Notice: server responsed not verified: " + s; aprsis_status.trim(); }
 	    #if defined(ENABLE_SYSLOG) && defined(ENABLE_WIFI) // unfortunately, on this plattform we only have IP if we have WIFI
-	      syslog_log(LOG_INFO, String("APRS-IS, connected to: '") + aprsis_host.c_str() + String("'"));
+	      syslog_log(LOG_INFO, String("APRS-IS, connected to: '") + aprsis_host.c_str() + " with Status: " + aprsis_status + String("'"));
 	    #endif
+	    aprs_is_client.print(outString);
 	  } else { aprsis_status = "Error: No response"; goto on_err; }
         }
         if (!aprs_is_client.connected())

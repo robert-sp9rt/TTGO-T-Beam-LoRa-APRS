@@ -222,6 +222,7 @@ boolean always_send_cseSpd_AND_altitude = false;
 
 // Variables and Constants
 String outString="";                      //The new Output String with GPS Conversion RAW
+String buildnr = "";
 
 //Oled Display (DL3EL)
 // to implement the blinking ticker, we have to save the content of the OLED. Also the preparation of output to OLED is done via these variables
@@ -1275,6 +1276,8 @@ void setup(){
   //adc1_config_width(ADC_WIDTH_BIT_12);
   //adc1_config_channel_atten(ADC1_CHANNEL_7,ADC_ATTEN_DB_11);
 #endif
+// to have access to the buildnr in Webserver
+  buildnr = BUILD_NUMBER;
 
   SPI.begin(SPI_sck,SPI_miso,SPI_mosi,SPI_ss);    //DO2JMG Heltec Patch
   Serial.begin(115200);
@@ -1828,7 +1831,6 @@ void setup(){
 
   #ifdef ENABLE_PREFERENCES
     if (clear_preferences == 2){
-      String buildnr = BUILD_NUMBER;
       writedisplaytext("LoRa-APRS","by DL9SAU & DL3EL","Build:" + String(BUILD_NUMBER),"Factory reset","","");
       Serial.println("LoRa-APRS by DL9SAU & DL3EL Build:" + String(BUILD_NUMBER));
       delay(2000);
