@@ -1261,7 +1261,8 @@ int max_file_size = 256;
       Serial.println("SSID: " + safeApName + " missing or PW: " + safeApPass + " < 8 Byte, Filesize: " + String(file.size()));
   } else {
       Serial.println("Fallback SSID: " + safeApName + ", PW: " + safeApPass + ", Filesize: " + String(file.size()));
-  }  
+  }
+  file.close();  
 }
 // SPIFFS by DL3EL
 
