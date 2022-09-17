@@ -20,6 +20,9 @@ extern const char web_js_js_end[] asm("_binary_data_embed_js_js_out_end");
 // Variable needed to send beacon from html page
 extern bool manBeacon;
 
+// KISS-friendly serial logging
+extern void do_serial_println(const String &);
+
 // Variable to show AP status
 extern uint8_t WIFI_DISABLED;
 extern uint8_t WIFI_SEARCHING_FOR_AP;
@@ -30,6 +33,9 @@ extern int8_t wifi_connection_status;
 extern String infoApName;
 extern String infoApPass;
 extern String infoIpAddr;
+// credentials from wifi.cfg
+extern String safeApName;
+extern String safeApPass;
 
 extern int8_t wifi_txpwr_mode_AP;
 extern int8_t wifi_txpwr_mode_STA;
@@ -39,6 +45,7 @@ extern bool gpsServer_enabled;
 
 
 extern boolean wifi_do_failback_to_mode_AP;
+extern String buildnr;
 
 
 // For APRS-IS connection
@@ -76,7 +83,6 @@ String apPassword = "";
 String defApPassword = "xxxxxxxxxx";
 String wifi_password = "";
 String wifi_ssid = "";
-uint8_t wifi_ssid_length = 0;
 
 
 // needed for aprsis igate functionality
@@ -97,6 +103,13 @@ extern void loraSend(byte, float, ulong, const String &);
 IPAddress IP_NULL(0,0,0,0);
 IPAddress IP_SUBNET_NULL(0,0,0,0);
 IPAddress IP_GATEWAY_NULL(0,0,0,0);
+
+
+// APRS-IS status message (about connection reset or our rboot)
+extern boolean send_status_message_to_aprsis;
+String aprsis_time_last_successful_connect = "";
+int aprsis_connect_tries = 0;
+extern char gps_time_s[];
 
 
 WebServer server(80);
@@ -215,7 +228,7 @@ void handle_SaveWifiCfg() {
   } else {
     // Update SSID
     preferences.putString(PREF_WIFI_SSID, server.arg(PREF_WIFI_SSID));
-    Serial.println("Updated SSID: " + server.arg(PREF_WIFI_SSID));
+    do_serial_println("WiFi: Updated remote SSID: " + server.arg(PREF_WIFI_SSID));
   }
 
   if (server.arg(PREF_WIFI_PASSWORD)!="*" && server.arg(PREF_WIFI_PASSWORD).length()>0 && server.arg(PREF_WIFI_PASSWORD).length()<8){
@@ -224,7 +237,7 @@ void handle_SaveWifiCfg() {
     if (server.arg(PREF_WIFI_PASSWORD)!="*") {
       // Update WiFi password
       preferences.putString(PREF_WIFI_PASSWORD, server.arg(PREF_WIFI_PASSWORD));
-      Serial.println("Updated WiFi PASS: " + server.arg(PREF_WIFI_PASSWORD));
+      do_serial_println("WiFi: Updated remote PASS: " + server.arg(PREF_WIFI_PASSWORD));
     }
   }
   if (server.hasArg(PREF_WIFI_TXPWR_MODE_STA)) {
@@ -243,7 +256,7 @@ void handle_SaveWifiCfg() {
     if (server.arg(PREF_AP_PASSWORD)!="*") {
       // Update AP password
       preferences.putString(PREF_AP_PASSWORD, server.arg(PREF_AP_PASSWORD));
-      Serial.println("Updated AP PASS: " + server.arg(PREF_AP_PASSWORD));
+      do_serial_println("WiFi: Updated local AP PASS: " + server.arg(PREF_AP_PASSWORD));
     }
   }
   preferences.putBool(PREF_WIFI_STA_ALLOW_FAILBACK_TO_MODE_AP_AFTER_ONCE_CONNECTED,  server.hasArg(PREF_WIFI_STA_ALLOW_FAILBACK_TO_MODE_AP_AFTER_ONCE_CONNECTED));
@@ -267,6 +280,11 @@ void handle_SaveWifiCfg() {
     s.trim();
   }
   preferences.putString(PREF_NTP_SERVER, s);
+  if (server.hasArg(PREF_SYSLOG_SERVER) && server.arg(PREF_SYSLOG_SERVER).length()) {
+    s = server.arg(PREF_SYSLOG_SERVER);
+    s.trim();
+  }
+  preferences.putString(PREF_SYSLOG_SERVER, s);
 
   server.sendHeader("Location", "/");
   server.send(302,"text/html", "");
@@ -316,6 +334,7 @@ void handle_Cfg() {
   jsonData += jsonLineFromPreferenceBool(PREF_TNCSERVER_ENABLE);
   jsonData += jsonLineFromPreferenceBool(PREF_GPSSERVER_ENABLE);
   jsonData += jsonLineFromPreferenceString(PREF_NTP_SERVER);
+  jsonData += jsonLineFromPreferenceString(PREF_SYSLOG_SERVER);
   jsonData += jsonLineFromPreferenceDouble(PREF_LORA_FREQ_PRESET);
   jsonData += jsonLineFromPreferenceInt(PREF_LORA_SPEED_PRESET);
   jsonData += jsonLineFromPreferenceBool(PREF_LORA_RX_ENABLE);
@@ -328,6 +347,7 @@ void handle_Cfg() {
   jsonData += jsonLineFromPreferenceInt(PREF_APRS_CROSS_DIGIPEATING_MODE_PRESET);
   jsonData += jsonLineFromPreferenceInt(PREF_LORA_TX_BEACON_AND_KISS_TO_FREQUENCIES_PRESET);
   jsonData += jsonLineFromPreferenceBool(PREF_LORA_TX_BEACON_AND_KISS_TO_APRSIS_PRESET);
+  jsonData += jsonLineFromPreferenceBool(PREF_LORA_TX_STATUSMESSAGE_TO_APRSIS_PRESET);
   jsonData += jsonLineFromPreferenceDouble(PREF_LORA_FREQ_CROSSDIGI_PRESET);
   jsonData += jsonLineFromPreferenceInt(PREF_LORA_SPEED_CROSSDIGI_PRESET);
   jsonData += jsonLineFromPreferenceInt(PREF_LORA_TX_POWER_CROSSDIGI_PRESET);
@@ -364,6 +384,7 @@ void handle_Cfg() {
   jsonData += jsonLineFromPreferenceBool(PREF_APRS_SHOW_CMT);
   jsonData += jsonLineFromPreferenceBool(PREF_APRS_COMMENT_RATELIMIT_PRESET);
   jsonData += jsonLineFromPreferenceBool(PREF_DEV_BT_EN);
+  jsonData += jsonLineFromPreferenceBool(PREF_DEV_LOGTOSERIAL_EN);
   jsonData += jsonLineFromPreferenceInt(PREF_DEV_SHOW_RX_TIME);
   jsonData += jsonLineFromPreferenceBool(PREF_DEV_AUTO_SHUT);
   jsonData += jsonLineFromPreferenceInt(PREF_DEV_AUTO_SHUT_PRESET);
@@ -403,7 +424,7 @@ void handle_ReceivedList() {
   // *1000 results in '{}' on TTGO t-beam (while it's correct on TTGO lora32)
   // -> Better not rely on complex functions that may not work as expected. We already have that simple and
   // -> ifdef notdef ;)
-#ifdef	notdef
+#ifdef notdef
   //PSRAMJsonDocument doc(MAX_RECEIVED_LIST_SIZE * 1000);
   DynamicJsonDocument doc(MAX_RECEIVED_LIST_SIZE * 1000);
   JsonObject root = doc.to<JsonObject>();
@@ -677,7 +698,6 @@ void handle_SaveAPRSCfg() {
   // LoRa settings
   if (server.hasArg(PREF_LORA_FREQ_PRESET)){
     preferences.putDouble(PREF_LORA_FREQ_PRESET, server.arg(PREF_LORA_FREQ_PRESET).toDouble());
-    Serial.printf("FREQ saved:\t%f\n", server.arg(PREF_LORA_FREQ_PRESET).toDouble());
   }
   if (server.hasArg(PREF_LORA_SPEED_PRESET)){
     preferences.putInt(PREF_LORA_SPEED_PRESET, server.arg(PREF_LORA_SPEED_PRESET).toInt());
@@ -702,9 +722,9 @@ void handle_SaveAPRSCfg() {
     preferences.putInt(PREF_LORA_TX_BEACON_AND_KISS_TO_FREQUENCIES_PRESET, server.arg(PREF_LORA_TX_BEACON_AND_KISS_TO_FREQUENCIES_PRESET).toInt());
   }
   preferences.putBool(PREF_LORA_TX_BEACON_AND_KISS_TO_APRSIS_PRESET, server.hasArg(PREF_LORA_TX_BEACON_AND_KISS_TO_APRSIS_PRESET));
+  preferences.putBool(PREF_LORA_TX_STATUSMESSAGE_TO_APRSIS_PRESET, server.hasArg(PREF_LORA_TX_STATUSMESSAGE_TO_APRSIS_PRESET));
   if (server.hasArg(PREF_LORA_FREQ_CROSSDIGI_PRESET)){
     preferences.putDouble(PREF_LORA_FREQ_CROSSDIGI_PRESET, server.arg(PREF_LORA_FREQ_CROSSDIGI_PRESET).toDouble());
-    Serial.printf("FREQ crossdigi saved:\t%f\n", server.arg(PREF_LORA_FREQ_CROSSDIGI_PRESET).toDouble());
   }
   if (server.hasArg(PREF_LORA_SPEED_CROSSDIGI_PRESET)){
     preferences.putInt(PREF_LORA_SPEED_CROSSDIGI_PRESET, server.arg(PREF_LORA_SPEED_CROSSDIGI_PRESET).toInt());
@@ -849,6 +869,7 @@ void handle_SaveAPRSCfg() {
 
 void handle_saveDeviceCfg(){
   preferences.putBool(PREF_DEV_BT_EN, server.hasArg(PREF_DEV_BT_EN));
+  preferences.putBool(PREF_DEV_LOGTOSERIAL_EN, server.hasArg(PREF_DEV_LOGTOSERIAL_EN));
   preferences.putBool(PREF_DEV_OL_EN, server.hasArg(PREF_DEV_OL_EN));
   if (server.hasArg(PREF_DEV_SHOW_RX_TIME)){
     preferences.putInt(PREF_DEV_SHOW_RX_TIME, server.arg(PREF_DEV_SHOW_RX_TIME).toInt());
@@ -875,102 +896,148 @@ void handle_saveDeviceCfg(){
 }
 
 
-void restart_AP_or_STA(void) {
+boolean restart_STA(String use_ssid, String use_password) {
+  int retryWifi = 0;
 
+  WiFi.disconnect();
+  WiFi.softAPdisconnect();
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(use_ssid.c_str(), use_password.length() ? use_password.c_str() : nullptr);
+  WiFi.setAutoReconnect(true);
+  // Set power:  minimum 8 (2dBm) (max 80 (20dBm))
+  // https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/network/esp_wifi.html
+  // Mapping Table {Power, max_tx_power} = {{8, 2}, {20, 5}, {28, 7}, {34, 8}, {44, 11}, {52, 13}, {56, 14}, {60, 15}, {66, 16}, {72, 18}, {80, 20}}.
+  // We'll use "min", "low", "mid", "high", "max" -> 2dBm (1.5mW) -> 8, 11dBm (12mW) -> 44, 15dBm (32mW) -> 60, 18dBm (63mW) ->72, 20dBm (100mW) ->80
+  esp_wifi_set_max_tx_power(wifi_txpwr_mode_STA);
+  wifi_connection_status = WIFI_SEARCHING_FOR_AP;
+
+  do_serial_println("WiFi: Searching for AP " + use_ssid);
+  while (WiFi.status() != WL_CONNECTED) {
+    esp_task_wdt_reset();
+    do_serial_println(String(int(WiFi.status())));
+    do_serial_println(String("WiFi: Status " + String(int(WiFi.status())) + ". Try " + retryWifi));
+    if (retryWifi > 30) {
+      esp_task_wdt_reset();
+      return false;
+    }
+    retryWifi += 1;
+    vTaskDelay(500/portTICK_PERIOD_MS);
+  }
+  esp_task_wdt_reset();
+  return true;;
+}
+
+
+void restart_AP_or_STA(void) {
   static boolean mode_sta_once_successfully_connected = false;
   static boolean first_run = true;
   boolean start_soft_ap = first_run ? true : false;
   first_run = false;
+  String log_msg;
+  String used_wifi_ssid;
+  String used_wifi_password;
 
-  if (wifi_ssid_length > 0) {
+  if (wifi_ssid.length() || safeApName.length()) {
 
-    int retryWifi = 0;
     infoApName = "[not connected]";
     infoApPass = "";
     infoIpAddr = "0.0.0.0";
 
     start_soft_ap = false;
 
-    WiFi.disconnect();
-    WiFi.softAPdisconnect();
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(wifi_ssid.c_str(), wifi_password.length() ? wifi_password.c_str() : nullptr);
-    WiFi.setAutoReconnect(true);
-    // Set power:  minimum 8 (2dBm) (max 80 (20dBm))
-    // https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/network/esp_wifi.html
-    // Mapping Table {Power, max_tx_power} = {{8, 2}, {20, 5}, {28, 7}, {34, 8}, {44, 11}, {52, 13}, {56, 14}, {60, 15}, {66, 16}, {72, 18}, {80, 20}}.
-    // We'll use "min", "low", "mid", "high", "max" -> 2dBm (1.5mW) -> 8, 11dBm (12mW) -> 44, 15dBm (32mW) -> 60, 18dBm (63mW) ->72, 20dBm (100mW) ->80
-    esp_wifi_set_max_tx_power(wifi_txpwr_mode_STA);
-    wifi_connection_status = WIFI_SEARCHING_FOR_AP;
-
-    Serial.print("Searching for AP..");
-    while (WiFi.status() != WL_CONNECTED) {
-      esp_task_wdt_reset();
-      Serial.println((int)WiFi.status());
-      Serial.print("Retry..");
-      Serial.println(retryWifi);
-      if (retryWifi > 60) {
-        esp_task_wdt_reset();
-        if (!mode_sta_once_successfully_connected || wifi_do_failback_to_mode_AP) {
-          start_soft_ap = true;
+    boolean successfully_associated = restart_STA(wifi_ssid, wifi_password);
+    if (successfully_associated ) {
+      used_wifi_ssid = wifi_ssid;
+      used_wifi_password = wifi_password;
+    } else {
+      if (safeApPass.length() >= 8) {
+        // second try, with the SSID and password from wifi.cfg
+        successfully_associated = restart_STA(safeApName, safeApPass);
+        if (successfully_associated) {
+          used_wifi_ssid = safeApName;
+          used_wifi_password = safeApPass;
         }
-        break;
-      }
-      retryWifi += 1;
-      vTaskDelay(500/portTICK_PERIOD_MS);
+      }  
     }
-    esp_task_wdt_reset();
+    if (!successfully_associated && (!mode_sta_once_successfully_connected || wifi_do_failback_to_mode_AP)) {
+       start_soft_ap = true;
+    }
+
   } else {
+
     // may start soft AP, if not already running as AP
     if (WiFi.getMode() == WIFI_MODE_STA) {
       start_soft_ap = true;
     }
+
   }
+  if (start_soft_ap)
+    do_serial_println("WiFi: Status: " + String((int ) WiFi.status()) + " SoftAP: true  (AP: " +  apSSID + ")");
+  else
+    do_serial_println("WiFi: Status: " + String((int ) WiFi.status()) + " SoftAP: false  (AP: " +  used_wifi_ssid + ")");
 
   if (start_soft_ap) {
     WiFi.disconnect();
     WiFi.softAPdisconnect();
     WiFi.mode(WIFI_AP);
 
-    Serial.println("Starting AP");
+    log_msg="WiFi: Starting AP";
+    #ifdef ENABLE_SYSLOG
+      syslog_log(LOG_INFO, log_msg);
+    #endif
     WiFi.softAP(apSSID.c_str(), apPassword.c_str());
     wifi_connection_status = WIFI_RUNNING_AS_AP;
     esp_wifi_set_max_tx_power(wifi_txpwr_mode_AP);
 
-    Serial.println("Running AP. IP: " + WiFi.softAPIP().toString());
-    #ifdef ENABLE_SYSLOG
-        syslog_log(LOG_INFO, "Running AP: SSID: " + apSSID + ". IP: " + WiFi.softAPIP().toString());
-    #endif
-    infoApName = apSSID.c_str();
-    infoApPass = apSSID.c_str();
+    infoApName = apSSID;
+    infoApPass = apPassword;
     infoIpAddr = WiFi.softAPIP().toString();
+
+    log_msg = "WiFi: Running AP. SSID: " + infoApName + ". IP: " + infoIpAddr;
+    #ifdef ENABLE_SYSLOG
+        syslog_log(LOG_INFO, log_msg);
+    #endif
+    do_serial_println(log_msg);
     wifi_connection_status = WIFI_RUNNING_AS_AP;
 
   } else if (WiFi.getMode() == WIFI_MODE_STA) {
     // Save some battery
     //WiFi.setSleep(true);
     esp_wifi_set_ps(WIFI_PS_MAX_MODEM);
-    Serial.println("Connected. IP: " + WiFi.localIP().toString());
-    #ifdef ENABLE_SYSLOG
-      if (WiFi.getMode() == WIFI_MODE_STA && WiFi.status() == WL_CONNECTED)
-        syslog_log(LOG_INFO, "Connected. IP: " + WiFi.localIP().toString());
-    #endif
-    infoApName = wifi_ssid.c_str();
-    infoApPass = wifi_password.c_str();
+    infoApName = used_wifi_ssid;
+    infoApPass = used_wifi_password;
     if (WiFi.status() == WL_CONNECTED) {
-      mode_sta_once_successfully_connected = true;
       infoIpAddr = WiFi.localIP().toString();
+
+      mode_sta_once_successfully_connected = true;
       wifi_connection_status = WIFI_CONNECTED_TO_AP;
+
+      log_msg = "WiFi: Connected to AP " + infoApName + "; got IP: " + infoIpAddr;
+      #ifdef ENABLE_SYSLOG
+        syslog_log(LOG_INFO, log_msg);
+      #endif
+      do_serial_println(log_msg);
+
     } else {
+      log_msg ="WiFi: Not successfully associated with AP " + infoApName;
       wifi_connection_status = WIFI_NOT_CONNECTED_TO_AP;
+      // reduce power consumption
+      esp_wifi_set_max_tx_power(8);
     }
   } else {
-    Serial.println("WiFi Mode: " + WiFi.getMode());
+    log_msg="WiFi: Unexpected Mode: " + WiFi.getMode();
+    #ifdef ENABLE_SYSLOG
+      syslog_log(LOG_INFO, log_msg);
+    #endif
+    do_serial_println(log_msg);
+    // reduce power consumption
+    esp_wifi_set_max_tx_power(8);
     wifi_connection_status = WIFI_DISABLED;
     return;
   }
 
   String ntp_server = preferences.getString(PREF_NTP_SERVER, "");
+  ntp_server.trim();
   if (ntp_server.isEmpty()) {
     if (infoIpAddr.startsWith("44."))
       ntp_server = "ntp.hc.r1.ampr.org";
@@ -981,11 +1048,11 @@ void restart_AP_or_STA(void) {
   #ifdef ENABLE_SYSLOG
     struct tm timeinfo{};
     if(!getLocalTime(&timeinfo)){
-      syslog_log(LOG_WARNING, "Failed to obtain time");
+      syslog_log(LOG_WARNING, "NTP: Failed to obtain time");
     } else {
       char buf[64];
       strftime(buf, 64, "%A, %B %d %Y %H:%M:%S", &timeinfo);
-      syslog_log(LOG_INFO, String("Time: ") + String(buf));
+      syslog_log(LOG_INFO, String("NTP: updated time: ") + String(buf));
     }
   #endif
 
@@ -1025,7 +1092,9 @@ void restart_AP_or_STA(void) {
   server.on("/save_device_cfg", handle_saveDeviceCfg);
   server.on("/restore", handle_Restore);
   server.on("/update", HTTP_POST, []() {
-    syslog_log(LOG_WARNING, String("Update finished. Status: ") + (!Update.hasError() ? "Ok" : "Error"));
+#if defined(ENABLE_SYSLOG)
+    syslog_log(LOG_WARNING, String("Firmware: Update finished. Status: ") + (!Update.hasError() ? "Ok" : "Error"));
+#endif
     server.sendHeader("Connection", "close");
     server.send(200, "text/plain", (Update.hasError()) ? "FAIL" : "OK");
     delay(500);
@@ -1034,23 +1103,31 @@ void restart_AP_or_STA(void) {
     HTTPUpload& upload = server.upload();
     if (upload.status == UPLOAD_FILE_START) {
       rf95.sleep(); // disable rf95 before update
-      Serial.printf("Update: %s\n", upload.filename.c_str());
+      Serial.printf("%c\nFirmware: Update: %s\n", 0xC0, upload.filename.c_str());
       if (!Update.begin(UPDATE_SIZE_UNKNOWN)) { //start with max available size
-        syslog_log(LOG_ERR, String("Update begin error: ") + Update.errorString());
+#if defined(ENABLE_SYSLOG)
+        syslog_log(LOG_ERR, String("Firmware: Update begin error: ") + Update.errorString());
+#endif
         Update.printError(Serial);
       }
     } else if (upload.status == UPLOAD_FILE_WRITE) {
       /* flashing firmware to ESP*/
       if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
-        syslog_log(LOG_ERR, String("Update error: ") + Update.errorString());
+#if defined(ENABLE_SYSLOG)
+        syslog_log(LOG_ERR, String("Firmware: Update error: ") + Update.errorString());
+#endif
         Update.printError(Serial);
       }
     } else if (upload.status == UPLOAD_FILE_END) {
       if (Update.end(true)) { //true to set the size to the current progress
-        Serial.printf("Update Success: %u\nRebooting...\n", upload.totalSize);
-        syslog_log(LOG_WARNING, String("Update Success: ") + String((int)upload.totalSize));
+        Serial.printf("%c\nFirmware: Update Success: %u\nRebooting...\n", 0xC0, upload.totalSize);
+#if defined(ENABLE_SYSLOG)
+        syslog_log(LOG_WARNING, String("Firmware: Update Success: ") + String((int)upload.totalSize));
+#endif
       } else {
-        syslog_log(LOG_ERR, String("Update error: ") + Update.errorString());
+#if defined(ENABLE_SYSLOG)
+        syslog_log(LOG_ERR, String("Firmware: Update error: ") + Update.errorString());
+#endif
         Update.printError(Serial);
       }
     }
@@ -1063,7 +1140,6 @@ void restart_AP_or_STA(void) {
 
   wifi_password = preferences.getString(PREF_WIFI_PASSWORD, "");
   wifi_ssid = preferences.getString(PREF_WIFI_SSID, "");
-  wifi_ssid_length = wifi_ssid.length();
   apPassword = preferences.getString(PREF_AP_PASSWORD, "");
   // 8 characters is requirements for WPA2
   if (apPassword.length() < 8) {
@@ -1072,7 +1148,16 @@ void restart_AP_or_STA(void) {
 
 
  #ifdef ENABLE_SYSLOG
-   syslog.server(SYSLOG_IP, 514);
+   String syslog_server = preferences.getString(PREF_SYSLOG_SERVER, "");
+   syslog_server.trim();
+   #ifdef SYSLOG_IP
+     if (syslog_server.isEmpty())
+       syslog_server=String(SYSLOG_IP);
+   #endif
+   // no syslog server configured? broadcast ;)
+   if (syslog_server.isEmpty())
+     syslog_server = "255.255.255.255";
+   syslog.server(syslog_server.c_str(), 514);
    syslog.deviceHostname(webServerCfg->callsign.c_str());
    syslog.appName("TTGO");
    syslog.defaultPriority(LOG_KERN);
@@ -1094,7 +1179,7 @@ void restart_AP_or_STA(void) {
 
   WiFiClient aprs_is_client;
 
-  uint32_t t_connect_apprsis_again = 0L;
+  uint32_t t_connect_aprsis_again = 0L;
   String aprs_callsign = webServerCfg->callsign;
   aprsis_host.trim();
   aprsis_filter.trim();
@@ -1141,7 +1226,7 @@ void restart_AP_or_STA(void) {
         }
       }
     } else {
-      if (wifi_ssid_length > 0 && millis() - webserver_started > 60*1000L && WiFi.softAPgetStationNum() < 1) {
+      if ((wifi_ssid.length() || safeApName.length()) && millis() - webserver_started > 60*1000L && WiFi.softAPgetStationNum() < 1) {
         restart_AP_or_STA();
         webserver_started = millis();
       }
@@ -1171,7 +1256,12 @@ void restart_AP_or_STA(void) {
       boolean err = true;
       if (WiFi.getMode() == WIFI_MODE_STA) {
         if (WiFi.status() != WL_CONNECTED) { aprsis_status = "Error: no internet"; goto on_err; } else { if (aprsis_status == "Error: no internet") aprsis_status = "Internet available"; }
-        if (!aprs_is_client.connected() && t_connect_apprsis_again < millis()) {
+        if (!aprs_is_client.connected() && t_connect_aprsis_again < millis()) {
+          String log_msg =  String("APRS-IS: Connecting to '") + aprsis_host + "' [" + aprs_is_client.remoteIP() + "], tries " + String(aprsis_connect_tries);
+          #if defined(ENABLE_SYSLOG)
+            syslog_log(LOG_INFO, log_msg);
+          #endif
+          do_serial_println(log_msg);
           aprsis_status = "Connecting";
           aprs_is_client.connect(aprsis_host.c_str(), aprsis_port);
           if (!aprs_is_client.connected()) { aprsis_status = "Error: connect failed"; goto on_err; }
@@ -1179,24 +1269,54 @@ void restart_AP_or_STA(void) {
           uint32_t t_start = millis();
           while (!aprs_is_client.available() && (millis()-t_start) < 25000L) delay(100);
           if (aprs_is_client.available()) {
-	    // check 
-	    String s = aprs_is_client.readStringUntil('\n');
-	    if (s.isEmpty() || !s.startsWith("#")) { aprsis_status = "Error: unexpected greeting"; goto on_err; }
-	  } else { aprsis_status = "Error: No response"; goto on_err; }
+            // check 
+            String s = aprs_is_client.readStringUntil('\n');
+            if (s.isEmpty() || !s.startsWith("#")) { aprsis_status = "Error: unexpected greeting"; goto on_err; }
+          } else { aprsis_status = "Error: No response"; goto on_err; }
           aprsis_status = "Login";
-	  char buffer[1024];
-	  sprintf(buffer, "user %s pass %s TTGO-T-Beam-LoRa-APRS 0.1%s%s\r\n", aprsis_callsign.c_str(), aprsis_password.c_str(), aprsis_filter.isEmpty() ? "" : " filter ", aprsis_filter.isEmpty() ? "" :  aprsis_filter.c_str());
+          char buffer[1024];
+          sprintf(buffer, "user %s pass %s TTGO-T-Beam-LoRa-APRS 0.1%s%s\r\n", aprsis_callsign.c_str(), aprsis_password.c_str(), aprsis_filter.isEmpty() ? "" : " filter ", aprsis_filter.isEmpty() ? "" :  aprsis_filter.c_str());
           aprs_is_client.print(String(buffer));
           t_start = millis();
           while (!aprs_is_client.available() && (millis()-t_start) < 25000L) delay(100);
           aprsis_status = "Logged in";
           if (aprs_is_client.available()) {
-	    // check 
-	    String s = aprs_is_client.readStringUntil('\n');
-	    if (s.isEmpty() || !s.startsWith("#")) { aprsis_status = "Error: unexpected reponse on login"; goto on_err; }
-	    if (s.indexOf(" logresp") == -1) { aprsis_status = "Error: Login denied: " + s; aprsis_status.trim(); goto on_err; }
-	    if (s.indexOf(" verified") == -1) { aprsis_status = "Notice: server responsed not verified: " + s; aprsis_status.trim(); }
-	  } else { aprsis_status = "Error: No response"; goto on_err; }
+            // check 
+            String s = aprs_is_client.readStringUntil('\n');
+            if (s.isEmpty() || !s.startsWith("#")) { aprsis_status = "Error: unexpected reponse on login"; goto on_err; }
+            if (s.indexOf(" logresp") == -1) { aprsis_status = "Error: Login denied: " + s; aprsis_status.trim(); goto on_err; }
+            if (s.indexOf(" verified") == -1) { aprsis_status = "Notice: server responsed not verified: " + s; aprsis_status.trim(); }
+          } else { aprsis_status = "Error: No response"; goto on_err; }
+          log_msg = String("APRS-IS: connected to '" + aprsis_host + String("' [") + aprs_is_client.remoteIP() + "]");
+          #if defined(ENABLE_SYSLOG)
+             syslog_log(LOG_INFO, log_msg);
+          #endif
+          do_serial_println(log_msg);
+          // send status mesg to APRS-IS. If reboot, print BUILDNUMBER
+          aprsis_connect_tries = 0;
+          if (send_status_message_to_aprsis) {
+            String outString = aprsis_callsign + ">" + MY_APRS_DEST_IDENTIFYER + ":>aprs-is-connect: ";
+            char buf[19];// Room for len(20220917 01:02:03z) + 1 /* \0 */  -> 19
+            struct tm timeinfo{};
+            if (getLocalTime(&timeinfo)) {
+              strftime(buf, sizeof(buf), "%Y%m%d %H:%M:%Sz", &timeinfo);
+            } else {
+              strncpy(buf, gps_time_s, sizeof(buf));
+            }
+            outString = outString + String(buf);
+            if (aprsis_time_last_successful_connect.length())
+              outString = outString + ", last " + aprsis_time_last_successful_connect;
+            else
+              outString = outString + "(Reboot[V" + buildnr + "])";
+            aprsis_time_last_successful_connect = String(buf);
+            outString = outString + ", tries " + String(aprsis_connect_tries);
+            log_msg = String("APRS-IS: sent status '" + outString + String("'"));
+            #if defined(ENABLE_SYSLOG)
+              syslog_log(LOG_INFO, log_msg);
+            #endif
+            do_serial_println(log_msg);
+            aprs_is_client.print(outString + "\r\n");
+          }
         }
         if (!aprs_is_client.connected())
           goto on_err;
@@ -1208,43 +1328,43 @@ void restart_AP_or_STA(void) {
           //aprsis_status = "OK";
           s.trim();
           if (s.isEmpty()) goto on_err;
-	  if (*(s.c_str()) == '#' || !isalnum(*(s.c_str()))) goto do_not_send;
-	  char *header_end = strchr(s.c_str(), ':');
-	  if (!header_end) goto do_not_send;
-	  char *src_call_end = strchr(s.c_str(), '>');
-	  if (!src_call_end) goto do_not_send;
-	  if (src_call_end > header_end-2) goto do_not_send;
-	  char *q = strchr(s.c_str(), '-');
-	  if (q && q < src_call_end) {
-	    // len callsign > 6?
-	    if (q-s.c_str() > 6) goto do_not_send;
-	    // SSID optional, only 0..15
-	    if (q[2] == '>') {
-	      if (q[1] < '0' || q[1] > '9') goto do_not_send;
-	    } else if (q[3] == '>') {
-	      if (q[1] != '1' || q[2] < '0' || q[2] > '5') goto do_not_send;
-	    } else goto do_not_send;
-	  } else {
-	    if (src_call_end-s.c_str() > 6) goto do_not_send;
-	  }
+          if (*(s.c_str()) == '#' || !isalnum(*(s.c_str()))) goto do_not_send;
+          char *header_end = strchr(s.c_str(), ':');
+          if (!header_end) goto do_not_send;
+          char *src_call_end = strchr(s.c_str(), '>');
+          if (!src_call_end) goto do_not_send;
+          if (src_call_end > header_end-2) goto do_not_send;
+          char *q = strchr(s.c_str(), '-');
+          if (q && q < src_call_end) {
+            // len callsign > 6?
+            if (q-s.c_str() > 6) goto do_not_send;
+            // SSID optional, only 0..15
+            if (q[2] == '>') {
+              if (q[1] < '0' || q[1] > '9') goto do_not_send;
+            } else if (q[3] == '>') {
+              if (q[1] != '1' || q[2] < '0' || q[2] > '5') goto do_not_send;
+            } else goto do_not_send;
+          } else {
+            if (src_call_end-s.c_str() > 6) goto do_not_send;
+          }
 
-	  // do not interprete packets coming back from aprs-is net (either our source call, or if we have repeated it with one of our calls
-	  // sender is our call?
+          // do not interprete packets coming back from aprs-is net (either our source call, or if we have repeated it with one of our calls
+          // sender is our call?
           if (s.startsWith(aprs_callsign + '>') || s.startsWith(aprsis_callsign + '>')) goto do_not_send;
 
-	  // packet has our call in i.E. ...,qAR,OURCALL:...
-	  q = strstr(s.c_str(), (',' + aprsis_callsign + ':').c_str());
-	  if (q && q < header_end) goto do_not_send;
-	  for (int i = 0; i < 2; i++) {
-	    String call = (i == 0 ? aprs_callsign : aprsis_callsign);
-		// digipeated frames look like "..,DL9SAU,DL1AAA,DL1BBB*,...", or "..,DL9SAU*,DL1AAA,DL1BBB,.."
-	    if (((q = strstr(s.c_str(), (',' + call + '*').c_str())) || (q = strstr(s.c_str(), (',' + call + ',').c_str()))) && q < header_end) {
+          // packet has our call in i.E. ...,qAR,OURCALL:...
+          q = strstr(s.c_str(), (',' + aprsis_callsign + ':').c_str());
+          if (q && q < header_end) goto do_not_send;
+          for (int i = 0; i < 2; i++) {
+            String call = (i == 0 ? aprs_callsign : aprsis_callsign);
+            // digipeated frames look like "..,DL9SAU,DL1AAA,DL1BBB*,...", or "..,DL9SAU*,DL1AAA,DL1BBB,.."
+            if (((q = strstr(s.c_str(), (',' + call + '*').c_str())) || (q = strstr(s.c_str(), (',' + call + ',').c_str()))) && q < header_end) {
               char *digipeatedflag = strchr(q, '*');
-	      if (digipeatedflag && digipeatedflag < header_end && digipeatedflag > q)
-	        goto do_not_send;
-	    }
-	  }
-	  // generate third party packet. Use aprs_callsign (deriving from webServerCfg->callsign), because aprsis_callsign may have a non-aprs (but only aprsis-compatible) ssid like '-L4'
+              if (digipeatedflag && digipeatedflag < header_end && digipeatedflag > q)
+                goto do_not_send;
+            }
+          }
+          // generate third party packet. Use aprs_callsign (deriving from webServerCfg->callsign), because aprsis_callsign may have a non-aprs (but only aprsis-compatible) ssid like '-L4'
           String third_party_packet = generate_third_party_packet(aprs_callsign, s);
           if (!third_party_packet.isEmpty()) {
             aprsis_status = "OK, fromAPRSIS: " + s + " => " + third_party_packet; aprsis_status.trim();
@@ -1252,14 +1372,14 @@ void restart_AP_or_STA(void) {
             sendToTNC(third_party_packet);
 #endif
             if (lora_tx_enabled && aprsis_data_allow_inet_to_rf) {
-	      // not query or aprs-message addressed to our call (check both, aprs_callsign and aprsis_callsign)=
-	      // Format: "..::DL9SAU-15:..."
-	      // check is in this code part, because we may like to see those packets via kiss (sent above)
-	      q = header_end + 1;
-	      if (*q == ':' && strlen(q) > 10 && q[10] == ':' &&
+              // not query or aprs-message addressed to our call (check both, aprs_callsign and aprsis_callsign)=
+              // Format: "..::DL9SAU-15:..."
+              // check is in this code part, because we may like to see those packets via kiss (sent above)
+              q = header_end + 1;
+              if (*q == ':' && strlen(q) > 10 && q[10] == ':' &&
                   ((!strncmp(q+1, aprs_callsign.c_str(), aprs_callsign.length()) && (aprs_callsign.length() == 9 || q[9] == ' ')) ||
                   (!strncmp(q+1, aprsis_callsign.c_str(), aprsis_callsign.length()) && (aprsis_callsign.length() == 9 || q[9] == ' ')) ))
-	        goto do_not_send;
+                goto do_not_send;
               if (aprsis_data_allow_inet_to_rf % 2)
                 loraSend(txPower, lora_freq, lora_speed, third_party_packet);
               if (aprsis_data_allow_inet_to_rf > 1 && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq)
@@ -1269,9 +1389,9 @@ void restart_AP_or_STA(void) {
         }
 do_not_send:
         if (to_aprsis_data) {
-	  // copy(). We are threaded..
-	  String data = String(to_aprsis_data);
-	  // clear queue
+          // copy(). We are threaded..
+          String data = String(to_aprsis_data);
+          // clear queue
           to_aprsis_data = "";
           data.trim();
           char *p = strchr(data.c_str(), '>');
@@ -1282,15 +1402,15 @@ do_not_send:
             // IGATECALL>APRS,GATEPATH:}FROMCALL>TOCALL,TCPIP,IGATECALL*:original packet data
             char *r; char *s;
             if (!(q[1] == '}' && (r = strchr(q+2, '>')) && ((s = strstr(r+1, ",TCPIP,")) || (s = strstr(r+1, ",TCPXX,"))) && strstr(s+6, "*:"))) {
-	      char buf[256];
-	      int len = (q-data.c_str());
-	      if (len > 0 && len < sizeof(buf)) {
-	        strncpy(buf, data.c_str(), len);
+              char buf[256];
+              int len = (q-data.c_str());
+              if (len > 0 && len < sizeof(buf)) {
+                strncpy(buf, data.c_str(), len);
                 buf[len] = 0;
-		String s_data = String(buf) + (lora_tx_enabled ? ",qAR," : ",qAO,") + aprsis_callsign + q + "\r\n";
+                String s_data = String(buf) + (lora_tx_enabled ? ",qAR," : ",qAO,") + aprsis_callsign + q + "\r\n";
                 aprsis_status = "OK, toAPRSIS: " + s_data; aprsis_status.trim();
                 aprs_is_client.print(s_data);
-	      }
+              }
             }
           }
           //aprsis_status = "OK";
@@ -1299,11 +1419,15 @@ do_not_send:
 
         if (err) {
 on_err:
-	  aprs_is_client.stop();
-	  if (!aprsis_status.startsWith("Error: "))
+          #if defined(ENABLE_SYSLOG)
+             syslog_log(LOG_INFO, String("APRS-IS: on_Err: '") + aprsis_status + String("'"));
+          #endif
+           do_serial_println(String("APRS-IS: on_Err: '") + aprsis_status + String("'"));
+          aprs_is_client.stop();
+          if (!aprsis_status.startsWith("Error: "))
             aprsis_status = "Disconnected";
-	  if (t_connect_apprsis_again <=  millis())
-	    t_connect_apprsis_again = millis() + 60000L;
+          if (t_connect_aprsis_again <=  millis())
+            t_connect_aprsis_again = millis() + 60000L;
           to_aprsis_data = "";
         }
       }
