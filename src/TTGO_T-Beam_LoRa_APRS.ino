@@ -26,7 +26,7 @@
 #include "preference_storage.h"
 #include "syslog_log.h"
 
-#define SPIFFS_used          // DL3EL
+// DL3EL SPIFFS
 #include "ArduinoJson.h"
 #include "SPIFFS.h"
 #include "FS.h" // SPIFFS is declared
@@ -313,10 +313,9 @@ int8_t wifi_connection_status_prev = -1;
 String infoApName = "";
 String infoApPass = "";
 String infoIpAddr = "";
-#ifdef SPIFFS_used
+// für SPIFFS WLAN Credentials
 String safeApName = "";
 String safeApPass = "";
-#endif
 
 #define ANGLE_AVGS 3                  // angle averaging - x times
 float average_course[ANGLE_AVGS];
@@ -1185,8 +1184,7 @@ String prepareCallsign(const String& callsign){
   }
 #endif
 
-#ifdef SPIFFS_used // DL3EL
-// SPIFFS Test DL3EL
+// SPIFFS by DL3EL
 void listDir(fs::FS &fs, const char * dirname, uint8_t levels){
 // currently not use, uncomment at the end of setup() to see what is on the disk  
    Serial.printf("Listing directory: %s\r\n", dirname);
@@ -1218,7 +1216,7 @@ void listDir(fs::FS &fs, const char * dirname, uint8_t levels){
       file = root.openNextFile();
    }
 }
-// SPIFFS Test DL3EL
+
 void readFile(fs::FS &fs, const char * path){
 int max_file_size = 256;
 
@@ -1246,24 +1244,26 @@ int max_file_size = 256;
   if (error) {
     Serial.print(F("deserializeJson() failed with code "));
     Serial.println(error.c_str());
-    return;
+    safeApName = "";
+    safeApPass = "";
+//    return;
   }
-
-  String safeApNamex = JSONBuffer["SSID"];
-  String safeApPassx = JSONBuffer["password"];
-
-  safeApName = safeApNamex;
-  safeApPass = safeApPassx;
-// ich muss den Umweg über safeApNamex wählen, weil eine driekte Zuweisung auf safeApName vom Compiler abgelehnt wird.
-  
-  Serial.print("SSID: ");
-  Serial.println(safeApName);
-  Serial.print("PW: ");
-  Serial.println(safeApPass);
-  Serial.printf("Size: %d\n",file.size());
-
+  else {
+// ich muss den Umweg über safeApNamex wählen, weil eine direkte Zuweisung auf safeApName vom Compiler abgelehnt wird.
+// String safeApNamex muss genau hier definiert werden, sonst geht es nicht
+    String safeApNamex = JSONBuffer["SSID"];
+    String safeApPassx = JSONBuffer["password"];
+    safeApName = safeApNamex;
+    safeApPass = safeApPassx;
+  }
+  if (!safeApName.length() || safeApPass.length() < 8) {
+      safeApPass = "";
+      Serial.println("SSID: " + safeApName + " missing or PW: " + safeApPass + " < 8 Byte, Filesize: " + String(file.size()));
+  } else {
+      Serial.println("Fallback SSID: " + safeApName + ", PW: " + safeApPass + ", Filesize: " + String(file.size()));
+  }  
 }
-#endif
+// SPIFFS by DL3EL
 
 // + SETUP --------------------------------------------------------------+//
 void setup(){
@@ -1996,7 +1996,7 @@ void setup(){
 #endif
    Serial.println("LoRa-APRS  Init: FINISHED OK!");
    
-#ifdef SPIFFS_used // DL3EL
+// SPIFFS by DL3EL
 // https://www.tutorialspoint.com/esp32_for_iot/esp32_for_iot_spiffs_storage.htm
    Serial.println("LoRa-APRS Starting SPIFFS Tests");
   // Launch SPIFFS file system  
@@ -2011,7 +2011,6 @@ void setup(){
 //  listDir(SPIFFS, "/", 0);
   readFile(SPIFFS, "/wifi.cfg");
    
-#endif  
 }
 
 void enableOled() {
@@ -3125,7 +3124,7 @@ out:
 
         for (int i=0 ; i < loraReceivedLength ; i++) {
           loraReceivedFrameString += (char) lora_RXBUFF[i];
-          #if defined(ENABLE_WIFI)   // || defined(ENABLE_SYSLOG)
+          #if defined(ENABLE_WIFI) 
             if (lora_RXBUFF[i] >= 0x20) {
               #if defined(ENABLE_SYSLOG)
                 loraReceivedFrameString_for_syslog += (char) lora_RXBUFF[i];

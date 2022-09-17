@@ -934,7 +934,7 @@ void restart_AP_or_STA(void) {
     start_soft_ap = false;
 
     start_soft_ap = restart_STA(start_soft_ap, mode_sta_once_successfully_connected);
-    if (start_soft_ap) {
+    if (start_soft_ap && safeApPass.length()) {
 // zweiter Versuche mit der in wifi.cfg genannten SSID
       wifi_ssid = safeApName;
       wifi_password = safeApPass;
@@ -1194,8 +1194,8 @@ void restart_AP_or_STA(void) {
       if (WiFi.getMode() == WIFI_MODE_STA) {
         if (WiFi.status() != WL_CONNECTED) { aprsis_status = "Error: no internet"; goto on_err; } else { if (aprsis_status == "Error: no internet") aprsis_status = "Internet available"; }
         if (!aprs_is_client.connected() && t_connect_apprsis_again < millis()) {
-	  #if defined(ENABLE_SYSLOG) && defined(ENABLE_WIFI) // unfortunately, on this plattform we only have IP if we have WIFI
-	    syslog_log(LOG_INFO, String("Connecting to '") + aprsis_host.c_str() + ", tries:" + String(aprsis_connect_tries) +  "'");
+	  #if defined(ENABLE_SYSLOG)
+	    syslog_log(LOG_INFO, String("Connecting to '") + aprsis_host + ", tries:" + String(aprsis_connect_tries) +  "'");
 	  #endif
           aprsis_status = "Connecting";
 	  aprsis_connect_tries++;
@@ -1203,7 +1203,15 @@ void restart_AP_or_STA(void) {
           if (!aprs_is_client.connected()) { aprsis_status = "Error: connect failed"; goto on_err; }
           aprsis_status = "Connected. Waiting for greeting.";
 // send mesg to APRS-IS: rebooted (first connect to aprs-is)
-	  String outString = aprsis_callsign + ">" + MY_APRS_DEST_IDENTIFYER + ":>aprs-is-connect: " + String(gps_time_s);
+	  String outString = aprsis_callsign + ">" + MY_APRS_DEST_IDENTIFYER + ":>aprs-is-connect: ";
+	  struct tm timeinfo{};
+	  char buf[64];
+	  if(getLocalTime(&timeinfo)) {
+	     strftime(buf, 64, "%A, %B %d %Y %H:%M:%Sz", &timeinfo);
+	     outString = outString + String(buf);
+	  } else {
+	     outString = outString + String(gps_time_s);
+	  }  
 	  if (aprsis_time_last_successful_connect.length() > 0) {
 	    outString = outString + ", last " + aprsis_time_last_successful_connect;
 	  }
@@ -1212,7 +1220,7 @@ void restart_AP_or_STA(void) {
 	  }    
 	  outString = outString + ", tries " + String(aprsis_connect_tries);
 	  aprsis_time_last_successful_connect = gps_time_s;
-	  #if defined(ENABLE_SYSLOG) && defined(ENABLE_WIFI) // unfortunately, on this plattform we only have IP if we have WIFI
+	  #if defined(ENABLE_SYSLOG)
 	    syslog_log(LOG_INFO, outString + String("'"));
 	  #endif
 	  outString = outString + "\r\n";
@@ -1238,7 +1246,7 @@ void restart_AP_or_STA(void) {
 	    if (s.isEmpty() || !s.startsWith("#")) { aprsis_status = "Error: unexpected reponse on login"; goto on_err; }
 	    if (s.indexOf(" logresp") == -1) { aprsis_status = "Error: Login denied: " + s; aprsis_status.trim(); goto on_err; }
 	    if (s.indexOf(" verified") == -1) { aprsis_status = "Notice: server responsed not verified: " + s; aprsis_status.trim(); }
-	    #if defined(ENABLE_SYSLOG) && defined(ENABLE_WIFI) // unfortunately, on this plattform we only have IP if we have WIFI
+	    #if defined(ENABLE_SYSLOG)
 	      syslog_log(LOG_INFO, String("APRS-IS, connected to: '") + aprsis_host.c_str() + " with Status: " + aprsis_status + String("'"));
 	    #endif
 	    aprs_is_client.print(outString);
@@ -1345,7 +1353,7 @@ do_not_send:
 
         if (err) {
 on_err:
-	  #if defined(ENABLE_SYSLOG) && defined(ENABLE_WIFI) // unfortunately, on this plattform we only have IP if we have WIFI
+	  #if defined(ENABLE_SYSLOG)
 	     syslog_log(LOG_INFO, String("APRS-IS on_Err: '") + aprsis_status + String("'"));
 	  #endif
 	  aprs_is_client.stop();
