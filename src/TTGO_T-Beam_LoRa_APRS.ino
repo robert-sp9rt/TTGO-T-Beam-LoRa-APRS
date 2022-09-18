@@ -21,12 +21,13 @@
 #include <gfxfont.h>
 #include <axp20x.h>
 #include <esp_task_wdt.h>
+#include <sys/time.h>
 #include "taskGPS.h"
 #include "version.h"
 #include "preference_storage.h"
 #include "syslog_log.h"
 
-// DL3EL SPIFFS
+// Access to SPIFFS for wifi.cfg
 #include "ArduinoJson.h"
 #include "SPIFFS.h"
 #include "FS.h" // SPIFFS is declared
@@ -37,8 +38,8 @@
 #endif
 #ifdef ENABLE_WIFI
   #include "taskWebServer.h"
-  String wifi_info;                // saving wifi info (CLI|AP|dis) for Oled
 #endif
+String wifi_info;                // saving wifi info (CLI|AP|dis) for Oled. If WIFI not compiled in, we still need this variable
 
 // oled address
 #define SSD1306_ADDRESS 0x3C
@@ -144,7 +145,7 @@ String aprsLonPreset = LONGITUDE_PRESET;
 //String LongShownP = aprsLonPreset;
 // "P" means original Preset, "u": Preset has been updated to the last valid position (DL3EL). "p" means, invalid gps, last known position used a temporary preset.
 String aprsPresetShown = "P";
-double lastTxdistance = 0;
+//double lastTxdistance = 0;
 
 #if defined(T_BEAM_V1_0) || defined(T_BEAM_V0_7)
   boolean gps_state = true;
@@ -303,6 +304,7 @@ ulong oled_timer;
 bool manBeacon = false;
 
 // Variable to show AP settings on OLED
+#ifdef ENABLE_WIFI
 int8_t WIFI_DISABLED = 0;
 int8_t WIFI_SEARCHING_FOR_AP = 1;
 int8_t WIFI_CONNECTED_TO_AP = 2;
@@ -316,6 +318,8 @@ String infoIpAddr = "";
 // für SPIFFS WLAN Credentials
 String safeApName = "";
 String safeApPass = "";
+#endif
+
 
 #define ANGLE_AVGS 3                  // angle averaging - x times
 float average_course[ANGLE_AVGS];
@@ -367,6 +371,10 @@ int rx_on_frequencies = 1;			// RX freq. Only if lora_digipeating_mode < 2 (we a
 bool acceptOwnPositionReportsViaKiss = true;		// true: Switches off local beacons as long as a kiss device is sending positions with our local callsign. false: filters out position packets with own callsign coming from kiss (-> do not send to LoRa).
 boolean gps_allow_sleep_while_kiss = true;		// user has a kiss device attached via kiss which sends positions with own call, we don't need our gps to be turned on -> We pause sending positions by ourself (neither fixed nor smart beaconing). Except: user has a display attached to this tracker, he'll will be able to see his position because our gps does not go to sleep (-> set this to false). Why sleep? Energy saving
 boolean wifi_do_failback_to_mode_AP = true;		// Allow failback to mode AP after once connected successfully connected (after boot) to configured remote AP. Disable for igates, where you don't need your tracker to be a hotspot. You like to enable, if you use your tracker portable and it should automatically be wifi client to your home network, and be AP if you are outside.
+boolean send_status_message_to_aprsis = true;		// Send reboot, wifi- or internet-loss as APPRS-status-message to APRS-IS
+boolean debug_to_serial = false;		// Display some debug messages on serial port.
+						// Cave: Because we are threaded, sooner or later data corruption will occur, i.E. DL9SAU>APRS:...ThoHost: euro2.aprs.net Tries: 1mas"
+
 
 #ifdef KISS_PROTOCOL
 // do not configure
@@ -426,7 +434,15 @@ xSemaphoreHandle sema_lora_chip;
 volatile boolean sema_lora_chip = false;
 #endif
 
+
 // + FUNCTIONS-----------------------------------------------------------+//
+
+void do_serial_println(const String &msg)
+{
+  if (debug_to_serial) {
+    Serial.println(msg);
+  }
+}
 
 
 char *ax25_base91enc(char *s, uint8_t n, uint32_t v){
@@ -668,7 +684,7 @@ void lora_set_speed(ulong lora_speed) {
 }
 
 #if defined(ENABLE_WIFI)
-void send_to_aprsis(String s)
+void send_to_aprsis(const String &s)
 {
   to_aprsis_data = s;
   return;
@@ -787,7 +803,11 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, const Strin
 #ifdef T_BEAM_V1_0
   // if lora_rx is disabled, but  ONLY if lora_digipeating_mode == 0 AND no SerialBT.hasClient is connected,
   // we can savely go to sleep
-  if (! (lora_rx_enabled || lora_digipeating_mode > 0 || SerialBT.hasClient()) )
+  if (! (lora_rx_enabled || lora_digipeating_mode > 0
+          #if defined(ENABLE_BLUETOOTH) && defined(KISS_PROTOCOL)
+            || SerialBT.hasClient()
+          #endif
+      ) )
     axp.setPowerOutPut(AXP192_LDO2, AXP202_OFF);                           // switch LoRa chip off
 #endif
   // release lock
@@ -1158,7 +1178,7 @@ String prepareCallsign(const String& callsign){
         String telemetryData = String("T#") + tel_sequence_str + "," + String(b_volt) + "," + String(b_in_c) + "," + String(b_out_c) + "," + String(ac_volt) + "," + String(ac_c);
         String telemetryBase = "";
         telemetryBase += Tcall + ">" + MY_APRS_DEST_IDENTIFYER + tel_path_str + ":";
-        Serial.print(telemetryBase);
+        do_serial_println("Telemetry: " + telemetryBase);
         sendToTNC(telemetryBase + telemetryParamsNames);
         sendToTNC(telemetryBase + telemetryUnitNames);
         sendToTNC(telemetryBase + telemetryEquations);
@@ -1184,27 +1204,29 @@ String prepareCallsign(const String& callsign){
   }
 #endif
 
-// SPIFFS by DL3EL
-void listDir(fs::FS &fs, const char * dirname, uint8_t levels){
+
+// SPIFFS for wifi.cfg
+void listDir(fs::FS &fs, const char * dirname, uint8_t levels) {
 // currently not use, uncomment at the end of setup() to see what is on the disk  
    Serial.printf("Listing directory: %s\r\n", dirname);
 
    File root = fs.open(dirname);
-   if(!root){
+   if(!root) {
       Serial.println("− failed to open directory");
       return;
    }
-   if(!root.isDirectory()){
+   if (!root.isDirectory()) {
       Serial.println(" − not a directory");
+      root.close();
       return;
    }
 
    File file = root.openNextFile();
-   while(file){
-      if(file.isDirectory()){
+   while (file){
+      if (file.isDirectory()) {
          Serial.print("  DIR : ");
          Serial.println(file.name());
-         if(levels){
+         if (levels){
             listDir(fs, file.name(), levels -1);
          }
       } else {
@@ -1213,61 +1235,82 @@ void listDir(fs::FS &fs, const char * dirname, uint8_t levels){
          Serial.print("\tSIZE: ");
          Serial.println(file.size());
       }
+      file.close();
       file = root.openNextFile();
    }
+   root.close();
 }
 
-void readFile(fs::FS &fs, const char * path){
-int max_file_size = 256;
+// readFile - is more than reading a file from flash. It reads and parses json data in the file and assigns some of our variables.
+// The correct function name would be readFile_parseJson_and_assignVariable(). This is would be too ugly.
+void readFile(fs::FS &fs, const char * filename) {
+  #define JSON_MAX_FILE_SIZE 256
 
-  File file = fs.open(path);
+  File file = fs.open(filename);
   if(!file || file.isDirectory()){
-    Serial.println("− failed to open file for reading");
+    Serial.printf("readFile: failed to open file %s for reading\n", filename);
     return;
   }
-//https://arduinojson.org/v6/doc/upgrade/
+  Serial.printf("readFile: opened file %s for reading\n", filename);
 
-  char JSONMessage[max_file_size];
-  int n = 0;
-  file = fs.open(path);
-  while(file.available()){
-    JSONMessage[n++] = file.read();
-    if (n > max_file_size) break;
+  char JSONMessage[JSON_MAX_FILE_SIZE];
+
+  int pos = 0;
+  for (; pos < JSON_MAX_FILE_SIZE-1; pos++) {
+    if (!file.available())
+      break;
+    JSONMessage[pos] = file.read();
   }
-  if (file.size() > max_file_size) {
-    Serial.printf("Warning, file too big: %d Byte (max: %d)\n",file.size(),max_file_size);
+  JSONMessage[pos] = 0;
+
+  if (file.size() > JSON_MAX_FILE_SIZE) {
+    Serial.printf("readFile: Warning, file too big: %d Byte (max: %d)\n",file.size(), JSON_MAX_FILE_SIZE);
   }
+
    
-  StaticJsonDocument<256> JSONBuffer;                         //Memory pool
+  //https://arduinojson.org/v6/doc/upgrade/
+  StaticJsonDocument<JSON_MAX_FILE_SIZE> JSONBuffer;                         //Memory pool
  
   auto error = deserializeJson(JSONBuffer, JSONMessage);
   if (error) {
     Serial.print(F("deserializeJson() failed with code "));
     Serial.println(error.c_str());
-    safeApName = "";
-    safeApPass = "";
-//    return;
+    goto end;
   }
-  else {
-// ich muss den Umweg über safeApNamex wählen, weil eine direkte Zuweisung auf safeApName vom Compiler abgelehnt wird.
-// String safeApNamex muss genau hier definiert werden, sonst geht es nicht
-    String safeApNamex = JSONBuffer["SSID"];
-    String safeApPassx = JSONBuffer["password"];
-    safeApName = safeApNamex;
-    safeApPass = safeApPassx;
-  }
-  if (!safeApName.length() || safeApPass.length() < 8) {
+
+  if (!strcmp(filename, "/wifi.cfg")) {
+    if (JSONBuffer.containsKey("SSID") && JSONBuffer.containsKey("password")) {
+      const char *p;
+      if ((p = JSONBuffer["SSID"]))
+        safeApName = String(p);
+      if ((p = JSONBuffer["password"]))
+        safeApPass = String(p);
+    }
+    if (!safeApName.length() || safeApPass.length() < 8) {
+      safeApName = "";
       safeApPass = "";
       Serial.println("SSID: " + safeApName + " missing or PW: " + safeApPass + " < 8 Byte, Filesize: " + String(file.size()));
-  } else {
+    } else {
       Serial.println("Fallback SSID: " + safeApName + ", PW: " + safeApPass + ", Filesize: " + String(file.size()));
+    }  
+  } else {
+    Serial.printf("Found file '%s', parsed it successfully, but I don't know what to do with the json data ;)!\n", filename);
   }
-  file.close();  
+
+end:
+  Serial.println("readFile: end");
+  file.close();
 }
-// SPIFFS by DL3EL
+
+
 
 // + SETUP --------------------------------------------------------------+//
-void setup(){
+void setup()
+{
+
+  // Our BUILD_NUMBER. The define is not available in the WEBSERVR -> we need to assign a global variable
+  buildnr = BUILD_NUMBER;
+
 #ifdef T_BEAM_V0_7 /*
   adcAttachPin(35);
   adcStart(35);
@@ -1277,8 +1320,6 @@ void setup(){
   //adc1_config_width(ADC_WIDTH_BIT_12);
   //adc1_config_channel_atten(ADC1_CHANNEL_7,ADC_ATTEN_DB_11);
 #endif
-// to have access to the buildnr in Webserver
-  buildnr = BUILD_NUMBER;
 
   SPI.begin(SPI_sck,SPI_miso,SPI_mosi,SPI_ss);    //DO2JMG Heltec Patch
   Serial.begin(115200);
@@ -1303,7 +1344,7 @@ void setup(){
 // if available.
 // https://randomnerdtutorials.com/esp32-save-data-permanently-preferences/
 
-  #ifdef ENABLE_PREFERENCES
+#ifdef ENABLE_PREFERENCES
     int clear_preferences = 0;
     if(digitalRead(BUTTON)==LOW){
       clear_preferences = 1;
@@ -1346,7 +1387,7 @@ void setup(){
       preferences.putInt(PREF_WIFI_TXPWR_MODE_STA, wifi_txpwr_mode_STA);
     }
     wifi_txpwr_mode_STA = preferences.getInt(PREF_WIFI_TXPWR_MODE_STA);
-#endif
+#endif //ENABLE_WIFI
     
     // LoRa transmission settings
 
@@ -1415,6 +1456,12 @@ void setup(){
       preferences.putInt(PREF_LORA_TX_BEACON_AND_KISS_TO_FREQUENCIES_PRESET, tx_own_beacon_from_this_device_or_fromKiss__to_frequencies);
     }
     tx_own_beacon_from_this_device_or_fromKiss__to_frequencies = preferences.getInt(PREF_LORA_TX_BEACON_AND_KISS_TO_FREQUENCIES_PRESET);
+
+    if (!preferences.getBool(PREF_LORA_TX_STATUSMESSAGE_TO_APRSIS_PRESET_INIT)){
+      preferences.putBool(PREF_LORA_TX_STATUSMESSAGE_TO_APRSIS_PRESET_INIT, true);
+      preferences.putInt(PREF_LORA_TX_STATUSMESSAGE_TO_APRSIS_PRESET, send_status_message_to_aprsis);
+    }
+    send_status_message_to_aprsis = preferences.getInt(PREF_LORA_TX_STATUSMESSAGE_TO_APRSIS_PRESET);
 
     if (!preferences.getBool(PREF_LORA_TX_BEACON_AND_KISS_TO_APRSIS_PRESET_INIT)){
       preferences.putBool(PREF_LORA_TX_BEACON_AND_KISS_TO_APRSIS_PRESET_INIT, true);
@@ -1687,6 +1734,12 @@ void setup(){
     }
     enable_bluetooth = preferences.getBool(PREF_DEV_BT_EN);
 
+    if (!preferences.getBool(PREF_DEV_LOGTOSERIAL_EN_INIT)){
+      preferences.putBool(PREF_DEV_LOGTOSERIAL_EN_INIT, true);
+      preferences.putBool(PREF_DEV_LOGTOSERIAL_EN, debug_to_serial);
+    }
+    debug_to_serial = preferences.getBool(PREF_DEV_LOGTOSERIAL_EN);
+
     if (!preferences.getBool(PREF_DEV_OL_EN_INIT)){
       preferences.putBool(PREF_DEV_OL_EN_INIT, true);
       preferences.putBool(PREF_DEV_OL_EN,enabled_oled);
@@ -1743,7 +1796,11 @@ void setup(){
       preferences.putInt(PREF_APRSIS_ALLOW_INET_TO_RF, aprsis_data_allow_inet_to_rf);
     }
     aprsis_data_allow_inet_to_rf = preferences.getInt(PREF_APRSIS_ALLOW_INET_TO_RF);
-#endif
+
+//    if (!preferences.hasString(PREF_NTP_SERVER)) preferences.putString(PREF_NTP_SERVER, "");
+//    if (!preferences.hasString(PREF_SYSLOG_SERVER)) preferences.putString(PREF_SYSLOG_SERVER, "");
+
+#endif // ENABLE_WIFI
 
     if (clear_preferences){
       delay(1000);
@@ -1752,7 +1809,7 @@ void setup(){
       }
     }
 
-  #endif
+  #endif // ENABLE_PREFERENCES
 
   // We have stored the manual position strring in a higher precision (in case resolution more precise than 18.52m is required; i.e. for base-91 location encoding, or DAO extenstion).
   // Furthermore, 53-32.1234N is more readable in the Web-interface than 5232.1234N
@@ -1803,7 +1860,11 @@ void setup(){
     if (!axp.begin(Wire, AXP192_SLAVE_ADDRESS)) {
     }
     axp.setLowTemp(0xFF);                                                 //SP6VWX Set low charging temperature
-    if (lora_rx_enabled || lora_digipeating_mode > 0 || SerialBT.hasClient())
+    if (lora_rx_enabled || lora_digipeating_mode > 0
+          #if defined(ENABLE_BLUETOOTH) && defined(KISS_PROTOCOL)
+            || SerialBT.hasClient()
+          #endif
+        )
       axp.setPowerOutPut(AXP192_LDO2, AXP202_ON);                            // switch LoRa chip on
     else
       axp.setPowerOutPut(AXP192_LDO2, AXP202_OFF);                           // switch LoRa chip off
@@ -1832,8 +1893,8 @@ void setup(){
 
   #ifdef ENABLE_PREFERENCES
     if (clear_preferences == 2){
-      writedisplaytext("LoRa-APRS","by DL9SAU & DL3EL","Build:" + String(BUILD_NUMBER),"Factory reset","","");
-      Serial.println("LoRa-APRS by DL9SAU & DL3EL Build:" + String(BUILD_NUMBER));
+      writedisplaytext("LoRa-APRS","by DL9SAU & DL3EL","Build:" + buildnr, "Factory reset","press","Button");
+      Serial.println("LoRa-APRS by DL9SAU & DL3EL Build:" + buildnr);
       delay(2000);
       //#ifdef T_BEAM_V1_0
         if(digitalRead(BUTTON)==LOW){
@@ -1886,9 +1947,12 @@ void setup(){
   batt_read();
   writedisplaytext("LoRa-APRS","","Init:","ADC OK!","BAT: "+String(BattVolts,2),"");
 
+  // Just to be sure: send KISS FEND before logging
+  
   // if we are fill-in or wide2 digi, we listen only on configured main frequency
   lora_speed_rx_curr = (rx_on_frequencies  != 2 || lora_digipeating_mode > 1) ? lora_speed : lora_speed_cross_digi;
   lora_set_speed(lora_speed_rx_curr);
+  // prefix with KISS_END
   Serial.printf("LoRa Speed:\t%lu\n", lora_speed_rx_curr);
 
   lora_freq_rx_curr = (rx_on_frequencies  != 2 || lora_digipeating_mode > 1) ? lora_freq : lora_freq_cross_digi;
@@ -1971,47 +2035,48 @@ void setup(){
     }
 #endif /* KISS_PROTOCOL && ENABLE_BLUETOOTH */
     delay(1500);
-#endif /* ENABLE_WIFI */
   }
+#endif /* ENABLE_WIFI */
 
-  writedisplaytext("LoRa-APRS","","Init:","FINISHED OK!","   =:-)   ","");
-//  writedisplaytext("","","","","","");
-  time_to_refresh = millis() + showRXTime;
-  fillDisplayLine1();
-  fillDisplayLine2();
-  displayInvalidGPS();
-  digitalWrite(TXLED, HIGH);
-
-  // Hold the OLED ON at first boot
-  oled_timer=millis()+oled_timeout;
-
-  esp_task_wdt_init(120, true); //enable panic so ESP32 restarts
-  esp_task_wdt_add(NULL); //add current thread to WDT watch
-
-  lastTxdistance  = 0;
+  //lastTxdistance  = 0;
 
 #ifdef IF_SEMAS_WOULD_WORK
   sema_lora_chip = xSemaphoreCreateBinary();
 #else
   sema_lora_chip = false;
-#endif
-   Serial.println("LoRa-APRS  Init: FINISHED OK!");
-   
-// SPIFFS by DL3EL
-// https://www.tutorialspoint.com/esp32_for_iot/esp32_for_iot_spiffs_storage.htm
-   Serial.println("LoRa-APRS Starting SPIFFS Tests");
+
+  // https://www.tutorialspoint.com/esp32_for_iot/esp32_for_iot_spiffs_storage.htm
   // Launch SPIFFS file system  
-  
-  if(!SPIFFS.begin(FORMAT_SPIFFS_IF_FAILED)){ 
+  if (!SPIFFS.begin(FORMAT_SPIFFS_IF_FAILED)){ 
     Serial.println("SPIFFS Mount Failed");
-  }
-  else {
-    Serial.println("SPIFFS Mount Success");
+  } else {
+   Serial.println("SPIFFS Mount Success");
   }
 
-//  listDir(SPIFFS, "/", 0);
+    Serial.printf("send_status_message_to_aprsis: %d\n",send_status_message_to_aprsis);
+
+  //debug:
+  //listDir(SPIFFS, "/", 0);
+
+  // read wifi.cfg file, interprete the json and assign some of our global variables
   readFile(SPIFFS, "/wifi.cfg");
-   
+
+  // Hold the OLED ON at first boot
+  oled_timer=millis()+oled_timeout;
+  time_to_refresh = millis() + showRXTime;
+
+  writedisplaytext("LoRa-APRS","","Init:","FINISHED OK!","   =:-)   ","");
+  //  writedisplaytext("","","","","","");
+
+  esp_task_wdt_init(120, true); //enable panic so ESP32 restarts
+  esp_task_wdt_add(NULL); //add current thread to WDT watch
+
+  fillDisplayLine1();
+  fillDisplayLine2();
+  displayInvalidGPS();
+  digitalWrite(TXLED, HIGH);
+
+#endif
 }
 
 void enableOled() {
@@ -2668,7 +2733,8 @@ String create_long_aprs(const char *delimiter, RawDegrees lng) {
 // +---------------------------------------------------------------------+//
 // + MAINLOOP -----------------------------------------------------------+//
 // +---------------------------------------------------------------------+//
-void loop() {
+void loop()
+{
 
   esp_task_wdt_reset();
 
@@ -2882,7 +2948,7 @@ void loop() {
       writedisplaytext("LoRa-APRS","","Init:","WiFi task started","long press to ","stop again");
       delay(1500);
     } else {
-      writedisplaytext("LoRa-APRS","","Reboot:","to stop WiFi","   =:-)   ","");
+      writedisplaytext("LoRa-APRS","","Rebooting","to stop WiFi","do not press key","");
       ESP.restart();
     }  
 #endif
@@ -2904,7 +2970,7 @@ void loop() {
          (((time_last_own_position_via_kiss_received + sb_max_interval + 10*1000L) < millis()) &&
              time_last_own_position_via_kiss_received >= time_last_frame_via_kiss_received) ||
            // ^kiss client has not recently sent a position gain (sb_max_interval plus 10 seconds grace) and kiss client sent no other data
-	 ((time_last_frame_via_kiss_received + sb_max_interval * 2 + 10*1000L) < millis())) {
+         ((time_last_frame_via_kiss_received + sb_max_interval * 2 + 10*1000L) < millis())) {
             // ^ kiss client sent no positions and stoped sending other data for 2*sb_max_interval (plus 10 seconds grace)
 #ifdef T_BEAM_V1_0
       if (!gps_state && gps_state_before_autochange)
@@ -2960,11 +3026,13 @@ void loop() {
     String *TNC2DataFrame = nullptr;
     if (tncToSendQueue) {
       if (xQueueReceive(tncToSendQueue, &TNC2DataFrame, (1 / portTICK_PERIOD_MS)) == pdPASS) {
-        boolean was_own_position_packet = false;
+        #ifdef ENABLE_WIFI
+          boolean was_own_position_packet = false;
+        #endif
         time_last_frame_via_kiss_received = millis();
         const char *data = TNC2DataFrame->c_str();
 
-	// Frame comes from same call as ours and is a position report?
+        // Frame comes from same call as ours and is a position report?
         if (!strncmp(data, Tcall.c_str(), Tcall.length()) && data[Tcall.length()] == '>') {
           char *p = strchr(data, ':');
           p++;
@@ -2972,7 +3040,9 @@ void loop() {
             time_last_own_position_via_kiss_received = time_last_frame_via_kiss_received;
             if (!acceptOwnPositionReportsViaKiss)
               goto out; // throw away this frame.
-            was_own_position_packet = true;
+            #ifdef ENABLE_WIFI
+              was_own_position_packet = true;
+            #endif
             if (!dont_send_own_position_packets) {
               gps_state_before_autochange = gps_state;
               if (gps_allow_sleep_while_kiss) {
@@ -3119,13 +3189,15 @@ out:
 
     if (lora_rx_enabled && lora_rx_data_available) {
         String loraReceivedFrameString;               //data on buff is copied to this string. raw
-        String loraReceivedFrameString_for_syslog;    //data on buff is copied to this string. Non-printable characters are shown as <0xnn>. Even valid EOL \r. Syslog is for analyzing.
+        #if defined(ENABLE_SYSLOG)
+          String loraReceivedFrameString_for_syslog;    //data on buff is copied to this string. Non-printable characters are shown as <0xnn>. Even valid EOL \r. Syslog is for analyzing.
+        #endif
         String loraReceivedFrameString_for_weblist;   //data on buff is copied to this string. Bad characters like \n and \0 are replaced by ' ' (also valid \r - aprs does not use two line messages ;); \r, \n or \0 at the end of the string are removed.
         char *s = 0;
 
         for (int i=0 ; i < loraReceivedLength ; i++) {
           loraReceivedFrameString += (char) lora_RXBUFF[i];
-          #if defined(ENABLE_WIFI) 
+          #if defined(ENABLE_WIFI)   // || defined(ENABLE_SYSLOG)
             if (lora_RXBUFF[i] >= 0x20) {
               #if defined(ENABLE_SYSLOG)
                 loraReceivedFrameString_for_syslog += (char) lora_RXBUFF[i];
@@ -3225,10 +3297,10 @@ out:
         #endif
     #endif
     #if defined(ENABLE_SYSLOG) && defined(ENABLE_WIFI) // unfortunately, on this plattform we only have IP if we have WIFI
-        syslog_log(LOG_INFO, String("Received LoRa: '") + loraReceivedFrameString_for_syslog + "', RSSI:" + bg_rf95rssi_to_rssi(rf95.lastRssi()) + ", SNR: " + bg_rf95snr_to_snr(rf95.lastSNR()));
+        syslog_log(LOG_INFO, String("LoRa-RX: '") + loraReceivedFrameString_for_syslog + "', RSSI:" + bg_rf95rssi_to_rssi(rf95.lastRssi()) + ", SNR: " + bg_rf95snr_to_snr(rf95.lastSNR()));
     #endif
     #ifdef KISS_PROTOCOL
-	s = 0;
+        s = 0;
         if (((lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_KISS) || user_demands_trace > 1) ||
             (!digipeatedflag && ((lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_KISS__ONLY_IF_HEARD_DIRECT) || user_demands_trace == 1)) )
 
@@ -3240,7 +3312,7 @@ out:
         if (lora_tx_enabled && lora_digipeating_mode > 0 && !our_packet && !blacklisted && lora_freq_rx_curr == lora_freq) {
           uint32_t time_lora_TXBUFF_for_digipeating_was_filled_prev = time_lora_TXBUFF_for_digipeating_was_filled;
           if (((lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_RF) || user_demands_trace > 1) ||
-	        (!digipeatedflag && ((lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_RF__ONLY_IF_HEARD_DIRECT) || user_demands_trace == 1)) )
+                (!digipeatedflag && ((lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_RF__ONLY_IF_HEARD_DIRECT) || user_demands_trace == 1)) )
             handle_lora_frame_for_lora_digipeating(received_frame, rssi_for_path);
           else
             handle_lora_frame_for_lora_digipeating(received_frame, NULL);

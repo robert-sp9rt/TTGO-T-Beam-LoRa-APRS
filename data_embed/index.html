@@ -78,8 +78,13 @@
                 <div class="grid-container quarters">
                     <div>
                         <label for="ntp_server">NTP Server</label>
-                        <input type="text" name="ntp_server" id="ntp_server" placeholder="pool.ntp.org" title="NTP Server or IP Address. I.e. pool.ntp.org. If your igate is in the HAMNET, use ntp.hc.r1.ampr.org">
+                        <input type="text" name="ntp_server" id="ntp_server" placeholder="pool.ntp.org" title="NTP Server name or IP Address. I.e. pool.ntp.org. If your igate is in the HAMNET, use ntp.hc.r1.ampr.org">
                       </div>
+                    <div>
+                        <label for="syslog_server">Syslog Server</label>
+                        <input type="text" name="syslog_server" id="syslog_server" placeholder="" title="Syslog Server name or IP Address.">
+                      </div>
+                </div>
                 </div>
                 <div class="grid-container quarters">
                     <div>
@@ -429,8 +434,12 @@
                     <input type="text" name="aprsis_fltr" id="aprsis_fltr" title="Request server-site filter (may be left empty). See http://www.aprs-is.net/javAPRSFilter.aspx ; Example: 't/mqs/YOURCALL/50' -> Gate only messages, query and status messages to RF, from a circle of 50km around your last known position. w, o and i may be of interest, but some people on 2m APRS or APRS-IS may send those packets much too frequently. Please trace the effect! Perhaps in combination with '-e/DB0FRI-10'. In our case, the digi positioning beacon from DB0FRI-10 (which is also an igate nearby, APRS-IS path qAI,DB0FRI-10) came from APRS-IS to us and we gated his beacon, encoded as third-party-trafffic, back to RF (which makes no sense: 1. His direct RF beacon is much better heard than ours -> all RF users heard it. 2. We needless consumed airtime). -> Using -e/IGATE1/IGATE2/.. , everything heard (and sent to APRS-IS) by our neighbor igates like DB0FRI-10 will not be re-gated by us. Please also check, if '-d/..' instead of (or additional to) '-e/..' is more suitiable in your environment; you may also consider -/b/.. ." placeholder="may be left blank">
                   </div>
                   <div>
-                    <label for="tx_aprsis_bc">TX our beacon to APRS-IS</label>
-                    <input name="tx_aprsis_bc" id="tx_aprsis_bc" type="checkbox" value="1" title="TX our beacon from this device or from KISS to APRS-IS. You may like to disable this i.e. if you are a portable hotspot together with your tracker, but others already gate your own packets to APRS-IS -> you'll see at APRS-IS who heard you.">
+                    <label for="tx_aprsis_sm">Send TX status-message to APRS-IS</label>
+                    <input name="tx_aprsis_sm" id="tx_aprsis_sm" type="checkbox" value="1" title="Send APRS-status-message to APRS-IS. This helps you to trace reboots and unexpected loss of wifi- or internet-access.">
+                  </div>
+                  <div>
+                    <label for="tx_aprsis_bc">Allow send our beacon to APRS-IS</label>
+                    <input name="tx_aprsis_bc" id="tx_aprsis_bc" type="checkbox" value="1" title="Allow sending our beacon from this device or from KISS to APRS-IS. You may like to disable this i.e. if you are a portable hotspot together with your tracker, but others already gate your own packets to APRS-IS -> you'll see at APRS-IS who heard you.">
                   </div>
                   <div>
                     <label for="aprsis_2rf">Gate APRS-IS traffic to frequencies</label>
@@ -469,6 +478,10 @@
                 <div>
                     <label for="bt_enabled">Bluetooth enabled</label>
                     <input name="bt_enabled" id="bt_enabled" type="checkbox" value="1" title="enable or disable bluetooth">
+                </div>
+                <div>
+                    <label for="logserial_en">Serial Logging</label>
+                    <input name="logserial_en" id="logserial_en" type="checkbox" value="0" title="enable or disable verbose logging on usb-serial port. Use only if NOT attached at the remote site an AX.25 kiss-device: your logging may corrupt the frames sent in parallel to that device.">
                 </div>
                 <div>
                     <label for="led_enable">LED signaling</label>
@@ -658,7 +671,7 @@
             <div>
                WiFi OFF<br/>
                <ul>
-                 <li>be aware, that aprs-is connection depends on the Webserver and will stop working). Hack: long-pressing the (GPS) button switches ON/OFF the GPS. When switching GPS ON, the webserver-config is also set to value 1</li>
+                 <li>be aware, that aprs-is connection depends on the Webserver and will stop working).</li>
                  <li>select option 0 to disable WiFi & APRS-IS</li>
                  <li>select option 1 to disable WiFi if a bluetooth client is connected in between 60s on boot (recommended for portables, and for LORA32_21 devices)</li>
                </ul>
