@@ -914,7 +914,11 @@ boolean restart_STA(String use_ssid, String use_password) {
   do_serial_println("WiFi: Searching for AP " + use_ssid);
   while (WiFi.status() != WL_CONNECTED) {
     esp_task_wdt_reset();
+<<<<<<< HEAD
 //    do_serial_println(String(int(WiFi.status())));
+=======
+    do_serial_println(String(int(WiFi.status())));
+>>>>>>> bb1a5b6196eb0db1f572438e24bb00550f8a7bf6
     do_serial_println(String("WiFi: Status " + String(int(WiFi.status())) + ". Try " + retryWifi));
     if (retryWifi > 30) {
       esp_task_wdt_reset();
@@ -1103,7 +1107,11 @@ void restart_AP_or_STA(void) {
     HTTPUpload& upload = server.upload();
     if (upload.status == UPLOAD_FILE_START) {
       rf95.sleep(); // disable rf95 before update
+<<<<<<< HEAD
       Serial.printf("Firmware: Update: %s\n", upload.filename.c_str());
+=======
+      Serial.printf("%c\nFirmware: Update: %s\n", 0xC0, upload.filename.c_str());
+>>>>>>> bb1a5b6196eb0db1f572438e24bb00550f8a7bf6
       if (!Update.begin(UPDATE_SIZE_UNKNOWN)) { //start with max available size
 #if defined(ENABLE_SYSLOG)
         syslog_log(LOG_ERR, String("Firmware: Update begin error: ") + Update.errorString());
@@ -1120,7 +1128,11 @@ void restart_AP_or_STA(void) {
       }
     } else if (upload.status == UPLOAD_FILE_END) {
       if (Update.end(true)) { //true to set the size to the current progress
+<<<<<<< HEAD
         Serial.printf("Firmware: Update Success: %u\nRebooting...\n", upload.totalSize);
+=======
+        Serial.printf("%c\nFirmware: Update Success: %u\nRebooting...\n", 0xC0, upload.totalSize);
+>>>>>>> bb1a5b6196eb0db1f572438e24bb00550f8a7bf6
 #if defined(ENABLE_SYSLOG)
         syslog_log(LOG_WARNING, String("Firmware: Update Success: ") + String((int)upload.totalSize));
 #endif
@@ -1307,7 +1319,11 @@ void restart_AP_or_STA(void) {
             if (aprsis_time_last_successful_connect.length())
               outString = outString + ", last " + aprsis_time_last_successful_connect;
             else
+<<<<<<< HEAD
               outString = outString + ", Reboot[Build#" + buildnr + "]";
+=======
+              outString = outString + "(Reboot[V" + buildnr + "])";
+>>>>>>> bb1a5b6196eb0db1f572438e24bb00550f8a7bf6
             aprsis_time_last_successful_connect = String(buf);
             outString = outString + ", tries " + String(aprsis_connect_tries);
             log_msg = String("APRS-IS: sent status '" + outString + String("'"));

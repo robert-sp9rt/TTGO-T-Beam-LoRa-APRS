@@ -440,7 +440,15 @@ volatile boolean sema_lora_chip = false;
 void do_serial_println(const String &msg)
 {
   if (debug_to_serial) {
+<<<<<<< HEAD
     Serial.println(msg);
+=======
+#ifdef KISS_PROTOCOL
+    // prefix with KISS_END
+    Serial.printf("%c\n", 0xC0);
+#endif
+    Serial.println("msg");
+>>>>>>> bb1a5b6196eb0db1f572438e24bb00550f8a7bf6
   }
 }
 
@@ -1321,6 +1329,11 @@ void setup()
   //adc1_config_channel_atten(ADC1_CHANNEL_7,ADC_ATTEN_DB_11);
 #endif
 
+#ifdef KISS_PROTOCOL
+  // just to be sure, terminate serial kiss packet that perhaps been transmitted half, before our reboot
+  Serial.printf("%c\n", 0xC0);
+#endif
+
   SPI.begin(SPI_sck,SPI_miso,SPI_mosi,SPI_ss);    //DO2JMG Heltec Patch
   Serial.begin(115200);
 
@@ -1462,6 +1475,12 @@ void setup()
       preferences.putInt(PREF_LORA_TX_STATUSMESSAGE_TO_APRSIS_PRESET, send_status_message_to_aprsis);
     }
     send_status_message_to_aprsis = preferences.getInt(PREF_LORA_TX_STATUSMESSAGE_TO_APRSIS_PRESET);
+
+    if (!preferences.getBool(PREF_LORA_TX_BEACON_AND_KISS_TO_APRSIS_PRESET_INIT)){
+      preferences.putBool(PREF_LORA_TX_BEACON_AND_KISS_TO_APRSIS_PRESET_INIT, true);
+      preferences.putInt(PREF_LORA_TX_BEACON_AND_KISS_TO_APRSIS_PRESET, send_status_message_to_aprsis);
+    }
+    send_status_message_to_aprsis = preferences.getInt(PREF_LORA_TX_BEACON_AND_KISS_TO_APRSIS_PRESET);
 
     if (!preferences.getBool(PREF_LORA_TX_BEACON_AND_KISS_TO_APRSIS_PRESET_INIT)){
       preferences.putBool(PREF_LORA_TX_BEACON_AND_KISS_TO_APRSIS_PRESET_INIT, true);
@@ -1893,7 +1912,11 @@ void setup()
 
   #ifdef ENABLE_PREFERENCES
     if (clear_preferences == 2){
+<<<<<<< HEAD
       writedisplaytext("LoRa-APRS","by DL9SAU & DL3EL","Build:" + buildnr, "Factory reset","press","Button");
+=======
+      writedisplaytext("LoRa-APRS","by DL9SAU & DL3EL","Build:" + buildnr, "Factory reset","","");
+>>>>>>> bb1a5b6196eb0db1f572438e24bb00550f8a7bf6
       Serial.println("LoRa-APRS by DL9SAU & DL3EL Build:" + buildnr);
       delay(2000);
       //#ifdef T_BEAM_V1_0
@@ -2046,6 +2069,10 @@ void setup()
   sema_lora_chip = false;
 
   // https://www.tutorialspoint.com/esp32_for_iot/esp32_for_iot_spiffs_storage.htm
+<<<<<<< HEAD
+=======
+  Serial.println("LoRa-APRS Starting SPIFFS Tests");
+>>>>>>> bb1a5b6196eb0db1f572438e24bb00550f8a7bf6
   // Launch SPIFFS file system  
   if (!SPIFFS.begin(FORMAT_SPIFFS_IF_FAILED)){ 
     Serial.println("SPIFFS Mount Failed");
@@ -2053,8 +2080,11 @@ void setup()
    Serial.println("SPIFFS Mount Success");
   }
 
+<<<<<<< HEAD
     Serial.printf("send_status_message_to_aprsis: %d\n",send_status_message_to_aprsis);
 
+=======
+>>>>>>> bb1a5b6196eb0db1f572438e24bb00550f8a7bf6
   //debug:
   //listDir(SPIFFS, "/", 0);
 
