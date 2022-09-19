@@ -1285,7 +1285,7 @@ void restart_AP_or_STA(void) {
             #endif
             do_serial_println(log_msg);
           }
-          goto out_wifi_mode_sta;
+          //goto out_wifi_mode_sta;
         }
 
         if (!aprs_is_client.connected()) {
