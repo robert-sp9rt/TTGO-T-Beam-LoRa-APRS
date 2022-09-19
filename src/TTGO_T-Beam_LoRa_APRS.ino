@@ -1359,31 +1359,6 @@ void setup()
     }
     enable_webserver = preferences.getInt(PREF_WIFI_ENABLE);
 
-    // taskWebserver is in some cases a bit different and does
-    // preferences.getString() on it's own. We assure that
-    // the preference variable exists, in order to avoid
-    // error messages from the preferences library
-    if (!preferences.getBool(PREF_AP_PASSWORD_INIT)){
-      preferences.putBool(PREF_AP_PASSWORD_INIT, true);
-      preferences.putString(PREF_AP_PASSWORD, "");
-    }
-    if (!preferences.getBool(PREF_WIFI_SSID_INIT)){
-      preferences.putBool(PREF_WIFI_SSID_INIT, true);
-      preferences.putString(PREF_WIFI_SSID, "");
-    }
-    if (!preferences.getBool(PREF_WIFI_PASSWORD_INIT)){
-      preferences.putBool(PREF_WIFI_PASSWORD_INIT, true);
-      preferences.putString(PREF_WIFI_PASSWORD, "");
-    }
-    if (!preferences.getBool(PREF_NTP_SERVER_INIT)){
-      preferences.putBool(PREF_NTP_SERVER_INIT, true);
-      preferences.putString(PREF_NTP_SERVER, "");
-    }
-    if (!preferences.getBool(PREF_SYSLOG_SERVER_INIT)){
-      preferences.putBool(PREF_SYSLOG_SERVER_INIT, true);
-      preferences.putString(PREF_SYSLOG_SERVER, "");
-    }
-
     if (!preferences.getBool(PREF_TNCSERVER_ENABLE_INIT)){
       preferences.putBool(PREF_TNCSERVER_ENABLE_INIT, true);
       preferences.putBool(PREF_TNCSERVER_ENABLE, tncServer_enabled);
