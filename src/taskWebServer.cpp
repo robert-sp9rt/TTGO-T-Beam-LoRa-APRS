@@ -1264,14 +1264,26 @@ void restart_AP_or_STA(void) {
         boolean aprs_is_was_connected = (WiFi.status() == WL_CONNECTED && aprs_is_client.connected());
 
         if (WiFi.status() != WL_CONNECTED) {
-          aprsis_status = "Error: no internet";
+          if (aprsis_status != "Error: no internet") {
+            aprsis_status = "Error: no internet";
+            // inform about state change
+            log_msg = String("APRS-IS: ") + aprsis_status;
+            #if defined(ENABLE_SYSLOG)
+              syslog_log(LOG_INFO, log_msg);
+            #endif
+            do_serial_println(log_msg);
+          }
           goto out_wifi_mode_sta;
         }
         if (!aprs_is_client.connected() && t_connect_aprsis_again < millis()) {
           if (aprsis_status == "Error: no internet") {
             aprsis_status = "Internet available";
             // inform about state change
-            goto on_err;
+            log_msg = String("APRS-IS: ") + aprsis_status;
+            #if defined(ENABLE_SYSLOG)
+              syslog_log(LOG_INFO, log_msg);
+            #endif
+            do_serial_println(log_msg);
           }
           goto out_wifi_mode_sta;
         }
@@ -1356,7 +1368,7 @@ void restart_AP_or_STA(void) {
           aprsis_connect_tries = 0;
         }
 
-        // session died during read / write?
+        // session died during read / write? - log
         if (aprs_is_was_connected && !aprs_is_client.connected())
           goto on_err;
 
@@ -1430,7 +1442,7 @@ void restart_AP_or_STA(void) {
 
 behing_aprsis_read:
 
-        // session died during read / write?
+        // session died during read / write? - log^
         if (aprs_is_was_connected && !aprs_is_client.connected())
           goto on_err;
 
@@ -1476,8 +1488,7 @@ on_err:
             aprs_is_client.stop();
           if (!aprsis_status.startsWith("Error: "))
             aprsis_status = "Disconnected";
-          if (t_connect_aprsis_again <=  millis())
-            t_connect_aprsis_again = millis() + 60000L;
+          t_connect_aprsis_again = millis() + 60000L;
           // avoid sending old data
           to_aprsis_data = "";
         }
