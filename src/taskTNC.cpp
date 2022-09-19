@@ -1,6 +1,9 @@
 #include "taskTNC.h"
 #include <esp_task_wdt.h>
 
+
+extern boolean debug_to_serial;
+
 #ifdef ENABLE_BLUETOOTH
   BluetoothSerial SerialBT;
 #endif
@@ -38,7 +41,9 @@ void handleKISSData(char character, int bufferIndex) {
 
     if (isDataFrame) {
       #ifdef LOCAL_KISS_ECHO
-      Serial.print(inTNCData);
+      if (!debug_to_serial) {
+        Serial.print(inTNCData);
+      }
         #ifdef ENABLE_BLUETOOTH
         if (SerialBT.hasClient()) {
           SerialBT.print(inTNCData);
@@ -78,9 +83,11 @@ void handleKISSData(char character, int bufferIndex) {
 
   while (true) {
     esp_task_wdt_reset();
-    while (Serial.available() > 0) {
-      char character = Serial.read();
-      handleKISSData(character, 0);
+    if (!debug_to_serial) {
+      while (Serial.available() > 0) {
+        char character = Serial.read();
+        handleKISSData(character, 0);
+      }
     }
     #ifdef ENABLE_BLUETOOTH
       if (SerialBT.hasClient()) {
@@ -103,7 +110,8 @@ void handleKISSData(char character, int bufferIndex) {
     #endif
     if (xQueueReceive(tncReceivedQueue, &loraReceivedFrameString, (1 / portTICK_PERIOD_MS)) == pdPASS) {
       const String &kissEncoded = encode_kiss(*loraReceivedFrameString);
-      Serial.print(kissEncoded);
+      if (!debug_to_serial)
+        Serial.print(kissEncoded);
       #ifdef ENABLE_BLUETOOTH
         if (SerialBT.hasClient()){
           SerialBT.print(kissEncoded);

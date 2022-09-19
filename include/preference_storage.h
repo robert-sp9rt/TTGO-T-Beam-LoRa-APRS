@@ -7,10 +7,15 @@
 extern Preferences preferences;
 
 // MAX 15 chars for preference key!!!
-static const char *const PREF_WIFI_SSID = "wifi_ssid";
-static const char *const PREF_WIFI_PASSWORD = "wifi_password";
+static const char *const PREF_AP_PASSWORD_INIT = "ap_password-i";
 static const char *const PREF_AP_PASSWORD = "ap_password";
+static const char *const PREF_WIFI_SSID_INIT = "wifi_ssid_i";
+static const char *const PREF_WIFI_SSID = "wifi_ssid";
+static const char *const PREF_WIFI_PASSWORD_INIT = "wifi_password_i";
+static const char *const PREF_WIFI_PASSWORD = "wifi_password";
+static const char *const PREF_NTP_SERVER_INIT = "ntp_server_i";
 static const char *const PREF_NTP_SERVER = "ntp_server";
+static const char *const PREF_SYSLOG_SERVER_INIT = "syslog_server_i";
 static const char *const PREF_SYSLOG_SERVER = "syslog_server";
 static const char *const PREF_WIFI_ENABLE_INIT = "wifi_en_i";
 static const char *const PREF_WIFI_ENABLE = "wifi_en";

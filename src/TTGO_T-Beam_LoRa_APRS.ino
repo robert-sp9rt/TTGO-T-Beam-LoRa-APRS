@@ -372,8 +372,7 @@ bool acceptOwnPositionReportsViaKiss = true;		// true: Switches off local beacon
 boolean gps_allow_sleep_while_kiss = true;		// user has a kiss device attached via kiss which sends positions with own call, we don't need our gps to be turned on -> We pause sending positions by ourself (neither fixed nor smart beaconing). Except: user has a display attached to this tracker, he'll will be able to see his position because our gps does not go to sleep (-> set this to false). Why sleep? Energy saving
 boolean wifi_do_failback_to_mode_AP = true;		// Allow failback to mode AP after once connected successfully connected (after boot) to configured remote AP. Disable for igates, where you don't need your tracker to be a hotspot. You like to enable, if you use your tracker portable and it should automatically be wifi client to your home network, and be AP if you are outside.
 boolean send_status_message_to_aprsis = true;		// Send reboot, wifi- or internet-loss as APPRS-status-message to APRS-IS
-boolean debug_to_serial = false;		// Display some debug messages on serial port.
-						// Cave: Because we are threaded, sooner or later data corruption will occur, i.E. DL9SAU>APRS:...ThoHost: euro2.aprs.net Tries: 1mas"
+boolean debug_to_serial = false;		// Display some debug messages on serial port. If enabled, usb-serial KISS-send and KISS-receive are stoped.
 
 
 #ifdef KISS_PROTOCOL
@@ -440,11 +439,7 @@ volatile boolean sema_lora_chip = false;
 void do_serial_println(const String &msg)
 {
   if (debug_to_serial) {
-#ifdef KISS_PROTOCOL
-    // prefix with KISS_END
-    Serial.printf("%c\n", 0xC0);
-#endif
-    Serial.println("msg");
+    Serial.println(msg);
   }
 }
 
@@ -1290,10 +1285,11 @@ void readFile(fs::FS &fs, const char * filename) {
       if ((p = JSONBuffer["password"]))
         safeApPass = String(p);
     }
-    if (!safeApName.length() || safeApPass.length() < 8) {
+
+    if (!safeApName.length() || safeApPass.length() < 8 || safeApName == "EnterSSIDofYourAccesspoint") {
+      Serial.println("SSID: " + safeApName + " missing or PW: " + safeApPass + " < 8 Byte, Filesize: " + String(file.size()));
       safeApName = "";
       safeApPass = "";
-      Serial.println("SSID: " + safeApName + " missing or PW: " + safeApPass + " < 8 Byte, Filesize: " + String(file.size()));
     } else {
       Serial.println("Fallback SSID: " + safeApName + ", PW: " + safeApPass + ", Filesize: " + String(file.size()));
     }  
@@ -1325,11 +1321,6 @@ void setup()
   //adc1_config_channel_atten(ADC1_CHANNEL_7,ADC_ATTEN_DB_11);
 #endif
 
-#ifdef KISS_PROTOCOL
-  // just to be sure, terminate serial kiss packet that perhaps been transmitted half, before our reboot
-  Serial.printf("%c\n", 0xC0);
-#endif
-
   SPI.begin(SPI_sck,SPI_miso,SPI_mosi,SPI_ss);    //DO2JMG Heltec Patch
   Serial.begin(115200);
 
@@ -1353,7 +1344,7 @@ void setup()
 // if available.
 // https://randomnerdtutorials.com/esp32-save-data-permanently-preferences/
 
-  #ifdef ENABLE_PREFERENCES
+#ifdef ENABLE_PREFERENCES
     int clear_preferences = 0;
     if(digitalRead(BUTTON)==LOW){
       clear_preferences = 1;
@@ -1367,6 +1358,32 @@ void setup()
       preferences.putInt(PREF_WIFI_ENABLE, enable_webserver);
     }
     enable_webserver = preferences.getInt(PREF_WIFI_ENABLE);
+
+    // taskWebserver is in some cases a bit different and does
+    // preferences.getString() on it's own. We assure that
+    // the preference variable exists, in order to avoid
+    // error messages from the preferences library
+    if (!preferences.getBool(PREF_AP_PASSWORD_INIT)){
+      preferences.putBool(PREF_AP_PASSWORD_INIT, true);
+      preferences.putString(PREF_AP_PASSWORD, "");
+    }
+    if (!preferences.getBool(PREF_WIFI_SSID_INIT)){
+      preferences.putBool(PREF_WIFI_SSID_INIT, true);
+      preferences.putString(PREF_WIFI_SSID, "");
+    }
+    if (!preferences.getBool(PREF_WIFI_PASSWORD_INIT)){
+      preferences.putBool(PREF_WIFI_PASSWORD_INIT, true);
+      preferences.putString(PREF_WIFI_PASSWORD, "");
+    }
+    if (!preferences.getBool(PREF_NTP_SERVER_INIT)){
+      preferences.putBool(PREF_NTP_SERVER_INIT, true);
+      preferences.putString(PREF_NTP_SERVER, "");
+    }
+    if (!preferences.getBool(PREF_SYSLOG_SERVER_INIT)){
+      preferences.putBool(PREF_SYSLOG_SERVER_INIT, true);
+      preferences.putString(PREF_SYSLOG_SERVER, "");
+    }
+
     if (!preferences.getBool(PREF_TNCSERVER_ENABLE_INIT)){
       preferences.putBool(PREF_TNCSERVER_ENABLE_INIT, true);
       preferences.putBool(PREF_TNCSERVER_ENABLE, tncServer_enabled);
@@ -1396,7 +1413,7 @@ void setup()
       preferences.putInt(PREF_WIFI_TXPWR_MODE_STA, wifi_txpwr_mode_STA);
     }
     wifi_txpwr_mode_STA = preferences.getInt(PREF_WIFI_TXPWR_MODE_STA);
-#endif
+#endif // ENABLE_WIFI
     
     // LoRa transmission settings
 
@@ -1466,11 +1483,11 @@ void setup()
     }
     tx_own_beacon_from_this_device_or_fromKiss__to_frequencies = preferences.getInt(PREF_LORA_TX_BEACON_AND_KISS_TO_FREQUENCIES_PRESET);
 
-    if (!preferences.getBool(PREF_LORA_TX_BEACON_AND_KISS_TO_APRSIS_PRESET_INIT)){
-      preferences.putBool(PREF_LORA_TX_BEACON_AND_KISS_TO_APRSIS_PRESET_INIT, true);
-      preferences.putInt(PREF_LORA_TX_BEACON_AND_KISS_TO_APRSIS_PRESET, send_status_message_to_aprsis);
+    if (!preferences.getBool(PREF_LORA_TX_STATUSMESSAGE_TO_APRSIS_PRESET_INIT)){
+      preferences.putBool(PREF_LORA_TX_STATUSMESSAGE_TO_APRSIS_PRESET_INIT, true);
+      preferences.putInt(PREF_LORA_TX_STATUSMESSAGE_TO_APRSIS_PRESET, send_status_message_to_aprsis);
     }
-    send_status_message_to_aprsis = preferences.getInt(PREF_LORA_TX_BEACON_AND_KISS_TO_APRSIS_PRESET);
+    send_status_message_to_aprsis = preferences.getInt(PREF_LORA_TX_STATUSMESSAGE_TO_APRSIS_PRESET);
 
     if (!preferences.getBool(PREF_LORA_TX_BEACON_AND_KISS_TO_APRSIS_PRESET_INIT)){
       preferences.putBool(PREF_LORA_TX_BEACON_AND_KISS_TO_APRSIS_PRESET_INIT, true);
@@ -1814,7 +1831,7 @@ void setup()
       }
     }
 
-  #endif
+#endif // ENABLE_PEFERENCES
 
   // We have stored the manual position strring in a higher precision (in case resolution more precise than 18.52m is required; i.e. for base-91 location encoding, or DAO extenstion).
   // Furthermore, 53-32.1234N is more readable in the Web-interface than 5232.1234N
@@ -1898,7 +1915,7 @@ void setup()
 
   #ifdef ENABLE_PREFERENCES
     if (clear_preferences == 2){
-      writedisplaytext("LoRa-APRS","by DL9SAU & DL3EL","Build:" + buildnr, "Factory reset","","");
+      writedisplaytext("LoRa-APRS","by DL9SAU & DL3EL","Build:" + buildnr, "Factory reset","press","Button");
       Serial.println("LoRa-APRS by DL9SAU & DL3EL Build:" + buildnr);
       delay(2000);
       //#ifdef T_BEAM_V1_0
@@ -2049,9 +2066,9 @@ void setup()
   sema_lora_chip = xSemaphoreCreateBinary();
 #else
   sema_lora_chip = false;
+#endif
 
   // https://www.tutorialspoint.com/esp32_for_iot/esp32_for_iot_spiffs_storage.htm
-  Serial.println("LoRa-APRS Starting SPIFFS Tests");
   // Launch SPIFFS file system  
   if (!SPIFFS.begin(FORMAT_SPIFFS_IF_FAILED)){ 
     Serial.println("SPIFFS Mount Failed");
@@ -2080,7 +2097,6 @@ void setup()
   displayInvalidGPS();
   digitalWrite(TXLED, HIGH);
 
-#endif
 }
 
 void enableOled() {
@@ -2952,7 +2968,7 @@ void loop()
       writedisplaytext("LoRa-APRS","","Init:","WiFi task started","long press to ","stop again");
       delay(1500);
     } else {
-      writedisplaytext("LoRa-APRS","","Reboot:","to stop WiFi","   =:-)   ","");
+      writedisplaytext("LoRa-APRS","","Rebooting:","to stop WiFi","do not press key","");
       ESP.restart();
     }  
 #endif

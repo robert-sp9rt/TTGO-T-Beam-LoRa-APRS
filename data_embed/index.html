@@ -480,8 +480,8 @@
                     <input name="bt_enabled" id="bt_enabled" type="checkbox" value="1" title="enable or disable bluetooth">
                 </div>
                 <div>
-                    <label for="logserial_en">LED signaling</label>
-                    <input name="logserial_en" id="logserial_en" type="checkbox" value="0" title="enable or disable verbose logging on usb-serial port. Use only if NOT attached at the remote site an AX.25 kiss-device: your logging may corrupt the frames sent in parallel to that device.">
+                    <label for="logserial_en">Serial Logging</label>
+                    <input name="logserial_en" id="logserial_en" type="checkbox" value="0" title="Enable or disable verbose logging on usb-serial port. If disabled, KISS-receive and KISS-send is disabled on usb-serial.">
                 </div>
                 <div>
                     <label for="led_enable">LED signaling</label>
@@ -671,7 +671,7 @@
             <div>
                WiFi OFF<br/>
                <ul>
-                 <li>be aware, that aprs-is connection depends on the Webserver and will stop working). Hack: long-pressing the (GPS) button switches ON/OFF the GPS. When switching GPS ON, the webserver-config is also set to value 1</li>
+                 <li>be aware, that aprs-is connection depends on the Webserver and will stop working).</li>
                  <li>select option 0 to disable WiFi & APRS-IS</li>
                  <li>select option 1 to disable WiFi if a bluetooth client is connected in between 60s on boot (recommended for portables, and for LORA32_21 devices)</li>
                </ul>
@@ -682,6 +682,40 @@
                Fixed Beacon off:<br>
                <ul>
                     <li>Smart Beaconing is activated, if there is no fixed beacon</li>
+               </ul>
+            </div>
+            <div class="grid-container full">
+              <h5 class="u-full-width">extended Wifi Config:</h5>
+            </div>
+            <div>
+               which WiFi is selected?<br/>
+               <ul>
+                 <li>first, the SSID which is configured via the WebSiet will be searched</li>
+                 <li>second, if that SSID is not found, the WiFi configured in data/wifi.cfg will be searched</li>
+                 <li>third, if that SSID is also not found, a local accesspoint with the SSID "call AP" will be created. After connected to, this Webserver will be reachable with the IP Address 192.168.4.1</li>
+               </ul>
+               data/wifi.cfg<br>
+               <ul>
+                 <li>wifi.cfg in the directory data contains an SSID and password of the AP for the second try described above</li>
+                 <li>the total length of this file must not exceed 256 Byte. The password must not be shorter that 8 byte. The json structure must not be changed</li>
+                 <li>if something is wrong or the file is missing, the complete file will be ignored and step 2 (above) will be skipped</li>
+                 <li>To upload wifi.cfg to your board you have to do this via Upload File System image in PlatformIO!</li>
+                 <li>To find the 'Upload File System image' click the PlatformIO symbol (the little alien) on the left side, choose your configuration, click on 'Platform' and search for 'Upload File System image'. If you use platformio-cli, upload the filesystem as described below.</li>
+               </ul>
+               Platform.IO CLI<br>
+               <ul>
+                 <li>if your computer is a raspberry PI3 or if you do not want/need the overhead of the Platfrom.IO GUI, you can use the CLI</li>
+                 <li>you can find it <a href="https://docs.platformio.org/en/latest/core/installation/methods/installer-script.html">here</a></li>
+                 <li>usefull commands, if the board is connected to the PI via USB:</li>
+                 <li>Clean all of project compilation: ~/.platformio/penv/bin/pio run  -e [board identifier] -t cleanall  --upload-port /dev/[port]</li>
+                 <li>Erase Flash: ~/.platformio/penv/bin/pio run  -e [board identifier] -t erase  --upload-port /dev/[port]</li>
+                 <li>Build Filesystem: ~/.platformio/penv/bin/pio run  -e [board identifier] -t buildfs  --upload-port /dev/[port]</li>
+                 <li>Upload Filesystem: ~/.platformio/penv/bin/pio run  -e [board identifier] -t uploadfs --upload-port /dev/[port]</li>
+                 <li>Compile and Upload Firmware: ~/.platformio/penv/bin/pio run  -e [board identifier] -t upload  --upload-port /dev/[port]</li>
+                 <li>start serial monitor: ~/.platformio/penv/bin/pio device monitor -p /dev/[port] -b 115200</li>
+                 <li>all the commands above executed in that order, will completely erase the board, compile and upload the filesystem, compile and upload the current firmware, reboot the board and start the serial monitor</li>
+                 <li>if a precompiled fw should be uploaded, without compilation, use the nobuild switch:<br/>
+                 ~/.platformio/penv/bin/pio run  -e ttgo-t-beam-v1.0-development -t nobuild -t upload  --upload-port /dev/ttyACM0</li>
                </ul>
             </div>
         </article>
