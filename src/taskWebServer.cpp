@@ -1149,8 +1149,7 @@ boolean connect_to_aprsis(void) {
 void do_send_status_message_to_aprsis(void) {
   String log_msg;
 
-  if (send_status_message_to_aprsis) {
-    String outString = aprsis_callsign + ">" + MY_APRS_DEST_IDENTIFYER + ":>aprs-is-connect: ";
+  String outString = aprsis_callsign + ">" + MY_APRS_DEST_IDENTIFYER + ":>aprs-is-connect: ";
   char buf[19];// Room for len(20220917 01:02:03z) + 1 /* \0 */  -> 19
   struct tm timeinfo{};
   if (getLocalTime(&timeinfo)) {
@@ -1161,17 +1160,21 @@ void do_send_status_message_to_aprsis(void) {
     outString = outString + String(buf);
   if (aprsis_time_last_successful_connect.length())
     outString = outString + ", last " + aprsis_time_last_successful_connect;
-  else
+  else 
     outString = outString + ", Reboot[V" + buildnr + "]";
-   aprsis_time_last_successful_connect = String(buf);
-    outString = outString + ", tries " + String(aprsis_connect_tries);
-   log_msg = String("APRS-IS: sent status '" + outString + String("'"));
-   #if defined(ENABLE_SYSLOG)
-     syslog_log(LOG_INFO, log_msg);
-   #endif
-     do_serial_println(log_msg);
-     aprsis_client.print(outString + "\r\n");
-   }
+
+  // remoember this time as last connect time, for being able to reference it next time
+  aprsis_time_last_successful_connect = String(buf);
+
+  outString = outString + ", tries " + String(aprsis_connect_tries);
+
+  log_msg = String("APRS-IS: sent status '" + outString + String("'"));
+  #if defined(ENABLE_SYSLOG)
+    syslog_log(LOG_INFO, log_msg);
+  #endif
+  do_serial_println(log_msg);
+
+  aprsis_client.print(outString + "\r\n");
 }
 
 
@@ -1273,7 +1276,7 @@ void read_from_aprsis(void) {
             }
           }
           for (q = s.c_str(); *q && *q != ':'; q++) {
-            if (! (*q >= 'A' && *q <= 'Z') || (*q >= '0' || *q <= '9') || *q == '>' || *q == '-' || *q == ',' || *q == '*') {
+            if (! (isalnum(*q) || *q == '>' || *q == '-' || *q == ',' || *q == '*') ) {
               err = 1;
               log_msg = "bad character in header";
                break;
