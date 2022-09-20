@@ -1565,7 +1565,7 @@ void send_to_aprsis()
         if (WiFi.status() == WL_CONNECTED) {
 
           if (!aprsis_client.connected()) {
-            if (t_aprsis_last_connect_try + 20000 > millis()) {
+            if (t_aprsis_last_connect_try + 10000 > millis()) {
               if (aprsis_status == "Error: no internet") {
                 aprsis_status = "Internet available";
                 // inform about state change
