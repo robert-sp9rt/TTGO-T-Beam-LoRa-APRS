@@ -1089,7 +1089,7 @@ boolean connect_to_aprsis(void) {
     aprsis_client.stop();
 
   aprsis_connect_tries++;
-  log_msg =  String("APRS-IS: Connecting to '") + aprsis_host + "', tries " + String(aprsis_connect_tries);
+  log_msg =  String("APRS-IS: connecting to '") + aprsis_host + "', tries " + String(aprsis_connect_tries);
   #if defined(ENABLE_SYSLOG)
     syslog_log(LOG_INFO, log_msg);
   #endif
@@ -1295,7 +1295,7 @@ void read_from_aprsis(void) {
       aprsis_client.stop();
       log_msg = "disconnecting: ";
     }
-    log_msg = "APRS-IS:read_from_aprs(): " + log_msg + ": '" + s + "'";
+    log_msg = "APRS-IS: read_from_aprs(): " + log_msg + ": '" + s + "'";
     #if defined(ENABLE_SYSLOG)
       syslog_log(LOG_INFO, log_msg);
     #endif

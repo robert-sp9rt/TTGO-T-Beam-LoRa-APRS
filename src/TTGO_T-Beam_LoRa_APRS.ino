@@ -1460,9 +1460,9 @@ void setup()
 
     if (!preferences.getBool(PREF_LORA_TX_STATUSMESSAGE_TO_APRSIS_PRESET_INIT)){
       preferences.putBool(PREF_LORA_TX_STATUSMESSAGE_TO_APRSIS_PRESET_INIT, true);
-      preferences.putInt(PREF_LORA_TX_STATUSMESSAGE_TO_APRSIS_PRESET, send_status_message_to_aprsis);
+      preferences.putBool(PREF_LORA_TX_STATUSMESSAGE_TO_APRSIS_PRESET, send_status_message_to_aprsis);
     }
-    send_status_message_to_aprsis = preferences.getInt(PREF_LORA_TX_STATUSMESSAGE_TO_APRSIS_PRESET);
+    send_status_message_to_aprsis = preferences.getBool(PREF_LORA_TX_STATUSMESSAGE_TO_APRSIS_PRESET);
 
     if (!preferences.getBool(PREF_LORA_TX_BEACON_AND_KISS_TO_APRSIS_PRESET_INIT)){
       preferences.putBool(PREF_LORA_TX_BEACON_AND_KISS_TO_APRSIS_PRESET_INIT, true);
@@ -1887,12 +1887,14 @@ void setup()
   if(!display.begin(SSD1306_SWITCHCAPVCC, SSD1306_ADDRESS)) {
       for(;;);                                                             // Don't proceed, loop forever
   }
+  //writedisplaytext("LoRa-APRS","","Init:","Display OK!","","");
+
+  writedisplaytext("LoRa-APRS","by DL9SAU & DL3EL","Build:" + buildnr, "Factory reset","press","Button");
+  Serial.println("LoRa-APRS by DL9SAU & DL3EL Build:" + buildnr);
+  delay(2000);
 
   #ifdef ENABLE_PREFERENCES
     if (clear_preferences == 2){
-      writedisplaytext("LoRa-APRS","by DL9SAU & DL3EL","Build:" + buildnr, "Factory reset","press","Button");
-      Serial.println("LoRa-APRS by DL9SAU & DL3EL Build:" + buildnr);
-      delay(2000);
       //#ifdef T_BEAM_V1_0
         if(digitalRead(BUTTON)==LOW){
           clear_preferences = 3;
@@ -1908,7 +1910,6 @@ void setup()
       //#endif
     }
   #endif
-  writedisplaytext("LoRa-APRS","","Init:","Display OK!","","");
 
   Tcall = prepareCallsign(String(CALLSIGN));
   #ifdef ENABLE_PREFERENCES
