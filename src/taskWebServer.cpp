@@ -1459,7 +1459,7 @@ void send_to_aprsis()
    if (syslog_server.length())
      syslog.server(syslog_server.c_str(), 514);
    else
-     syslog_server(NULL, 0);
+     syslog.server(NULL, 0);
    syslog.deviceHostname(webServerCfg->callsign.c_str());
    syslog.appName("TTGO");
    syslog.defaultPriority(LOG_KERN);
