@@ -1214,7 +1214,10 @@ void read_from_aprsis(void) {
       err = 2;
       log_msg = "unexpected answer from aprsis-connection";
     } else {
-      // #, a, _, ' ', >, ... are invalid in the header. First do a simple check
+      // idle message from aprs-is server?
+      if (*(s.c_str()) == '#')
+        return;
+      // a, _, ' ', >, ... are invalid in the header. First do a simple check
       if (!isalnum(*(s.c_str()))) {
         log_msg = "unexpected answer from aprsis-connection";
         err = 2;
@@ -1452,10 +1455,11 @@ void send_to_aprsis()
      if (syslog_server.isEmpty())
        syslog_server=String(SYSLOG_IP);
    #endif
-   // no syslog server configured? broadcast ;)
-   if (syslog_server.isEmpty())
-     syslog_server = "255.255.255.255";
-   syslog.server(syslog_server.c_str(), 514);
+   // syslog server configured?
+   if (syslog_server.length())
+     syslog.server(syslog_server.c_str(), 514);
+   else
+     syslog_server(NULL, 0);
    syslog.deviceHostname(webServerCfg->callsign.c_str());
    syslog.appName("TTGO");
    syslog.defaultPriority(LOG_KERN);
@@ -1475,7 +1479,7 @@ void send_to_aprsis()
   webListReceivedQueue = xQueueCreate(4,sizeof(tReceivedPacketData *));
   tReceivedPacketData *receivedPacketData = nullptr;
 
-  uint32_t t_connect_aprsis_again = 0L;
+  uint32_t t_aprsis_last_connect_try = 0L;
   aprs_callsign = webServerCfg->callsign;
   aprsis_host.trim();
   aprsis_filter.trim();
@@ -1506,6 +1510,7 @@ void send_to_aprsis()
 
   uint32_t webserver_started = millis();
 
+
   while (true) {
     esp_task_wdt_reset();
 
@@ -1520,7 +1525,6 @@ void send_to_aprsis()
           webserver_started = millis();
           esp_task_wdt_reset();
           last_connection_attempt = millis();
-          t_connect_aprsis_again = millis() + 20000L;
         }
       }
     } else {
@@ -1528,7 +1532,6 @@ void send_to_aprsis()
         if (aprsis_client.connected()) aprsis_client.stop();
         restart_AP_or_STA();
         webserver_started = millis();
-        t_connect_aprsis_again = millis() + 20000L;
       }
     }
 
@@ -1559,7 +1562,7 @@ void send_to_aprsis()
         if (WiFi.status() == WL_CONNECTED) {
 
           if (!aprsis_client.connected()) {
-            if (t_connect_aprsis_again < millis()) {
+            if (t_aprsis_last_connect_try + 20000 > millis()) {
               if (aprsis_status == "Error: no internet") {
                 aprsis_status = "Internet available";
                 // inform about state change
@@ -1570,6 +1573,7 @@ void send_to_aprsis()
                 do_serial_println(log_msg);
               }
             } else {
+              t_aprsis_last_connect_try = millis();
               // connect to aprsis
               if (connect_to_aprsis()) {
                 // send aprs-status packet?
@@ -1583,7 +1587,6 @@ void send_to_aprsis()
                 do_serial_println(log_msg);
                 if (!aprsis_status.startsWith("Error: "))
                   aprsis_status = "Disconnected";
-                t_connect_aprsis_again = millis() + 60000L;
               }
             }
           }
