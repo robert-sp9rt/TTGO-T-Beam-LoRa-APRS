@@ -208,6 +208,10 @@ void handle_Js() {
 }
 
 void handle_ScanWifi() {
+  #if defined(ENABLE_SYSLOG)
+    syslog_log(LOG_INFO, String("WebServer: handle_ScanWifi()"));
+  #endif
+  do_serial_println("WebServer: WebServer: handle_ScanWifi()");
   String listResponse = R"(<label for="networks_found_list">Networks found:</label><select class="u-full-width" id="networks_found_list">)";
   int n = WiFi.scanNetworks();
   listResponse += "<option value=\"\">Select Network</option>";
@@ -220,6 +224,10 @@ void handle_ScanWifi() {
 }
 
 void handle_SaveWifiCfg() {
+  #if defined(ENABLE_SYSLOG)
+    syslog_log(LOG_INFO, String("WebServer: handle_SaveWifiCfg()"));
+  #endif
+  do_serial_println("WebServer: WebServer: handle_WifiCfg()");
 
   if (!server.hasArg(PREF_WIFI_SSID) || !server.hasArg(PREF_WIFI_PASSWORD) || !server.hasArg(PREF_AP_PASSWORD)){
     server.send(500, "text/plain", "Invalid request, make sure all fields are set");
@@ -294,6 +302,10 @@ void handle_SaveWifiCfg() {
 }
 
 void handle_Reboot() {
+  #if defined(ENABLE_SYSLOG)
+    syslog_log(LOG_WARNING, String("WebServer: Reboot Request -> Rebooting..."));
+  #endif
+  Serial.println("WebServer: Reboot Request -> Rebooting...");
   server.sendHeader("Location", "/");
   server.send(302,"text/html", "");
   server.close();
@@ -301,6 +313,10 @@ void handle_Reboot() {
 }
 
 void handle_Beacon() {
+  #if defined(ENABLE_SYSLOG)
+    syslog_log(LOG_INFO, String("WebServer: Button manual beacon pressed."));
+  #endif
+  do_serial_println("WebServer: WebServer: Button manual beacon pressed.");
   server.sendHeader("Location", "/");
   server.send(302,"text/html", "");
   manBeacon=true;
@@ -308,15 +324,27 @@ void handle_Beacon() {
 
 void handle_Shutdown() {
   #ifdef T_BEAM_V1_0
+    #if defined(ENABLE_SYSLOG)
+      syslog_log(LOG_WARNING, String("WebServer: Shutdown Request -> Shutdown..."));
+    #endif
+    Serial.println("WebServer: Shutdown Request -> Shutdown...");
     server.send(200,"text/html", "Shutdown");
     axp.setChgLEDMode(AXP20X_LED_OFF);
     axp.shutdown();
   #else
+    #if defined(ENABLE_SYSLOG)
+      syslog_log(LOG_WARNING, String("WebServer: Shutdown Request. Your device does not support this. Canceled!"));
+    #endif
+    do_serial_println("WebServer: Shutdown Request -> Your device does not support this. Canceled!");
     server.send(404,"text/html", "Not supported");
   #endif
 }
 
 void handle_Restore() {
+  #if defined(ENABLE_SYSLOG)
+    syslog_log(LOG_WARNING, String("WebServer: Reset Reqeust -> Reseting preferences and rebooting..."));
+  #endif
+  Serial.println("WebServer: Reset Requet -> Reseting preferences and rebooting...");
   server.sendHeader("Location", "/");
   server.send(302,"text/html", "");
   preferences.clear();
@@ -698,6 +726,10 @@ out:
 }
 
 void handle_SaveAPRSCfg() {
+  #if defined(ENABLE_SYSLOG)
+    syslog_log(LOG_INFO, String("WebServer: handle_SaveAPPRSCfg()"));
+  #endif
+  do_serial_println("WebServer: WebServer: handle_SaveAPRSCfg()");
   // LoRa settings
   if (server.hasArg(PREF_LORA_FREQ_PRESET)){
     preferences.putDouble(PREF_LORA_FREQ_PRESET, server.arg(PREF_LORA_FREQ_PRESET).toDouble());
@@ -871,6 +903,10 @@ void handle_SaveAPRSCfg() {
 }
 
 void handle_saveDeviceCfg(){
+  #if defined(ENABLE_SYSLOG)
+    syslog_log(LOG_INFO, String("WebServer: handle_SaveAPPRSCfg()"));
+  #endif
+  do_serial_println("WebServer: WebServer: handle_SaveAPRSCfgs()");
   preferences.putBool(PREF_DEV_BT_EN, server.hasArg(PREF_DEV_BT_EN));
   preferences.putBool(PREF_DEV_LOGTOSERIAL_EN, server.hasArg(PREF_DEV_LOGTOSERIAL_EN));
   preferences.putBool(PREF_DEV_OL_EN, server.hasArg(PREF_DEV_OL_EN));
@@ -1163,7 +1199,7 @@ void do_send_status_message_to_aprsis(void) {
   else 
     outString = outString + ", Reboot[V" + buildnr + "]";
 
-  // remoember this time as last connect time, for being able to reference it next time
+  // remember this time as last connect time, for being able to reference it next time
   aprsis_time_last_successful_connect = String(buf);
 
   outString = outString + ", tries " + String(aprsis_connect_tries);
@@ -1424,9 +1460,9 @@ void send_to_aprsis()
       }
     } else if (upload.status == UPLOAD_FILE_END) {
       if (Update.end(true)) { //true to set the size to the current progress
-        Serial.printf("Firmware: Update Success: %u\nRebooting...\n", upload.totalSize);
+        Serial.printf("Firmware: Update Success: %u\nFirmware: Rebooting...\n", upload.totalSize);
 #if defined(ENABLE_SYSLOG)
-        syslog_log(LOG_WARNING, String("Firmware: Update Success: ") + String((int)upload.totalSize));
+        syslog_log(LOG_WARNING, String("Firmware: Update Success: ") + String((int)upload.totalSize) + ". Rebooting...");
 #endif
       } else {
 #if defined(ENABLE_SYSLOG)
