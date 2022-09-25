@@ -1523,7 +1523,8 @@ void send_to_aprsis()
      syslog.server(NULL, 0);
    syslog.deviceHostname(webServerCfg->callsign.c_str());
    syslog.appName("TTGO");
-   syslog.defaultPriority(LOG_KERN);
+   //syslog.defaultPriority(LOG_KERN);
+   syslog.defaultPriority(LOG_LOCAL0);
  #endif
 
   restart_AP_or_STA();
