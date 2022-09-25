@@ -2857,15 +2857,26 @@ void handle_usb_serial_input(void) {
         } else if (arg == "off") {
           arg_bool = false;
         } else {
+          //  some commands need an non-binary agument
+          #ifdef ENABLE_PREFERENCES
+            if (cmd == "preferences") {
+              Serial.println("*** preferences: error: preferences command needs to be implemented ;)");
+              #if defined(ENABLE_SYSLOG) && defined(ENABLE_WIFI)
+                syslog_log(LOG_WARNING, String("usb-serial: preferences: user entered preferences command. Yet not implemented."));
+              #endif
+              inputBuf = "";
+              return;
+            }
+          #endif
           if (arg != "") {
-              Serial.println("*** " + cmd + ": error: not implemented, or argument not 'on' or 'off'");
+            Serial.println("*** " + cmd + ": error: not implemented, or argument not 'on' or 'off'");
             inputBuf = "";
             return;
           }
         }
 
         if (arg == "" &&
-            (cmd == "?" || cmd == "beacon" || cmd == "converse" || cmd == "display" || cmd == "reboot" || cmd == "preferences" ) ) {
+            (cmd == "?" || cmd == "beacon" || cmd == "converse" || cmd == "display" || cmd == "reboot") ) {
           if (cmd == "beacon") {
             Serial.println("*** beacon: sending");
             manBeacon = true;
@@ -2904,14 +2915,7 @@ void handle_usb_serial_input(void) {
             delay(100);
             ESP.restart();
           }
-#ifdef ENABLE_PREFERENCES
-          else if (cmd == "pfererences") {
-            Serial.println("*** preferences: error: preferences command needs to be implemented ;)");
-            #if defined(ENABLE_SYSLOG) && defined(ENABLE_WIFI)
-              syslog_log(LOG_WARNING, String("usb-serial: preferences: user entered preferences command. Yet not implemented."));
-            #endif
-          }
-#endif
+
         } else {
 
           if (cmd == "echo") {
