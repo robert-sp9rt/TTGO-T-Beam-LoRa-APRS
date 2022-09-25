@@ -372,8 +372,8 @@ bool acceptOwnPositionReportsViaKiss = true;		// true: Switches off local beacon
 boolean gps_allow_sleep_while_kiss = true;		// user has a kiss device attached via kiss which sends positions with own call, we don't need our gps to be turned on -> We pause sending positions by ourself (neither fixed nor smart beaconing). Except: user has a display attached to this tracker, he'll will be able to see his position because our gps does not go to sleep (-> set this to false). Why sleep? Energy saving
 boolean wifi_do_failback_to_mode_AP = true;		// Allow failback to mode AP after once connected successfully connected (after boot) to configured remote AP. Disable for igates, where you don't need your tracker to be a hotspot. You like to enable, if you use your tracker portable and it should automatically be wifi client to your home network, and be AP if you are outside.
 boolean send_status_message_to_aprsis = true;		// Send reboot, wifi- or internet-loss as APPRS-status-message to APRS-IS
-boolean debug_to_serial = false;		// Display some debug messages on serial port. If enabled, usb-serial KISS-send and KISS-receive are stoped.
-
+uint8_t usb_serial_data_type = 0;		// 0: KISS. 1: Display some debug messages on serial port. 2: Display lora-received packets in TNC trace format. 3: 1+2
+						// If >0  usb-serial KISS-send and KISS-receive are stoped.
 
 #ifdef KISS_PROTOCOL
 // do not configure
@@ -438,7 +438,7 @@ volatile boolean sema_lora_chip = false;
 
 void do_serial_println(const String &msg)
 {
-  if (debug_to_serial) {
+  if (usb_serial_data_type & 1) {
     Serial.println(msg);
   }
 }
@@ -1133,72 +1133,76 @@ String prepareCallsign(const String& callsign){
 }
 
 #if defined(ENABLE_TNC_SELF_TELEMETRY) && defined(KISS_PROTOCOL)
-  void sendTelemetryFrame() {
-    if(enable_tel == true){
-      #ifdef T_BEAM_V1_0
-        uint8_t b_volt = (axp.getBattVoltage() - 3000) / 5.1;
-        uint8_t b_in_c = (axp.getBattChargeCurrent()) / 10;
-        uint8_t b_out_c = (axp.getBattDischargeCurrent()) / 10;
-        uint8_t ac_volt = (axp.getVbusVoltage() - 3000) / 28;
-        uint8_t ac_c = (axp.getVbusCurrent()) / 10;
-        // Pad telemetry message address to 9 characters
-        char Tcall_message_char[9];
-        sprintf_P(Tcall_message_char, "%-9s", Tcall.c_str());
-        String Tcall_message = String(Tcall_message_char);
-        // Flash the light when telemetry is being sent
-        #ifdef ENABLE_LED_SIGNALING
-          digitalWrite(TXLED, LOW);
-        #endif
+void sendTelemetryFrame() {
+  if(enable_tel == true){
+#ifdef T_BEAM_V1_0
+    uint8_t b_volt = (axp.getBattVoltage() - 3000) / 5.1;
+    uint8_t b_in_c = (axp.getBattChargeCurrent()) / 10;
+    uint8_t b_out_c = (axp.getBattDischargeCurrent()) / 10;
+    uint8_t ac_volt = (axp.getVbusVoltage() - 3000) / 28;
+    uint8_t ac_c = (axp.getVbusCurrent()) / 10;
+    // Pad telemetry message address to 9 characters
+    char Tcall_message_char[9];
+    sprintf_P(Tcall_message_char, "%-9s", Tcall.c_str());
+    String Tcall_message = String(Tcall_message_char);
+    // Flash the light when telemetry is being sent
+    #ifdef ENABLE_LED_SIGNALING
+      digitalWrite(TXLED, LOW);
+    #endif
 
-        // Determine sequence number (or 'MIC')
-        String tel_sequence_str;
-        if(tel_mic == 1){
-          tel_sequence_str = "MIC";
-        }else{
-          // Get the current saved telemetry sequence
-          tel_sequence = preferences.getUInt(PREF_TNC_SELF_TELEMETRY_SEQ, 0);
-          // Pad to 3 digits
-          char tel_sequence_char[3];
-          sprintf_P(tel_sequence_char, "%03u", tel_sequence);
-          tel_sequence_str = String(tel_sequence_char);
-        }
-        // Format telemetry path
-        String tel_path_str;
-        if(tel_path == ""){
-          tel_path_str = tel_path;
-        }else{
-          tel_path_str = "," + tel_path;
-        }
-
-        String telemetryParamsNames = String(":") + Tcall_message + ":PARM.B Volt,B In,B Out,AC V,AC C";
-        String telemetryUnitNames = String(":") + Tcall_message + ":UNIT.mV,mA,mA,mV,mA";
-        String telemetryEquations = String(":") + Tcall_message + ":EQNS.0,5.1,3000,0,10,0,0,10,0,0,28,3000,0,10,0";
-        //String telemetryData = String("T#") + tel_sequence_str + "," + String(b_volt) + "," + String(b_in_c) + "," + String(b_out_c) + "," + String(ac_volt) + "," + String(ac_c) + ",00000000";
-        String telemetryData = String("T#") + tel_sequence_str + "," + String(b_volt) + "," + String(b_in_c) + "," + String(b_out_c) + "," + String(ac_volt) + "," + String(ac_c);
-        String telemetryBase = "";
-        telemetryBase += Tcall + ">" + MY_APRS_DEST_IDENTIFYER + tel_path_str + ":";
-        do_serial_println("Telemetry: " + telemetryBase);
-        sendToTNC(telemetryBase + telemetryParamsNames);
-        sendToTNC(telemetryBase + telemetryUnitNames);
-        sendToTNC(telemetryBase + telemetryEquations);
-        sendToTNC(telemetryBase + telemetryData);
-
-        // Show when telemetry is being sent
-        writedisplaytext("((TEL TX))","","","","","");
-
-        // Flash the light when telemetry is being sent
-        #ifdef ENABLE_LED_SIGNALING
-          digitalWrite(TXLED, HIGH);
-        #endif
-
-        // Update the telemetry sequence number
-        if(tel_sequence >= 999){
-          tel_sequence = 0;
-        }else{
-          tel_sequence = tel_sequence + 1;
-        }
-        preferences.putUInt(PREF_TNC_SELF_TELEMETRY_SEQ, tel_sequence);
+    // Determine sequence number (or 'MIC')
+    String tel_sequence_str;
+    if(tel_mic == 1){
+      tel_sequence_str = "MIC";
+    }else{
+      // Get the current saved telemetry sequence
+      #ifdef ENABLE_PREFERENCES
+        tel_sequence = preferences.getUInt(PREF_TNC_SELF_TELEMETRY_SEQ, 0);
       #endif
+      // Pad to 3 digits
+      char tel_sequence_char[3];
+      sprintf_P(tel_sequence_char, "%03u", tel_sequence);
+      tel_sequence_str = String(tel_sequence_char);
+    }
+    // Format telemetry path
+    String tel_path_str;
+    if(tel_path == ""){
+      tel_path_str = tel_path;
+    }else{
+      tel_path_str = "," + tel_path;
+    }
+
+    String telemetryParamsNames = String(":") + Tcall_message + ":PARM.B Volt,B In,B Out,AC V,AC C";
+    String telemetryUnitNames = String(":") + Tcall_message + ":UNIT.mV,mA,mA,mV,mA";
+    String telemetryEquations = String(":") + Tcall_message + ":EQNS.0,5.1,3000,0,10,0,0,10,0,0,28,3000,0,10,0";
+    //String telemetryData = String("T#") + tel_sequence_str + "," + String(b_volt) + "," + String(b_in_c) + "," + String(b_out_c) + "," + String(ac_volt) + "," + String(ac_c) + ",00000000";
+    String telemetryData = String("T#") + tel_sequence_str + "," + String(b_volt) + "," + String(b_in_c) + "," + String(b_out_c) + "," + String(ac_volt) + "," + String(ac_c);
+    String telemetryBase = "";
+    telemetryBase += Tcall + ">" + MY_APRS_DEST_IDENTIFYER + tel_path_str + ":";
+    do_serial_println("Telemetry: " + telemetryBase);
+    sendToTNC(telemetryBase + telemetryParamsNames);
+    sendToTNC(telemetryBase + telemetryUnitNames);
+    sendToTNC(telemetryBase + telemetryEquations);
+    sendToTNC(telemetryBase + telemetryData);
+
+    // Show when telemetry is being sent
+    writedisplaytext("((TEL TX))","","","","","");
+
+    // Flash the light when telemetry is being sent
+    #ifdef ENABLE_LED_SIGNALING
+      digitalWrite(TXLED, HIGH);
+    #endif
+
+    // Update the telemetry sequence number
+    if(tel_sequence >= 999){
+      tel_sequence = 0;
+    }else{
+      tel_sequence = tel_sequence + 1;
+    }
+    #ifdef ENABLE_PREFERENCES
+      preferences.putUInt(PREF_TNC_SELF_TELEMETRY_SEQ, tel_sequence);
+    #endif
+#endif // T_BEAM_V1_0
     }
   }
 #endif
@@ -1247,10 +1251,10 @@ void readFile(fs::FS &fs, const char * filename) {
 
   File file = fs.open(filename);
   if(!file || file.isDirectory()){
-    Serial.printf("readFile: failed to open file %s for reading\n", filename);
+    Serial.printf("readFile: failed to open file %s for reading\r\n", filename);
     return;
   }
-  Serial.printf("readFile: opened file %s for reading\n", filename);
+  Serial.printf("readFile: opened file %s for reading\r\n", filename);
 
   char JSONMessage[JSON_MAX_FILE_SIZE];
 
@@ -1263,7 +1267,7 @@ void readFile(fs::FS &fs, const char * filename) {
   JSONMessage[pos] = 0;
 
   if (file.size() > JSON_MAX_FILE_SIZE) {
-    Serial.printf("readFile: Warning, file too big: %d Byte (max: %d)\n",file.size(), JSON_MAX_FILE_SIZE);
+    Serial.printf("readFile: Warning, file too big: %d Byte (max: %d)\r\n",file.size(), JSON_MAX_FILE_SIZE);
   }
 
    
@@ -1294,7 +1298,7 @@ void readFile(fs::FS &fs, const char * filename) {
       Serial.println("Fallback SSID: " + safeApName + ", PW: " + safeApPass + ", Filesize: " + String(file.size()));
     }  
   } else {
-    Serial.printf("Found file '%s', parsed it successfully, but I don't know what to do with the json data ;)!\n", filename);
+    Serial.printf("Found file '%s', parsed it successfully, but I don't know what to do with the json data ;)!\r\n", filename);
   }
 
 end:
@@ -1735,11 +1739,18 @@ void setup()
     }
     enable_bluetooth = preferences.getBool(PREF_DEV_BT_EN);
 
-    if (!preferences.getBool(PREF_DEV_LOGTOSERIAL_EN_INIT)){
-      preferences.putBool(PREF_DEV_LOGTOSERIAL_EN_INIT, true);
-      preferences.putBool(PREF_DEV_LOGTOSERIAL_EN, debug_to_serial);
+    // remove old usb-serial-debug-log preference (-> switch over)
+    if (preferences.getBool(PREF_DEV_LOGTOSERIAL_EN_INIT)){
+      usb_serial_data_type = preferences.getBool(PREF_DEV_LOGTOSERIAL_EN) ? 1 : 0;
+      preferences.remove(PREF_DEV_LOGTOSERIAL_EN_INIT);
+      preferences.remove(PREF_DEV_LOGTOSERIAL_EN);
+    } else {
+      if (!preferences.getBool(PREF_DEV_USBSERIAL_DATA_TYPE_INIT)){
+        preferences.putBool(PREF_DEV_USBSERIAL_DATA_TYPE_INIT, true);
+        preferences.putInt(PREF_DEV_USBSERIAL_DATA_TYPE, usb_serial_data_type);
+      }
+      usb_serial_data_type = preferences.getInt(PREF_DEV_USBSERIAL_DATA_TYPE, usb_serial_data_type);
     }
-    debug_to_serial = preferences.getBool(PREF_DEV_LOGTOSERIAL_EN);
 
     if (!preferences.getBool(PREF_DEV_OL_EN_INIT)){
       preferences.putBool(PREF_DEV_OL_EN_INIT, true);
@@ -1951,11 +1962,11 @@ void setup()
   lora_speed_rx_curr = (rx_on_frequencies  != 2 || lora_digipeating_mode > 1) ? lora_speed : lora_speed_cross_digi;
   lora_set_speed(lora_speed_rx_curr);
   // prefix with KISS_END
-  Serial.printf("LoRa Speed:\t%lu\n", lora_speed_rx_curr);
+  Serial.printf("LoRa Speed:\t%lu\r\n", lora_speed_rx_curr);
 
   lora_freq_rx_curr = (rx_on_frequencies  != 2 || lora_digipeating_mode > 1) ? lora_freq : lora_freq_cross_digi;
   rf95.setFrequency(lora_freq_rx_curr);
-  Serial.printf("LoRa FREQ:\t%f\n", lora_freq_rx_curr);
+  Serial.printf("LoRa FREQ:\t%f\r\n", lora_freq_rx_curr);
 
   // we tx on main and/or secondary frequency. For tx, loraSend is called (and always has desired txpower as argument)
   rf95.setTxPower((lora_digipeating_mode < 2 || lora_cross_digipeating_mode < 1) ? txPower : txPower_cross_digi);
@@ -2014,6 +2025,20 @@ void setup()
 #endif /* KISS_PROTOCOL && ENABLE_BLUETOOTH */
 
 #ifdef ENABLE_WIFI
+  // https://www.tutorialspoint.com/esp32_for_iot/esp32_for_iot_spiffs_storage.htm
+  // Launch SPIFFS file system
+  if (!SPIFFS.begin(FORMAT_SPIFFS_IF_FAILED)){
+    Serial.println("SPIFFS Mount Failed");
+  } else {
+   Serial.println("SPIFFS Mount Success");
+  }
+
+  //debug:
+  //listDir(SPIFFS, "/", 0);
+
+  // read wifi.cfg file, interprete the json and assign some of our global variables
+  readFile(SPIFFS, "/wifi.cfg");
+
   if (enable_webserver) {
 #if defined(KISS_PROTOCOL) && defined(ENABLE_BLUETOOTH)
     // if enabble_webserver == 2 or (enable_webserver == 1 && (no serial-bt-client is connected OR aprs-is-connecion configuried)
@@ -2043,20 +2068,6 @@ void setup()
 #else
   sema_lora_chip = false;
 #endif
-
-  // https://www.tutorialspoint.com/esp32_for_iot/esp32_for_iot_spiffs_storage.htm
-  // Launch SPIFFS file system  
-  if (!SPIFFS.begin(FORMAT_SPIFFS_IF_FAILED)){ 
-    Serial.println("SPIFFS Mount Failed");
-  } else {
-   Serial.println("SPIFFS Mount Success");
-  }
-
-  //debug:
-  //listDir(SPIFFS, "/", 0);
-
-  // read wifi.cfg file, interprete the json and assign some of our global variables
-  readFile(SPIFFS, "/wifi.cfg");
 
   // Hold the OLED ON at first boot
   oled_timer=millis()+oled_timeout;
@@ -2726,6 +2737,335 @@ String create_long_aprs(const char *delimiter, RawDegrees lng) {
 }
 
 
+// usb-serial tnc emulator
+
+int parse_cmd_arg(const String &inputBuf, char *cmd, int cmd_size, char *arg, int arg_size) {
+  const char *p = inputBuf.c_str();
+  char *q;
+
+  if (!cmd || cmd_size < 1 || !arg || arg_size < 1)
+    return 1;
+  *cmd = *arg = 0;
+  if (cmd_size < 2 || arg_size < 2)
+  return 1;
+
+  // copy comand. First, skip leading blanks
+  while (*p && *p == ' ')
+    p++;
+  // copy command part (separator is ' ')
+  for (q = cmd; *p && *p != ' ' && q-cmd < cmd_size-1; p++, q++) {
+    if (*p >= 'A' && *p <= 'Z')
+      *q = tolower(*p);
+    else
+      *q = *p;
+  }
+  *q = 0;
+
+  // copy arg. First, skip leading blanks
+  while (*p && *p == ' ')
+    p++;
+  // copy arg until end or ' '
+  for (q = arg; *p && *p != ' ' && q-arg < arg_size-1; p++, q++) {
+    if (*p >= 'A' && *p <= 'Z')
+      *q = tolower(*p);
+    else
+      *q = *p;
+  }
+  *q = 0;
+
+  return 0;
+}
+
+
+void handle_usb_serial_input(void) {
+  if (!usb_serial_data_type || !Serial.available())
+    return;
+
+  static boolean cmd_mode = true;
+  static String inputBuf;
+  static boolean local_echo = true;
+  static boolean usb_serial_data_type__had_traceing_enabled_before_entering_converse_mode = false;
+  static boolean in_rx_kiss_frame = false;
+  char c = Serial.read();
+  boolean do_prompt = false;
+
+  if (c == 0xC0 || in_rx_kiss_frame) {
+    // was kiss frame
+    inputBuf = "";
+    if (c == 0xC0)
+      in_rx_kiss_frame = !in_rx_kiss_frame;;
+    return;
+  }
+
+  if (inputBuf.length() > 255) {
+    // reboot? lol. No ;)
+    inputBuf = "";
+    Serial.println("*** Error: Line too long");
+    inputBuf = "";
+  }
+
+  if (c == 0x03) {
+    // user pressed ^C
+    do_prompt = true;
+    Serial.print("\r\n");
+    if (!cmd_mode) {
+      if (!usb_serial_data_type__had_traceing_enabled_before_entering_converse_mode)
+        usb_serial_data_type &= ~2;
+      cmd_mode = true;
+    }
+    inputBuf="";
+  } else if (c == 0x0c) {
+    // user pressed ^L
+    if (local_echo) {
+      Serial.print("\r");
+      Serial.print(inputBuf);
+    }
+  } else if (c == 0x15) {
+    // user pressed ^U (clear line)
+    inputBuf="";
+    Serial.print("\r");
+  } else if (c == 0x7f || c == 0x08) {
+    if (inputBuf.length() > 0)
+      inputBuf.remove(inputBuf.length()-1);
+    if (local_echo)
+      Serial.print(c);
+  } else if (c == '\n') {
+    if (local_echo)
+      Serial.print(c);
+  } else if (c == '\r') {
+
+    if (local_echo)
+      Serial.print("\r\n");
+
+    if (cmd_mode) {
+
+      // command mode
+
+      char buf_cmd[256];
+      char buf_arg[256];
+      parse_cmd_arg(inputBuf, buf_cmd, sizeof(buf_cmd), buf_arg, sizeof(buf_arg));
+      String cmd = String(buf_cmd);
+      String arg = String(buf_arg);
+
+      do_prompt = true;
+
+      if (inputBuf != "") {
+
+        boolean arg_bool = false;
+        if (arg == "on") {
+          arg_bool = true;
+        } else if (arg == "off") {
+          arg_bool = false;
+        } else {
+          if (arg != "") {
+              Serial.println("*** " + cmd + ": error: not implemented, or argument not 'on' or 'off'");
+            inputBuf = "";
+            return;
+          }
+        }
+
+        if (arg == "" &&
+            (cmd == "?" || cmd == "beacon" || cmd == "converse" || cmd == "display" || cmd == "reboot" || cmd == "preferences" ) ) {
+          if (cmd == "beacon") {
+            Serial.println("*** beacon: sending");
+            manBeacon = true;
+          } else if (cmd == "converse") {
+            do_prompt = false;
+            Serial.println("*** converse: entering converse mode. Enabling LoRa RX packet trace. Hit ^C to leave");
+            cmd_mode = false;
+            // enable tnc trace
+            usb_serial_data_type__had_traceing_enabled_before_entering_converse_mode = (usb_serial_data_type & 2) ? true: false;
+            // We do not change preference setting
+            usb_serial_data_type |= 2;
+          } else if (cmd == "display" || inputBuf == "?") {
+            Serial.println("*** display: I know the following commands:");
+#ifdef	ENABLE_WIFI
+            Serial.println("  aprsis <on|off>");
+            Serial.println("  beacon     (tx a beacon)");
+#endif
+            Serial.println("  converse   (leave with ^C)");
+            Serial.println("  echo <on|off>");
+            Serial.println("  kiss on");
+            Serial.println("  logging <on|off>");
+            Serial.println("  trace <on|off>");
+            Serial.println("  reboot");
+#ifdef ENABLE_PREFERENCES
+            Serial.println("  preferences");
+#endif
+#ifdef	ENABLE_WIFI
+            Serial.println("  wifi <on|off>");
+#endif
+            Serial.println("  ?");
+          } else if (cmd == "reboot") {
+            Serial.println("*** reboot: rebooting!");
+            #if defined(ENABLE_SYSLOG) && defined(ENABLE_WIFI)
+              syslog_log(LOG_WARNING, String("usb-serial: reboot: user entered reboot command. Rebooting.."));
+            #endif
+            delay(100);
+            ESP.restart();
+          }
+#ifdef ENABLE_PREFERENCES
+          else if (cmd == "pfererences") {
+            Serial.println("*** preferences: error: preferences command needs to be implemented ;)");
+            #if defined(ENABLE_SYSLOG) && defined(ENABLE_WIFI)
+              syslog_log(LOG_WARNING, String("usb-serial: preferences: user entered preferences command. Yet not implemented."));
+            #endif
+          }
+#endif
+        } else {
+
+          if (cmd == "echo") {
+            if (arg != "")
+              local_echo = arg_bool;
+            Serial.println("*** " + cmd + " is " + (local_echo ? "on" : "off"));
+          } else if (cmd == "kiss") {
+             if (arg != "" && arg_bool) {
+               Serial.printf("KISS ON\r\n%c", 0xC0);
+               Serial.flush();
+               // point of no return for this function, until reboot
+               // We do not change preference setting
+               usb_serial_data_type = 0;
+               inputBuf = "";
+               return;
+            } else {
+              Serial.println("*** " + cmd + " is off");
+            }
+          } else if (cmd == "logging") {
+            if (arg != "") {
+              if (arg_bool) {
+                usb_serial_data_type |= 1;
+                usb_serial_data_type &= ~4;
+              } else {
+                // avoid going to kiss mode (!usb_serial_data_type)
+                usb_serial_data_type &= ~1;
+                if (!usb_serial_data_type)
+                  usb_serial_data_type = 4;
+              }
+              #ifdef ENABLE_PREFERENCES
+                preferences.putInt(PREF_DEV_USBSERIAL_DATA_TYPE, usb_serial_data_type);
+              #endif
+            }
+            Serial.println("*** " + cmd + " is " + ((usb_serial_data_type & 1) ? "on" : "off"));
+          } else if (cmd == "trace") {
+            if (arg != "") {
+              if (arg_bool) {
+                usb_serial_data_type |= 2;
+                usb_serial_data_type &= ~4;
+              } else {
+                // avoid going to kiss mode (!usb_serial_data_type)
+                usb_serial_data_type &= ~2;
+                if (!usb_serial_data_type)
+                  usb_serial_data_type = 4;
+              }
+              #ifdef ENABLE_PREFERENCES
+                preferences.putInt(PREF_DEV_USBSERIAL_DATA_TYPE, usb_serial_data_type);
+             #endif
+           }
+           Serial.println("*** " + cmd + " is " + ((usb_serial_data_type & 2) ? "on" : "off"));
+#ifdef	ENABLE_WIFI
+          } else if (cmd == "aprsis") {
+            if (arg != "") {
+              preferences.putBool(PREF_APRSIS_EN, arg_bool);
+              aprsis_enabled = arg_bool;
+            }
+            Serial.println("*** " + cmd + " is " + (aprsis_enabled ? "on" : "off"));
+          } else if (cmd == "wifi") {
+            if (arg != "") {
+              #ifdef ENABLE_PREFERENCES
+                preferences.putInt(PREF_WIFI_ENABLE, (arg_bool) ? 0 : 1);
+              #endif
+              if (arg_bool) {
+                if (!webserverStarted) {
+                  enable_webserver = 1;
+                  #if defined(LORA32_21) && defined(ENABLE_BLUETOOTH)
+                    // lora32_21 hardware bug: btt and wifi are mutual exclusive
+                    SerialBT.end();
+                    delay(100);
+                  #endif
+                  webServerCfg = {.callsign = Tcall};
+                  xTaskCreate(taskWebServer, "taskWebServer", 12000, (void*)(&webServerCfg), 1, nullptr);
+                  webserverStarted = true;
+                  writedisplaytext("LoRa-APRS","","Init:","WiFi task started","long press to ","stop again");
+                  delay(1500);
+                }
+              }
+            }
+            Serial.println("*** " + cmd + " is " + (enable_webserver ? "on" : "off"));
+#endif // ENABLE_WIFI
+          } else {
+            Serial.println("*** ?");
+          }
+        }
+      }
+      inputBuf = "";
+
+    } else {
+
+      // converse mode
+
+      const char *p = inputBuf.c_str();
+      const char *q, *r;
+
+      // user pressed enter, without any character before`
+      if (!*p)
+        return;
+
+      if ((*p && ((*p >= 'A' && *p <= 'Z') || (*p >= '0' && *p <= '9')))
+          && (q = strchr(p, '>')) && isalnum(q[1]) && (r = strchr(p, ':')) && r > q && r[1] > ' ') {
+        for ( ++p; *p && *p != ':'; p++) {
+          if (! (*p == '-' || *p == '>' || *p == ',' || *q == '*' || (*p >= 'A' && *p <= 'Z') || (*p >= '0' && *p <= '9')))
+            break;
+        }
+        if (p == r) {
+          Serial.println("*** sending: '" + inputBuf + "'");
+          #ifdef KISS_PROTOCOL
+            sendToTNC(inputBuf);
+          #endif
+          if (lora_tx_enabled) {
+            if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies % 2)
+              loraSend(txPower, lora_freq, lora_speed, inputBuf);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
+            if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies > 1 && lora_digipeating_mode > 1 && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq)
+              loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, inputBuf);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
+            enableOled(); // enable OLED
+            writedisplaytext("((KISSTX))","","","","","");
+            time_to_refresh = millis() + showRXTime;
+          } else {
+            Serial.println("*** Warning: lora tx must be enabled! Not sending to RF");
+          }
+        } else {
+          Serial.println("*** refusing to send bad user input: '" + inputBuf + "'");
+        }
+      } else {
+        Serial.println("*** refusing to send bad user input: '" + inputBuf + "'");
+      }
+      inputBuf = "";
+
+    }
+
+  } else {
+
+    // user entered a character
+
+    if (local_echo)
+      Serial.print(c);
+
+    if (inputBuf.length() > 255) {
+      Serial.println("\r\n*** Error: Line too long");
+      inputBuf = "";
+    } else {
+      // add character to inputBuf
+      inputBuf += String(c);
+    }
+
+  }
+
+  if (do_prompt)
+    Serial.print("cmd:");
+
+  Serial.flush();
+}
+
+
 // +---------------------------------------------------------------------+//
 // + MAINLOOP -----------------------------------------------------------+//
 // +---------------------------------------------------------------------+//
@@ -2933,11 +3273,11 @@ void loop()
 #ifdef	ENABLE_WIFI
     if (!webserverStarted) {
       enable_webserver = 1;
-#if defined(LORA32_21) && defined(ENABLE_BLUETOOTH)
-      // lora32_21 hardware bug: btt and wifi are mutual exclusive
-      SerialBT.end();
-      delay(100);
-#endif
+      #if defined(LORA32_21) && defined(ENABLE_BLUETOOTH)
+        // lora32_21 hardware bug: btt and wifi are mutual exclusive
+        SerialBT.end();
+        delay(100);
+      #endif
       webServerCfg = {.callsign = Tcall};
       xTaskCreate(taskWebServer, "taskWebServer", 12000, (void*)(&webServerCfg), 1, nullptr);
       webserverStarted = true;
@@ -3303,6 +3643,17 @@ out:
           s = kiss_add_snr_rssi_to_path_at_position_without_digippeated_flag ? append_element_to_path(received_frame, rssi_for_path) : add_element_to_path(received_frame, rssi_for_path);
         sendToTNC(s ? String(s) : loraReceivedFrameString);
     #endif
+        if (usb_serial_data_type & 2) {
+          s = 0;
+          if (((lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_KISS) || user_demands_trace > 1) ||
+              (!digipeatedflag && ((lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_KISS__ONLY_IF_HEARD_DIRECT) || user_demands_trace == 1)) )
+
+
+            s = kiss_add_snr_rssi_to_path_at_position_without_digippeated_flag ? append_element_to_path(received_frame, rssi_for_path) : add_element_to_path(received_frame, rssi_for_path);
+          String s_tmp = s ? String(s) : String(loraReceivedFrameString);
+	  s_tmp.trim();
+          Serial.println(s_tmp);
+        }
 
         // Are we configured as lora digi? Are we listening on the main frequency?
         if (lora_tx_enabled && lora_digipeating_mode > 0 && !our_packet && !blacklisted && lora_freq_rx_curr == lora_freq) {
@@ -3607,6 +3958,8 @@ behind_position_tx:
       *lora_TXBUFF_for_digipeating = 0;
     }
   }
+
+  handle_usb_serial_input();
 
   vTaskDelay(1);
 }

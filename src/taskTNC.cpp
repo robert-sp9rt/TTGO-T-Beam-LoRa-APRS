@@ -2,7 +2,7 @@
 #include <esp_task_wdt.h>
 
 
-extern boolean debug_to_serial;
+extern boolean usb_serial_data_type;
 
 #ifdef ENABLE_BLUETOOTH
   BluetoothSerial SerialBT;
@@ -41,9 +41,9 @@ void handleKISSData(char character, int bufferIndex) {
 
     if (isDataFrame) {
       #ifdef LOCAL_KISS_ECHO
-      if (!debug_to_serial) {
-        Serial.print(inTNCData);
-      }
+        if (!usb_serial_data_type) {
+          Serial.print(inTNCData);
+        }
         #ifdef ENABLE_BLUETOOTH
         if (SerialBT.hasClient()) {
           SerialBT.print(inTNCData);
@@ -83,7 +83,7 @@ void handleKISSData(char character, int bufferIndex) {
 
   while (true) {
     esp_task_wdt_reset();
-    if (!debug_to_serial) {
+    if (!usb_serial_data_type) {
       while (Serial.available() > 0) {
         char character = Serial.read();
         handleKISSData(character, 0);
@@ -110,7 +110,7 @@ void handleKISSData(char character, int bufferIndex) {
     #endif
     if (xQueueReceive(tncReceivedQueue, &loraReceivedFrameString, (1 / portTICK_PERIOD_MS)) == pdPASS) {
       const String &kissEncoded = encode_kiss(*loraReceivedFrameString);
-      if (!debug_to_serial)
+      if (!usb_serial_data_type)
         Serial.print(kissEncoded);
       #ifdef ENABLE_BLUETOOTH
         if (SerialBT.hasClient()){

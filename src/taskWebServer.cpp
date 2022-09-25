@@ -57,6 +57,8 @@ extern String aprsis_callsign;
 extern String aprsis_password;
 extern uint8_t aprsis_data_allow_inet_to_rf;
 extern String MY_APRS_DEST_IDENTIFYER;
+extern int lora_digipeating_mode;
+extern int tx_own_beacon_from_this_device_or_fromKiss__to_frequencies;
 
 extern double lora_freq_rx_curr;
 extern boolean lora_tx_enabled;
@@ -415,7 +417,7 @@ void handle_Cfg() {
   jsonData += jsonLineFromPreferenceBool(PREF_APRS_SHOW_CMT);
   jsonData += jsonLineFromPreferenceBool(PREF_APRS_COMMENT_RATELIMIT_PRESET);
   jsonData += jsonLineFromPreferenceBool(PREF_DEV_BT_EN);
-  jsonData += jsonLineFromPreferenceBool(PREF_DEV_LOGTOSERIAL_EN);
+  jsonData += jsonLineFromPreferenceInt(PREF_DEV_USBSERIAL_DATA_TYPE);
   jsonData += jsonLineFromPreferenceInt(PREF_DEV_SHOW_RX_TIME);
   jsonData += jsonLineFromPreferenceBool(PREF_DEV_AUTO_SHUT);
   jsonData += jsonLineFromPreferenceInt(PREF_DEV_AUTO_SHUT_PRESET);
@@ -908,7 +910,9 @@ void handle_saveDeviceCfg(){
   #endif
   do_serial_println("WebServer: WebServer: handle_SaveAPRSCfgs()");
   preferences.putBool(PREF_DEV_BT_EN, server.hasArg(PREF_DEV_BT_EN));
-  preferences.putBool(PREF_DEV_LOGTOSERIAL_EN, server.hasArg(PREF_DEV_LOGTOSERIAL_EN));
+  if (server.hasArg(PREF_DEV_USBSERIAL_DATA_TYPE)){
+    preferences.putInt(PREF_DEV_USBSERIAL_DATA_TYPE, server.arg(PREF_DEV_USBSERIAL_DATA_TYPE).toInt());
+  }
   preferences.putBool(PREF_DEV_OL_EN, server.hasArg(PREF_DEV_OL_EN));
   if (server.hasArg(PREF_DEV_SHOW_RX_TIME)){
     preferences.putInt(PREF_DEV_SHOW_RX_TIME, server.arg(PREF_DEV_SHOW_RX_TIME).toInt());
@@ -1093,7 +1097,7 @@ void restart_AP_or_STA(void) {
       syslog_log(LOG_WARNING, "NTP: Failed to obtain time");
     } else {
       char buf[64];
-      strftime(buf, 64, "%A, %B %d %Y %H:%M:%S", &timeinfo);
+      strftime(buf, 64, "%Y-%m-%d %H:%M:%S", &timeinfo);
       syslog_log(LOG_INFO, String("NTP: updated time: ") + String(buf));
     }
   #endif
@@ -1117,6 +1121,53 @@ void restart_AP_or_STA(void) {
 
 // APRSIS related functions
 
+// send status mesg to APRS-IS. If reboot, print BUILDNUMBER
+void do_send_status_message_to_aprsis(void) {
+  String log_msg;
+
+  String outString = aprsis_callsign + ">" + MY_APRS_DEST_IDENTIFYER + ":>APRSIS-Conn: ";
+  char buf[19];// Room for len(20220917 01:02:03z) + 1 /* \0 */  -> 19
+  struct tm timeinfo{};
+  if (getLocalTime(&timeinfo)) {
+    strftime(buf, sizeof(buf), "%Y%m%d %H:%M:%Sz", &timeinfo);
+    //sprintf(buf, "%X%2.2d %2.2d:%2.2d:%2.2dz", timeinfo.tm_mon+1, timeinfo.tm_mday, timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+  } else {
+    strncpy(buf, gps_time_s, sizeof(buf));
+  }
+    outString = outString + String(buf);
+  if (aprsis_time_last_successful_connect.length())
+    outString = outString + ", last " + aprsis_time_last_successful_connect;
+  else
+    outString = outString + ", Reboot[B" + buildnr + "]";
+
+  // remember this time as last connect time, for being able to reference it next time
+  aprsis_time_last_successful_connect = String(buf);
+
+  if (aprsis_connect_tries > 1)
+    outString = outString + ", tries " + String(aprsis_connect_tries);
+
+  log_msg = String("APRS-IS: sent status '" + outString + String("'"));
+  #if defined(ENABLE_SYSLOG)
+    syslog_log(LOG_INFO, log_msg);
+  #endif
+  do_serial_println(log_msg);
+
+  aprsis_client.print(outString + "\r\n");
+
+  outString.replace(":>", ",RFONLY:>");
+  if (lora_tx_enabled && tx_own_beacon_from_this_device_or_fromKiss__to_frequencies) {
+    if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies % 2)
+      loraSend(txPower, lora_freq, lora_speed, outString);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
+    if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies > 1 && lora_digipeating_mode > 1 && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq)
+      loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, outString);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
+  }
+  #ifdef KISS_PROTOCOL
+    sendToTNC(outString);
+  #endif
+
+}
+
+
 // connect to apprsis
 boolean connect_to_aprsis(void) {
   String log_msg;
@@ -1133,7 +1184,7 @@ boolean connect_to_aprsis(void) {
 
   aprsis_status = "Connecting";
   aprsis_client.connect(aprsis_host.c_str(), aprsis_port);
-  if (!aprsis_client.connected()) { aprsis_status = "Error: connect failed"; return false; }
+  if (!aprsis_client.connected()) { aprsis_status = "Error: connect failed"; aprsis_client.stop(); return false; }
   aprsis_status = "Connected. Waiting for greeting.";
 
   uint32_t t_start = millis();
@@ -1172,45 +1223,16 @@ boolean connect_to_aprsis(void) {
   #endif
   do_serial_println(log_msg);
 
-  // avoid sending old data
-  to_aprsis_data = "";
+  // send aprs-status packet?
+  if (send_status_message_to_aprsis)
+    do_send_status_message_to_aprsis();
 
   aprsis_connect_tries = 0;
 
+  // avoid sending old data
+  to_aprsis_data = "";
+
   return true;
-}
-
-
-// send status mesg to APRS-IS. If reboot, print BUILDNUMBER
-void do_send_status_message_to_aprsis(void) {
-  String log_msg;
-
-  String outString = aprsis_callsign + ">" + MY_APRS_DEST_IDENTIFYER + ":>aprs-is-connect: ";
-  char buf[19];// Room for len(20220917 01:02:03z) + 1 /* \0 */  -> 19
-  struct tm timeinfo{};
-  if (getLocalTime(&timeinfo)) {
-    strftime(buf, sizeof(buf), "%Y%m%d %H:%M:%Sz", &timeinfo);
-  } else {
-    strncpy(buf, gps_time_s, sizeof(buf));
-  }
-    outString = outString + String(buf);
-  if (aprsis_time_last_successful_connect.length())
-    outString = outString + ", last " + aprsis_time_last_successful_connect;
-  else 
-    outString = outString + ", Reboot[V" + buildnr + "]";
-
-  // remember this time as last connect time, for being able to reference it next time
-  aprsis_time_last_successful_connect = String(buf);
-
-  outString = outString + ", tries " + String(aprsis_connect_tries);
-
-  log_msg = String("APRS-IS: sent status '" + outString + String("'"));
-  #if defined(ENABLE_SYSLOG)
-    syslog_log(LOG_INFO, log_msg);
-  #endif
-  do_serial_println(log_msg);
-
-  aprsis_client.print(outString + "\r\n");
 }
 
 
@@ -1443,7 +1465,7 @@ void send_to_aprsis()
     HTTPUpload& upload = server.upload();
     if (upload.status == UPLOAD_FILE_START) {
       rf95.sleep(); // disable rf95 before update
-      Serial.printf("Firmware: Update: %s\n", upload.filename.c_str());
+      Serial.printf("Firmware: Update: %s\r\n", upload.filename.c_str());
       if (!Update.begin(UPDATE_SIZE_UNKNOWN)) { //start with max available size
 #if defined(ENABLE_SYSLOG)
         syslog_log(LOG_ERR, String("Firmware: Update begin error: ") + Update.errorString());
@@ -1460,9 +1482,9 @@ void send_to_aprsis()
       }
     } else if (upload.status == UPLOAD_FILE_END) {
       if (Update.end(true)) { //true to set the size to the current progress
-        Serial.printf("Firmware: Update Success: %u\nFirmware: Rebooting...\n", upload.totalSize);
+        Serial.printf("Firmware: Update Success: %u\r\nFirmware: Rebooting...\r\n", upload.totalSize);
 #if defined(ENABLE_SYSLOG)
-        syslog_log(LOG_WARNING, String("Firmware: Update Success: ") + String((int)upload.totalSize) + ". Rebooting...");
+        syslog_log(LOG_WARNING, String("Firmware: Update Success: ") + String((int)upload.totalSize) + "byte. Rebooting...");
 #endif
       } else {
 #if defined(ENABLE_SYSLOG)
@@ -1614,12 +1636,8 @@ void send_to_aprsis()
             } else {
               t_aprsis_last_connect_try = millis();
               // connect to aprsis
-              if (connect_to_aprsis()) {
-                // send aprs-status packet?
-                if (send_status_message_to_aprsis)
-                  do_send_status_message_to_aprsis();
-              } else {
-                log_msg = String("APRS-IS: on_Err: '") + aprsis_status + String("' [") + aprsis_client.remoteIP().toString() + String("]");
+              if (!connect_to_aprsis()) {
+                log_msg = String("APRS-IS: on_Err: '") + aprsis_status + String("' [") + aprsis_client.remoteIP().toString() + String("], tries ") +  String(aprsis_connect_tries);
                 #if defined(ENABLE_SYSLOG)
                   syslog_log(LOG_INFO, log_msg);
                 #endif
