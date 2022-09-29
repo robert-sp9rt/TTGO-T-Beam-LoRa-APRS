@@ -511,7 +511,7 @@
                 </div>
                 <div>
                     <label for="shutdown_act">Auto power off</label>
-                    <input name="shutdown_act" id="shutdown_act" type="checkbox" value="1" title="activate auto shutdown after usb plug off (not for T-BEAM 0.7)">
+                    <input name="shutdown_act" id="shutdown_act" type="checkbox" value="1" title="activate auto shutdown after usb plug off (not for T-BEAM 0.7). The power off the device will be switched off.">
                 </div>
                 <div>
                     <label for="shutdown_dt">Auto power off delay [s]</label>
@@ -659,7 +659,7 @@
                  Use with care; resulting longer path consumes a bit more airtime.
             </div>
             <div class="grid-container full">
-              <h5 class="u-full-width">User key functions (hardware buttons):</h5>
+              <h5 class="u-full-width">TTGO T-Beam middle hardware-button: User key functions:</h5>
             </div>
             <div>
                <h6 class="u-full-width">short press</h6>
@@ -675,7 +675,17 @@
                <h6 class="u-full-width">long press</h6>
                <ul>
                    <li>toggle on or off WiFi and WebServer</li>
-                </ul>
+                   <li><b>Cave</b>: if you long-press during boot, your <b>settings are purged!</b></li>
+               </ul>
+            </div>
+            <div class="grid-container full">
+               <h5 class="u-full-width">TTGO T-Beam left/right hardware-buttons:</h5>
+            </div>
+            <div>
+               <ul><li>Left button (nearby USB-port): if long-pressed, your device will powered off (press 7s), or is switched on again (2s).</li></ul>
+               <ul><li>Right button (lateral): short-press reboots your device (restarts the CPU).</li></ul>
+            </div>
+            <div>
             </div>
             <div class="grid-container full">
               <h5 class="u-full-width">Tips for reducing power (Usage as tracker only):</h5>
