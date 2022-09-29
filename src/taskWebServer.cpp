@@ -1174,7 +1174,7 @@ void do_send_status_message_about_shutdown_to_aprsis()
 }
 #endif
 
-// send status mesg to APRS-IS. If rebooted, print BUILDNUMBER
+// send status mesg to APRS-IS. If (re)booted, print BUILDNUMBER
 void do_send_status_message_about_connect_to_aprsis(void) {
   String log_msg;
 
@@ -1191,7 +1191,7 @@ void do_send_status_message_about_connect_to_aprsis(void) {
   if (aprsis_time_last_successful_connect.length())
     outString = outString + ", last " + aprsis_time_last_successful_connect;
   else
-    outString = outString + ", Rebooted[B" + buildnr + "]";
+    outString = outString + ", Booted[B" + buildnr + "]";
 
   // remember this time as last connect time, for being able to reference it next time
   aprsis_time_last_successful_connect = String(buf);
