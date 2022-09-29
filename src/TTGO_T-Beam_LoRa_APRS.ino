@@ -131,6 +131,10 @@ String aprsis_filter = "";
 String aprsis_callsign = "";
 String aprsis_password = "-1";
 uint8_t aprsis_data_allow_inet_to_rf = 2;  // 0: disable. 1: gate to main qrg. 2: gate to secondary qrg. 3: gate to both frequencies
+extern void do_send_status_message_about_reboot_to_aprsis();
+#ifdef T_BEAM_V1_0
+extern void do_send_status_message_about_shutdown_to_aprsis();
+#endif
 #endif
 
 // Variables for APRS packaging
@@ -846,6 +850,7 @@ void writedisplaytext(String HeaderTxt, String Line1, String Line2, String Line3
       #ifdef T_BEAM_V1_0
         axp.setChgLEDMode(AXP20X_LED_OFF);
         //axp.shutdown(); <-we need fix this
+        do_send_status_message_about_shutdown_to_aprsis();
         axp.shutdown();
       #endif
     }
@@ -1281,6 +1286,7 @@ void readFile(fs::FS &fs, const char * filename) {
     goto end;
   }
 
+#ifdef	ENABLE_WIFI
   if (!strcmp(filename, "/wifi.cfg")) {
     if (JSONBuffer.containsKey("SSID") && JSONBuffer.containsKey("password")) {
       const char *p;
@@ -1298,6 +1304,9 @@ void readFile(fs::FS &fs, const char * filename) {
       Serial.println("Fallback SSID: " + safeApName + ", PW: " + safeApPass + ", Filesize: " + String(file.size()));
     }  
   } else {
+#else
+  {
+#endif // ENABLE_WIFI
     Serial.printf("Found file '%s', parsed it successfully, but I don't know what to do with the json data ;)!\r\n", filename);
   }
 
@@ -1305,7 +1314,6 @@ end:
   Serial.println("readFile: end");
   file.close();
 }
-
 
 
 // + SETUP --------------------------------------------------------------+//
@@ -2900,6 +2908,9 @@ void handle_usb_serial_input(void) {
             Serial.println("  logging <on|off>");
             Serial.println("  trace <on|off>");
             Serial.println("  reboot");
+#ifdef T_BEAM_V1_0
+            Serial.println("  shutdown");
+#endif
 #ifdef ENABLE_PREFERENCES
             Serial.println("  preferences");
 #endif
@@ -2912,8 +2923,23 @@ void handle_usb_serial_input(void) {
             #if defined(ENABLE_SYSLOG) && defined(ENABLE_WIFI)
               syslog_log(LOG_WARNING, String("usb-serial: reboot: user entered reboot command. Rebooting.."));
             #endif
+#ifdef	ENABLE_WIFI
+            do_send_status_message_about_reboot_to_aprsis();
+#endif
             delay(100);
             ESP.restart();
+#ifdef T_BEAM_V1_0
+          } else if (cmd == "shutdown") {
+            Serial.println("*** shutdown: halting!");
+            #if defined(ENABLE_SYSLOG) && defined(ENABLE_WIFI)
+              syslog_log(LOG_WARNING, String("usb-serial: halting: user entered shutdown command. Shutdown.."));
+            #endif
+#ifdef	ENABLE_WIFI
+            do_send_status_message_about_shutdown_to_aprsis();
+#endif
+            delay(100);
+            axp.shutdown();
+#endif // T_BEAM_V1_0
           }
 
         } else {
@@ -2986,11 +3012,14 @@ void handle_usb_serial_input(void) {
                     SerialBT.end();
                     delay(100);
                   #endif
+                  esp_task_wdt_reset();
                   webServerCfg = {.callsign = Tcall};
                   xTaskCreate(taskWebServer, "taskWebServer", 12000, (void*)(&webServerCfg), 1, nullptr);
                   webserverStarted = true;
-                  writedisplaytext("LoRa-APRS","","Init:","WiFi task started","long press to ","stop again");
+                  writedisplaytext("LoRa-APRS","","TNC:","WiFi task started","long press button","to stop again");
+                  esp_task_wdt_reset();
                   delay(1500);
+                  esp_task_wdt_reset();
                 }
               }
             }
@@ -3079,6 +3108,9 @@ void loop()
   esp_task_wdt_reset();
 
   if (reboot_interval && millis() > reboot_interval) {
+#ifdef	ENABLE_WIFI
+    do_send_status_message_about_reboot_to_aprsis();
+#endif
     ESP.restart();
   }
 
@@ -3282,13 +3314,19 @@ void loop()
         SerialBT.end();
         delay(100);
       #endif
+      esp_task_wdt_reset();
       webServerCfg = {.callsign = Tcall};
       xTaskCreate(taskWebServer, "taskWebServer", 12000, (void*)(&webServerCfg), 1, nullptr);
       webserverStarted = true;
-      writedisplaytext("LoRa-APRS","","Init:","WiFi task started","long press to ","stop again");
+      writedisplaytext("LoRa-APRS","","Button:","WiFi task started","long press to ","stop again");
+      esp_task_wdt_reset();
       delay(1500);
+      esp_task_wdt_reset();
     } else {
       writedisplaytext("LoRa-APRS","","Rebooting:","to stop WiFi","do not press key","");
+#ifdef	ENABLE_WIFI
+      do_send_status_message_about_reboot_to_aprsis();
+#endif
       ESP.restart();
     }  
 #endif
@@ -3356,6 +3394,7 @@ void loop()
       if(shutdown_countdown_timer_enable){
         if(millis() >= shutdown_countdown_timer){
           axp.setChgLEDMode(AXP20X_LED_OFF);
+          do_send_status_message_about_shutdown_to_aprsis();
           axp.shutdown();
         }
       }

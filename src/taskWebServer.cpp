@@ -90,6 +90,10 @@ String wifi_ssid = "";
 String aprsis_status = "Disconnected";
 // aprsis 3rd party traffic encoding
 String generate_third_party_packet(String, String);
+void do_send_status_message_about_reboot_to_aprsis();
+#ifdef T_BEAM_V1_0
+void do_send_status_message_about_shutdown_to_aprsis();
+#endif
 #ifdef KISS_PROTOCOL
 extern void sendToTNC(const String &);
 #endif
@@ -308,6 +312,7 @@ void handle_Reboot() {
     syslog_log(LOG_WARNING, String("WebServer: Reboot Request -> Rebooting..."));
   #endif
   Serial.println("WebServer: Reboot Request -> Rebooting...");
+  do_send_status_message_about_reboot_to_aprsis();
   server.sendHeader("Location", "/");
   server.send(302,"text/html", "");
   server.close();
@@ -331,6 +336,7 @@ void handle_Shutdown() {
     #endif
     Serial.println("WebServer: Shutdown Request -> Shutdown...");
     server.send(200,"text/html", "Shutdown");
+    do_send_status_message_about_shutdown_to_aprsis();
     axp.setChgLEDMode(AXP20X_LED_OFF);
     axp.shutdown();
   #else
@@ -347,6 +353,7 @@ void handle_Restore() {
     syslog_log(LOG_WARNING, String("WebServer: Reset Reqeust -> Reseting preferences and rebooting..."));
   #endif
   Serial.println("WebServer: Reset Requet -> Reseting preferences and rebooting...");
+  do_send_status_message_about_reboot_to_aprsis();
   server.sendHeader("Location", "/");
   server.send(302,"text/html", "");
   preferences.clear();
@@ -1121,8 +1128,54 @@ void restart_AP_or_STA(void) {
 
 // APRSIS related functions
 
-// send status mesg to APRS-IS. If reboot, print BUILDNUMBER
-void do_send_status_message_to_aprsis(void) {
+
+#define SSMASTA_SHUTDOWN 0
+#define SSMASTA_REBOOT 1
+
+// on axp.shutdown(), say goodby to APRS-IS and close connection
+void do_send_status_message_about_shutdown_or_reboot_to_aprsis(int why) {
+  if (!aprsis_enabled || !aprsis_client.connected())
+    return;
+
+  if (send_status_message_to_aprsis) {
+    String outString = aprsis_callsign + ">" + MY_APRS_DEST_IDENTIFYER + ":>APRSIS-Conn: ";
+    char buf[19];// Room for len(20220917 01:02:03z) + 1 /* \0 */  -> 19
+    struct tm timeinfo{};
+    if (getLocalTime(&timeinfo)) {
+      strftime(buf, sizeof(buf), "%Y%m%d %H:%M:%Sz", &timeinfo);
+      //sprintf(buf, "%X%2.2d %2.2d:%2.2d:%2.2dz", timeinfo.tm_mon+1, timeinfo.tm_mday, timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+    } else {
+      strncpy(buf, gps_time_s, sizeof(buf));
+    }
+    outString = outString + String(buf);
+    if (aprsis_time_last_successful_connect.length()) {
+      outString = outString + ", since " + aprsis_time_last_successful_connect + ", ";
+    }
+    if (why == SSMASTA_SHUTDOWN)
+      outString = outString + "Shutdown";
+    else
+      outString = outString + "Rebooting";
+    //outString = outString + "[B" + buildnr + "]";
+    aprsis_client.print(outString + "\r\n");
+  }
+  esp_task_wdt_reset();
+  delay(500);
+  aprsis_client.stop();
+}
+
+void do_send_status_message_about_reboot_to_aprsis()
+{
+  do_send_status_message_about_shutdown_or_reboot_to_aprsis(SSMASTA_REBOOT);
+}
+#ifdef T_BEAM_V1_0
+void do_send_status_message_about_shutdown_to_aprsis()
+{
+  do_send_status_message_about_shutdown_or_reboot_to_aprsis(SSMASTA_SHUTDOWN);
+}
+#endif
+
+// send status mesg to APRS-IS. If rebooted, print BUILDNUMBER
+void do_send_status_message_about_connect_to_aprsis(void) {
   String log_msg;
 
   String outString = aprsis_callsign + ">" + MY_APRS_DEST_IDENTIFYER + ":>APRSIS-Conn: ";
@@ -1134,11 +1187,11 @@ void do_send_status_message_to_aprsis(void) {
   } else {
     strncpy(buf, gps_time_s, sizeof(buf));
   }
-    outString = outString + String(buf);
+  outString = outString + String(buf);
   if (aprsis_time_last_successful_connect.length())
     outString = outString + ", last " + aprsis_time_last_successful_connect;
   else
-    outString = outString + ", Reboot[B" + buildnr + "]";
+    outString = outString + ", Rebooted[B" + buildnr + "]";
 
   // remember this time as last connect time, for being able to reference it next time
   aprsis_time_last_successful_connect = String(buf);
@@ -1188,7 +1241,7 @@ boolean connect_to_aprsis(void) {
   aprsis_status = "Connected. Waiting for greeting.";
 
   uint32_t t_start = millis();
-  while (!aprsis_client.available() && (millis()-t_start) < 25000L) delay(100);
+  while (!aprsis_client.available() && (millis()-t_start) < 25000L) { delay(100); esp_task_wdt_reset(); }
   if (aprsis_client.available()) {
     // check
     String s = aprsis_client.readStringUntil('\n');
@@ -1207,7 +1260,7 @@ boolean connect_to_aprsis(void) {
   aprsis_client.print(String(buffer));
 
   t_start = millis();
-  while (!aprsis_client.available() && (millis()-t_start) < 25000L) delay(100);
+  while (!aprsis_client.available() && (millis()-t_start) < 25000L) { delay(100); esp_task_wdt_reset(); }
   if (aprsis_client.available()) {
     // check
     String s = aprsis_client.readStringUntil('\n');
@@ -1225,7 +1278,7 @@ boolean connect_to_aprsis(void) {
 
   // send aprs-status packet?
   if (send_status_message_to_aprsis)
-    do_send_status_message_to_aprsis();
+    do_send_status_message_about_connect_to_aprsis();
 
   aprsis_connect_tries = 0;
 
@@ -1457,6 +1510,7 @@ void send_to_aprsis()
 #if defined(ENABLE_SYSLOG)
     syslog_log(LOG_WARNING, String("Firmware: Update finished. Status: ") + (!Update.hasError() ? "Ok" : "Error"));
 #endif
+    do_send_status_message_about_reboot_to_aprsis();
     server.sendHeader("Connection", "close");
     server.send(200, "text/plain", (Update.hasError()) ? "FAIL" : "OK");
     delay(500);
