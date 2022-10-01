@@ -645,6 +645,8 @@ out_relay_path:
   #ifdef KISS_PROTOCOL
     sendToTNC(outString);
   #endif
+  if (usb_serial_data_type & 2)
+    Serial.println(outString);
 }
 
 #ifdef BUZZER
@@ -3496,6 +3498,9 @@ void loop()
               }
             }
         }
+
+        if (usb_serial_data_type & 2)
+          Serial.println(data);
 
 #if defined(ENABLE_WIFI)
         if (!was_own_position_packet || tx_own_beacon_from_this_device_or_fromKiss__to_aprsis) {

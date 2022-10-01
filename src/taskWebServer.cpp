@@ -60,6 +60,7 @@ extern String MY_APRS_DEST_IDENTIFYER;
 extern int lora_digipeating_mode;
 extern int tx_own_beacon_from_this_device_or_fromKiss__to_frequencies;
 
+extern uint8_t usb_serial_data_type;
 extern double lora_freq_rx_curr;
 extern boolean lora_tx_enabled;
 
@@ -1361,7 +1362,7 @@ void read_from_aprsis(void) {
               q = strchr(s.c_str(), '-');
               if (q && q < src_call_end) {
                 // len callsign > 6?
-              if (q-s.c_str() > 6) {
+                if (q-s.c_str() > 6) {
                   log_msg = "bad length of call (> 6)!";
                   err = 1;
                 } else {
@@ -1390,11 +1391,13 @@ void read_from_aprsis(void) {
               }
             }
           }
-          for (q = s.c_str(); *q && *q != ':'; q++) {
-            if (! (isalnum(*q) || *q == '>' || *q == '-' || *q == ',' || *q == '*') ) {
-              err = 1;
-              log_msg = "bad character in header";
-               break;
+          if (!err) {
+            for (q = s.c_str(); *q && *q != ':'; q++) {
+              if (! (isalnum(*q) || *q == '>' || *q == '-' || *q == ',' || *q == '*') ) {
+                err = 1;
+                log_msg = "bad character in header";
+                break;
+              }
             }
           }
         }
@@ -1414,7 +1417,20 @@ void read_from_aprsis(void) {
     #if defined(ENABLE_SYSLOG)
       syslog_log(LOG_INFO, log_msg);
     #endif
-      do_serial_println(log_msg);
+    do_serial_println(log_msg);
+    return;
+  }
+  // bug: header_end may be 0 (due to crash trace), but schouldn't: we tried to assuere.
+  // Can't see why this happens.
+  // Code without "goto" is ugly and can lead to strange results ;)
+  // Needs to be resolved. This is a the&D fix:
+  // search for ':' in String s again
+  if (!header_end && !(header_end = strchr(s.c_str(), ':'))) {
+    log_msg = "APRS-IS: read_from_aprs(): BUG! header_end is NULL: '" + s + "'";
+    #if defined(ENABLE_SYSLOG)
+      syslog_log(LOG_INFO, log_msg);
+    #endif
+    do_serial_println(log_msg);
     return;
   }
 
@@ -1435,11 +1451,13 @@ void read_from_aprsis(void) {
   String third_party_packet = generate_third_party_packet(aprs_callsign, s);
   if (!third_party_packet.isEmpty()) {
     aprsis_status = "OK, fromAPRSIS: " + s + " => " + third_party_packet; aprsis_status.trim();
+    if (usb_serial_data_type & 2)
+      Serial.println(third_party_packet);
 #ifdef KISS_PROTOCOL
     sendToTNC(third_party_packet);
 #endif
     if (lora_tx_enabled && aprsis_data_allow_inet_to_rf) {
-      // not query or aprs-message addressed to our call (check both, aprs_callsign and aprsis_callsign)=
+      // not query or aprs-message addressed to our call (check both, aprs_callsign and aprsis_callsign)
       // Format: "..::DL9SAU-15:..."
       // check is in this code part, because we may like to see those packets via kiss (sent above)
       q = header_end + 1;
