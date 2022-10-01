@@ -948,7 +948,7 @@ String getSatAndBatInfo() {
   String line5;
 
   if (gps_state == true)
-    line5 = "S:" + String(gps.satellites.value()) + "/" + int(gps.hdop.hdop());
+    line5 = "S:" + String(gps.satellites.value()) + "/" + String(int(gps.hdop.hdop()));
   else
     line5 = "S:-/-";
 #ifdef T_BEAM_V1_0

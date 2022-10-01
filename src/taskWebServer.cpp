@@ -1193,7 +1193,7 @@ void do_send_status_message_about_connect_to_aprsis(void) {
   else {
     outString = outString + ", Booted[B" + buildnr + "]";
     if (millis() > 60*1000)
-      outString = outString + ",up:" + int(millis()/1000/60);
+      outString = outString + ",up:" + String(int(millis()/1000/60));
     outString = outString + "]";
   }
 
