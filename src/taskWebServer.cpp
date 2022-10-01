@@ -1191,7 +1191,7 @@ void do_send_status_message_about_connect_to_aprsis(void) {
   if (aprsis_time_last_successful_connect.length())
     outString = outString + ", last " + aprsis_time_last_successful_connect;
   else {
-    outString = outString + ", Booted[B" + buildnr + "]";
+    outString = outString + ", Booted[B" + buildnr;
     if (millis() > 60*1000)
       outString = outString + ",up:" + String(int(millis()/1000/60));
     outString = outString + "]";
