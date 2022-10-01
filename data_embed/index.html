@@ -434,8 +434,8 @@
                     <input type="text" name="aprsis_fltr" id="aprsis_fltr" title="Request server-site filter (may be left empty). See http://www.aprs-is.net/javAPRSFilter.aspx ; Example: 't/mqs/YOURCALL/50' -> Gate only messages, query and status messages to RF, from a circle of 50km around your last known position. w, o and i may be of interest, but some people on 2m APRS or APRS-IS may send those packets much too frequently. Please trace the effect! Perhaps in combination with '-e/DB0FRI-10'. In our case, the digi positioning beacon from DB0FRI-10 (which is also an igate nearby, APRS-IS path qAI,DB0FRI-10) came from APRS-IS to us and we gated his beacon, encoded as third-party-trafffic, back to RF (which makes no sense: 1. His direct RF beacon is much better heard than ours -> all RF users heard it. 2. We needless consumed airtime). -> Using -e/IGATE1/IGATE2/.. , everything heard (and sent to APRS-IS) by our neighbor igates like DB0FRI-10 will not be re-gated by us. Please also check, if '-d/..' instead of (or additional to) '-e/..' is more suitiable in your environment; you may also consider -/b/.. ." placeholder="may be left blank">
                   </div>
                   <div>
-                    <label for="tx_aprsis_sm">Send TX status-message to APRS-IS</label>
-                    <input name="tx_aprsis_sm" id="tx_aprsis_sm" type="checkbox" value="1" title="Send APRS-status-message to APRS-IS. This helps you to trace reboots and unexpected loss of wifi- or internet-access.">
+                    <label for="tx_aprsis_sm">Send status-message to APRS-IS</label>
+                    <input name="tx_aprsis_sm" id="tx_aprsis_sm" type="checkbox" value="1" title="Send APRS-status-message about new tcp connectioni, -attepts or your requested shutdown/reboot to APRS-IS. This helps you to trace reboots and unexpected loss of wifi- or internet-access.">
                   </div>
                   <div>
                     <label for="tx_aprsis_bc">Allow send our beacon to APRS-IS</label>
