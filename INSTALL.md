@@ -28,7 +28,7 @@ If you issue "~/.platformio/penv/bin/pio run", it should resolve all dependencie
 thanks to the definitions in the section "lib_deps =".<br/>
 You could (but not need to) install the libraries by hand:
 <br/>
-platformio lib install „<library name>“
+platformio lib install "\<library name\>“
 <br/>
 Check that the platformio.ini is available as it holds the board type for PlatformIO.
 
