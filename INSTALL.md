@@ -24,11 +24,12 @@ Search and install the following libaries:<br/>
 </ul>
 <br>
 <h3>2. Command Line Tool</h3>
-If you issue "~/.platformio/penv/bin/pio run", it should resolve all dependencies automaticaly,
-thanks to the definitions in the section "lib_deps =".<br/>
+If you issue<br/>
+~/.platformio/penv/bin/pio run<br/>
+It should resolve all dependencies automaticaly, thanks to the definitions in the section "lib_deps =".<br/>
 You could (but not need to) install the libraries by hand:
 <br/>
-platformio lib install "\<library name\>“
+platformio lib install "&lt;library name&gt;“
 <br/>
 Check that the platformio.ini is available as it holds the board type for PlatformIO.
 
