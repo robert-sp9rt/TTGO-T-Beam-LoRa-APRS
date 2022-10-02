@@ -32,7 +32,7 @@ platformio lib install „<library name>“
 <br/>
 Check that the platformio.ini is available as it holds the board type for PlatformIO.
 
-<h3>Compile</h3>
+<h2>Compile</h2>
 <ul>
 <li>GUI: After pressing the check mark the code will be compiled, after pressing the arrow it will be compiled and uploaded to a connected TTGO.</li>
 <li>platformio-cli: ~/.platformio/penv/bin/pio run -e ttgo-t-beam-v1.0 -t upload --upload-port /dev/cu.SLAB_USBtoUART</li>
