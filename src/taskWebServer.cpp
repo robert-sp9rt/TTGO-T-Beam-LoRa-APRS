@@ -1210,15 +1210,20 @@ void do_send_status_message_about_connect_to_aprsis(void) {
   #endif
   do_serial_println(log_msg);
 
+  esp_task_wdt_reset();
   aprsis_client.print(outString + "\r\n");
 
   outString.replace(":>", ",RFONLY:>");
   if (lora_tx_enabled && tx_own_beacon_from_this_device_or_fromKiss__to_frequencies) {
+    esp_task_wdt_reset();
     if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies % 2)
       loraSend(txPower, lora_freq, lora_speed, outString);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
+    esp_task_wdt_reset();
     if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies > 1 && lora_digipeating_mode > 1 && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq)
       loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, outString);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
   }
+
+  esp_task_wdt_reset();
   #ifdef KISS_PROTOCOL
     sendToTNC(outString);
   #endif
