@@ -1300,13 +1300,39 @@ String generate_third_party_packet(String callsign, String packet_in) {
   char *p = strchr(s, '>');
   char *q = strchr(s, ',');
   char *r = strchr(s, ':');
-  char fromtodest[20]; // room for max (due to spec) 'DL9SAU-15>APRSXX-NN' + \0
-  if (p > s && p < q && q < r && (q-s) < sizeof(fromtodest)) {
-    r++;
-    strncpy(fromtodest, s, q-s);
-    fromtodest[(q-s)] = 0;
-    packet_out = callsign + ">" + MY_APRS_DEST_IDENTIFYER + ":}" + fromtodest + ",TCPIP," + callsign + "*:" + r;
+  char buf[20]; // room for max (due to spec) 'DL9SAU-15>APRSXX-NN' + \0
+  if (p && q && r && p > s && p-s < 10 && p < q && q < r && (q-s) < sizeof(buf)) {
+    strncpy(buf, s, q-s);
+    buf[(q-s)] = 0;
+    packet_out = callsign + ">" + MY_APRS_DEST_IDENTIFYER + ":}" + buf + ",TCPIP,";
                              // ^ 3rd party traffic should be addressed directly (-> not to WIDE2-1 or so)
+    buf[0] = 0;
+    if ((q = strstr(q+1, ",q")) && q < r) {
+      if ((q = strchr(q+1, ',')) && q < r) {
+        q++;
+        // search for receiving igate: i.e. path...,qAR,DB0AAA:
+        // please note, that AE5PL>APRS,WIDE1*,qAI,AE5PL-10,AE5PL-JS:payload   may also occur
+        char *t = strchr(q, ',');
+        if (!t || t > r)
+          t = r;
+        if (t-q < sizeof(buf)) {
+          strncpy(buf, q, t-q);
+          buf[t-q] = 0;
+        }
+      }
+    }
+    // no qAR,CALL found?
+    if (buf[0] == 0 && p-s < 10) {
+      // add his src callsign
+      strncpy(buf, s, p-s);
+      buf[p-s] = 0;
+    }
+    // should never happen. A really bad packet
+    if (buf[0] == 0) {
+      packet_out = "";
+      return packet_out;
+    }
+    packet_out = packet_out + buf + "*" + r;
   }
   return packet_out;
 }
