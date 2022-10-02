@@ -3055,12 +3055,21 @@ void handle_usb_serial_input(void) {
           Serial.println("*** sending: '" + inputBuf + "'");
           #ifdef KISS_PROTOCOL
             sendToTNC(inputBuf);
+            esp_task_wdt_reset();
+          #endif
+          #if defined(ENABLE_WIFI)
+            send_to_aprsis(inputBuf);
+            esp_task_wdt_reset();
           #endif
           if (lora_tx_enabled) {
-            if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies % 2)
+            if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies % 2) {
               loraSend(txPower, lora_freq, lora_speed, inputBuf);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
-            if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies > 1 && lora_digipeating_mode > 1 && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq)
+              esp_task_wdt_reset();
+            }
+            if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies > 1 && lora_digipeating_mode > 1 && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq) {
               loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, inputBuf);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
+              esp_task_wdt_reset();
+            }
             enableOled(); // enable OLED
             writedisplaytext("((KISSTX))","","","","","");
             time_to_refresh = millis() + showRXTime;
