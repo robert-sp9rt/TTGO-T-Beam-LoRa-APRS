@@ -4,8 +4,7 @@
 2. Install the missing libraries<br>
 There are two possibilities - either using the Library Manager of PlatformIO or the command line tool:<br>
 <h3>1. Built-In Liabrary Manager</h3>
-Press the PlatformIO HOME Button to enter the Home Screen and there the Libraries Button to add missing libraries:<br>
-<img src="img/img1.jpg" width="480"><br/>
+Press the PlatformIO HOME Button to enter the Home Screen and there the Libraries Button to add missing libraries.<br>
 Search and install the following libaries:<br/>
 <ul>
 <li>RadioHead</li>
