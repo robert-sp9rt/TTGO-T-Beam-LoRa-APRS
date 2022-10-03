@@ -1345,11 +1345,38 @@ String generate_third_party_packet(String callsign, String packet_in) {
 
 // read packets from APRSIS
 void read_from_aprsis(void) {
-  uint8_t err = 0;
+  static uint32_t t_last_rxqueue_was_empty = 0L;
+  bool src_call_not_for_rf = false;
+  uint8_t err = 0;;
   String log_msg;
 
-  if (!aprsis_client.connected() || !aprsis_client.available())
+  if (!aprsis_client.connected()) {
+    t_last_rxqueue_was_empty = 0L;
     return;
+  }
+
+  // packet in rx buffer?
+  if (!aprsis_client.available()) {
+    t_last_rxqueue_was_empty = millis();
+    return;
+  }
+  if (t_last_rxqueue_was_empty == 0L)
+     t_last_rxqueue_was_empty = millis();
+
+  // lora transmissions take abt 3-5s. aprs-is can easily flood the channel.
+  // With aprs-filter positions in radius 150km, our queue went so large.
+  // -> if in between 25s the rx-queue did not become empty at least one time, tidy up.
+  if (millis() - t_last_rxqueue_was_empty > 25000L) {
+    // clear queue
+    while (aprsis_client.available()) {
+      String s = aprsis_client.readStringUntil('\n');
+      esp_task_wdt_reset();
+      if (s.isEmpty())
+        break;
+    }
+    t_last_rxqueue_was_empty = millis();
+    return;
+  }
 
   const char *q = 0;
   const char *header_end = 0;
@@ -1400,31 +1427,39 @@ void read_from_aprsis(void) {
                   // SSID optional, only 0..15
                   if (q[2] == '>') {
                     if (q[1] < '0' || q[1] > '9') {
-                      err = 1;
+                      //err = 1;
+                      src_call_not_for_rf = true;
                     } // else: ssid is fine
                   } else if (q[3] == '>') {
                     if (q[1] != '1' || q[2] < '0' || q[2] > '5') {
-                      err = 1;
+                      //err = 1;
+                      src_call_not_for_rf = true;
                     } // else: ssid is fine
                   } else {
-                    err = 1;
+                    //err = 1;
+                    src_call_not_for_rf = true;
                   }
                   if (err) {
                     log_msg = "src-call with bad SSID";
                   }
                 }
               } else {
-                // else: call without ssid is fine
+                // call without ssid is fine
                 if (src_call_end-s.c_str() > 6) {
-                  log_msg = "bad length of call (> 6)!";
-                  err = 1;
+                  //log_msg = "bad length of call (> 6)!";
+                  //err = 1;
+                  src_call_not_for_rf = true;
                 }
+              }
+              if (!err && src_call_end-s.c_str() > 9) {
+                log_msg = "src-call length > 9 breaks APRS standard";
+                err=1;
               }
             }
           }
           if (!err) {
             for (q = s.c_str(); *q && *q != ':'; q++) {
-              if (! (isalnum(*q) || *q == '>' || *q == '-' || *q == ',' || *q == '*') ) {
+              if (! ( (*q >= '0' && *q <= '9') || (*q >= 'A' && *q <= 'Z') || *q == 'q' || *q == '>' || *q == '-' || *q == ',' || *q == '*' ) ) {
                 err = 1;
                 log_msg = "bad character in header";
                 break;
@@ -1478,16 +1513,19 @@ void read_from_aprsis(void) {
         return;
     }
   }
+
   // generate third party packet. Use aprs_callsign (deriving from webServerCfg->callsign), because aprsis_callsign may have a non-aprs (but only aprsis-compatible) ssid like '-L4'
   String third_party_packet = generate_third_party_packet(aprs_callsign, s);
   if (!third_party_packet.isEmpty()) {
     aprsis_status = "OK, fromAPRSIS: " + s + " => " + third_party_packet; aprsis_status.trim();
     if (usb_serial_data_type & 2)
       Serial.println(third_party_packet);
+
+    esp_task_wdt_reset();
 #ifdef KISS_PROTOCOL
     sendToTNC(third_party_packet);
 #endif
-    if (lora_tx_enabled && aprsis_data_allow_inet_to_rf) {
+    if (lora_tx_enabled && aprsis_data_allow_inet_to_rf && !src_call_not_for_rf) {
       // not query or aprs-message addressed to our call (check both, aprs_callsign and aprsis_callsign)
       // Format: "..::DL9SAU-15:..."
       // check is in this code part, because we may like to see those packets via kiss (sent above)
@@ -1496,10 +1534,14 @@ void read_from_aprsis(void) {
           ((!strncmp(q+1, aprs_callsign.c_str(), aprs_callsign.length()) && (aprs_callsign.length() == 9 || q[9] == ' ')) ||
           (!strncmp(q+1, aprsis_callsign.c_str(), aprsis_callsign.length()) && (aprsis_callsign.length() == 9 || q[9] == ' ')) ))
         return;
-      if (aprsis_data_allow_inet_to_rf % 2)
+      if (aprsis_data_allow_inet_to_rf % 2) {
+        esp_task_wdt_reset();
         loraSend(txPower, lora_freq, lora_speed, third_party_packet);
-      if (aprsis_data_allow_inet_to_rf > 1 && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq)
+      }
+      if (aprsis_data_allow_inet_to_rf > 1 && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq) {
         loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, third_party_packet);
+        esp_task_wdt_reset();
+      }
     }
   }
 }
@@ -1532,6 +1574,7 @@ void send_to_aprsis()
         String s_data = String(buf) + (lora_tx_enabled ? ",qAR," : ",qAO,") + aprsis_callsign + q + "\r\n";
         aprsis_status = "OK, toAPRSIS: " + s_data; aprsis_status.trim();
         aprsis_client.print(s_data);
+        esp_task_wdt_reset();
       }
     }
     //aprsis_status = "OK";
