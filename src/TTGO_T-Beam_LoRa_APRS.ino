@@ -130,7 +130,7 @@ uint16_t aprsis_port = 14580;
 String aprsis_filter = "";
 String aprsis_callsign = "";
 String aprsis_password = "-1";
-uint8_t aprsis_data_allow_inet_to_rf = 2;  // 0: disable. 1: gate to main qrg. 2: gate to secondary qrg. 3: gate to both frequencies
+uint8_t aprsis_data_allow_inet_to_rf = 0;  // 0: disable (default). 1: gate to main qrg. 2: gate to secondary qrg. 3: gate to both frequencies
 extern void do_send_status_message_about_reboot_to_aprsis();
 #ifdef T_BEAM_V1_0
 extern void do_send_status_message_about_shutdown_to_aprsis();
@@ -301,7 +301,7 @@ uint32_t reboot_interval = 0L;
 // With "Display dimmer enabled" it will turn OLED off after some time
 // if the checkbox is disabled the display stays OFF
 uint oled_timeout = SHOW_OLED_TIME; // OLED Timeout
-bool tempOled = true; // Turn ON OLED at first startup
+bool display_is_on = true; // Turn ON OLED at first startup
 ulong oled_timer;
 
 // Variable to manually send beacon from html page
@@ -874,9 +874,6 @@ void writedisplaytext(String HeaderTxt, String Line1, String Line2, String Line3
   display.println(Line4);
   display.setCursor(0,56);
   display.println(Line5);
-  if (!enabled_oled){                         // disable oled
-    display.dim(true);
-  }
   display.display();
   // if oled is continuosly on, refresh every second (DL3EL)
   if (oled_timeout == 0) {
@@ -2079,8 +2076,12 @@ void setup()
   sema_lora_chip = false;
 #endif
 
-  // Hold the OLED ON at first boot
-  oled_timer=millis()+oled_timeout;
+  // Hold the OLED ON at first boot.
+  // oled_timeout == 0 is a special case for 'always on'.
+  // If user switches off OLED (enabled_oled == false), but sets oled_timeout to 0 (always on),
+  // we add SHOW_OLED_TIME to timeout (instead of 0), for keep it running for 15s after setup();
+  // if enabled_oled is true and oled_timeout is 0, this does not harm.
+  oled_timer = millis()+ (oled_timeout ? oled_timeout : SHOW_OLED_TIME);
   time_to_refresh = millis() + showRXTime;
 
   writedisplaytext("LoRa-APRS","","Init:","FINISHED OK!","   =:-)   ","");
@@ -2092,13 +2093,15 @@ void setup()
   fillDisplayLine1();
   fillDisplayLine2();
   displayInvalidGPS();
+
   digitalWrite(TXLED, HIGH);
 
 }
 
 void enableOled() {
+  if (!enabled_oled)
+    return;
   // This function enables OLED display after pressing a button
-  tempOled = true;
   oled_timer = millis() + oled_timeout;
 }
 
@@ -2902,9 +2905,10 @@ void handle_usb_serial_input(void) {
             Serial.println("*** display: I know the following commands:");
 #ifdef	ENABLE_WIFI
             Serial.println("  aprsis <on|off>");
-            Serial.println("  beacon     (tx a beacon)");
+            Serial.println("  beacon      (tx a beacon)");
 #endif
-            Serial.println("  converse   (leave with ^C)");
+            Serial.println("  display     (help)");
+            Serial.println("  converse    (leave with ^C)");
             Serial.println("  echo <on|off>");
             Serial.println("  kiss on");
             Serial.println("  logging <on|off>");
@@ -2914,12 +2918,12 @@ void handle_usb_serial_input(void) {
             Serial.println("  shutdown");
 #endif
 #ifdef ENABLE_PREFERENCES
-            Serial.println("  preferences");
+            Serial.println("  preferences (needs to bei implemented)");
 #endif
 #ifdef	ENABLE_WIFI
             Serial.println("  wifi <on|off>");
 #endif
-            Serial.println("  ?");
+            Serial.println("  ?           (help)");
           } else if (cmd == "reboot") {
             Serial.println("*** reboot: rebooting!");
             #if defined(ENABLE_SYSLOG) && defined(ENABLE_WIFI)
@@ -3129,7 +3133,7 @@ void loop()
 
   // Ticker blinks upper left corner to indicate system is running
   // only when OLED is on
-  if (tempOled) {
+  if (display_is_on) {
     display_refresh1s();
   }  
 
@@ -3140,7 +3144,7 @@ void loop()
       delay(300);
       time_delay = millis() + 1500;
       if(digitalRead(BUTTON)==HIGH){
-        if (!tempOled && enabled_oled) {
+        if (!display_is_on && enabled_oled) {
           enableOled(); // turn ON OLED temporary
         } else {
           fillDisplayLines3to5();
@@ -3297,18 +3301,25 @@ void loop()
     sendpacket(SP_POS_GPS);
     manBeacon=false;
   }
-  // Only wake up OLED when necessary, note that DIM is to turn OFF the backlight
-  if (enabled_oled) {
-    if (oled_timeout > 0) {
-      display.dim(!tempOled);
-    } else {
-      // If timeout is 0 keep OLED awake
-      display.dim(false);
-    }
-  }
 
-  if (tempOled && oled_timeout > 0 && millis() >= oled_timer) {
-    tempOled = false; // After some time reset backlight
+  // Only wake up OLED when necessary, note that DIM is to turn OFF the backlight
+  // avoid unnecessary display_dim_calls -> remember dim state
+  if (display_is_on) {
+    if (oled_timeout > 0 && millis() >= oled_timer) {
+      // if enabled_oled is >0: oled_timer switch-of-time reached? -> dim the display
+      // if enabled_oled is 0: if we booted, display is on and oled_timer is set. oled_timer switch-of-time reached? -> dim the display
+      // -> condition is the same. We don't have to look if enabled_oled is true or false.
+      display.dim(true);
+      display_is_on = false;
+      // mark state change
+      oled_timer = 0L;
+    } // else: keep it on, esp. if oled_timeout is set to 0, regardles of oled_timer.
+  } else {
+    // state change of oled timer? switch backlight on, if oled is enabled
+    if (enabled_oled && oled_timer != 0L) {
+      display.dim(false);
+      display_is_on = true;
+    } // else: enabled_oled == false: never turn on. enabled_oled == true and oled_timer == 0L: recently turned off -> also no need to be turned on.
   }
 
   if (digitalRead(BUTTON)==LOW && key_up == false && millis() >= time_delay && t_lock == false) {
