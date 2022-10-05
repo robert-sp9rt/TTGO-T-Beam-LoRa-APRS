@@ -1426,7 +1426,7 @@ void read_from_aprsis(void) {
                 } else {
                   // SSID optional, only 0..15
                   if (q[2] == '>') {
-                    if (q[1] < '0' || q[1] > '9') {
+                    if (q[1] < '1' || q[1] > '9') {
                       //err = 1;
                       src_call_not_for_rf = true;
                     } // else: ssid is fine

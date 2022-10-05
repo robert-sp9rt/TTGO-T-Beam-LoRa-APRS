@@ -1336,7 +1336,13 @@ void setup()
   Serial.begin(115200);
 
   #ifdef BUZZER
-    ledcSetup(0,1E5,12);
+    // framwork-arduinoespressif32 library now warns if frequency is too high:
+    // ledc: requested frequency and duty resolution can not be achieved, try reducing freq_hz or duty_resolution. div_param=50
+    // [E][esp32-hal-ledc.c:75] ledcSetup(): ledc setup failed!
+    // Examples in documentation use 5000. If your buzzer does not work correctly, please find a correct value,
+    // and report us (along with the info which CPU frequency you configured).
+    //ledcSetup(0,1E5,12);
+    ledcSetup(0,5000,12);
     ledcAttachPin(BUZZER,0);
     ledcWriteTone(0,0);  // turn off buzzer on start
   #endif
