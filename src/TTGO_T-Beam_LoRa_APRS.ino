@@ -3422,7 +3422,9 @@ void loop()
       if(shutdown_countdown_timer_enable){
         if(millis() >= shutdown_countdown_timer){
           axp.setChgLEDMode(AXP20X_LED_OFF);
+#ifdef	ENABLE_WIFI
           do_send_status_message_about_shutdown_to_aprsis();
+#endif
           axp.shutdown();
         }
       }
