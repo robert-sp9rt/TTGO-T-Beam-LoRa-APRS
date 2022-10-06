@@ -284,7 +284,7 @@ int point_avg_speed = 0, point_avg_course = 0;
 
 ulong nextTX=60000L;                  // preset time period between TX = 60000ms = 60secs = 1min
 
-ulong time_to_refresh = 0;
+ulong time_to_refresh = 0;            // typical time display lines are shown, before overwritten with new info
 ulong next_fixed_beacon = 75000L;    // first fixed beacon app. 125s after system start (DL3EL)
 ulong fix_beacon_interval = FIX_BEACON_INTERVAL;
 ulong showRXTime = SHOW_RX_TIME;
@@ -486,7 +486,7 @@ out_relay_path:
 
   if (
 #if defined(ENABLE_BLUETOOTH) && defined(KISS_PROTOCOL)
-      SerialBT.hasClient() ||
+      (enable_bluetooth && SerialBT.hasClient()) ||
 #endif
       ((time_last_own_text_message_via_kiss_received + 24*60*60*1000L) > millis())
      )
@@ -810,7 +810,7 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, const Strin
   // we can savely go to sleep
   if (! (lora_rx_enabled || lora_digipeating_mode > 0
           #if defined(ENABLE_BLUETOOTH) && defined(KISS_PROTOCOL)
-            || SerialBT.hasClient()
+            || (enable_bluetooth && SerialBT.hasClient())
           #endif
       ) )
     axp.setPowerOutPut(AXP192_LDO2, AXP202_OFF);                           // switch LoRa chip off
@@ -852,7 +852,9 @@ void writedisplaytext(String HeaderTxt, String Line1, String Line2, String Line3
       #ifdef T_BEAM_V1_0
         axp.setChgLEDMode(AXP20X_LED_OFF);
         //axp.shutdown(); <-we need fix this
-        do_send_status_message_about_shutdown_to_aprsis();
+        #ifdef ENABLE_WIFI
+          do_send_status_message_about_shutdown_to_aprsis();
+        #endif
         axp.shutdown();
       #endif
     }
@@ -976,7 +978,7 @@ String getSatAndBatInfo() {
     line5 = line5 + "/" + charge + "mA";
 #endif
 #if defined(ENABLE_BLUETOOTH) && defined(KISS_PROTOCOL)
-    if (SerialBT.hasClient()) {
+    if (enable_bluetooth && SerialBT.hasClient()) {
       line5 += " BT";
     }
 #endif
@@ -1750,7 +1752,9 @@ void setup()
       preferences.putBool(PREF_DEV_BT_EN_INIT, true);
       preferences.putBool(PREF_DEV_BT_EN, enable_bluetooth);
     }
-    enable_bluetooth = preferences.getBool(PREF_DEV_BT_EN);
+    #ifdef ENABLE_BLUETOOTH
+      enable_bluetooth = preferences.getBool(PREF_DEV_BT_EN);
+    #endif
 
     // remove old usb-serial-debug-log preference (-> switch over)
     if (preferences.getBool(PREF_DEV_LOGTOSERIAL_EN_INIT)){
@@ -1832,7 +1836,174 @@ void setup()
 
 #endif // ENABLE_PEFERENCES
 
-  // We have stored the manual position strring in a higher precision (in case resolution more precise than 18.52m is required; i.e. for base-91 location encoding, or DAO extenstion).
+  pinMode(TXLED, OUTPUT);
+  #ifdef T_BEAM_V1_0
+    pinMode(BUTTON, INPUT);
+  #elif T_BEAM_V0_7
+    pinMode(BUTTON, INPUT);
+  #else
+    pinMode(BUTTON, INPUT_PULLUP);
+  #endif
+  digitalWrite(TXLED, LOW);                                               // turn blue LED off
+
+  Wire.begin(I2C_SDA, I2C_SCL);
+
+  #ifdef T_BEAM_V1_0
+    if (!axp.begin(Wire, AXP192_SLAVE_ADDRESS)) {
+    }
+    axp.setLowTemp(0xFF);                                                 //SP6VWX Set low charging temperature
+    if (lora_rx_enabled || lora_digipeating_mode > 0
+          // no: bluetooth has not been configured at this point
+          // #if defined(ENABLE_BLUETOOTH) && defined(KISS_PROTOCOL)
+          //   || SerialBT.hasClient()
+          // #endif
+        )
+      axp.setPowerOutPut(AXP192_LDO2, AXP202_ON);                            // switch LoRa chip on
+    else
+      axp.setPowerOutPut(AXP192_LDO2, AXP202_OFF);                           // switch LoRa chip off
+    if (gps_state){
+      axp.setPowerOutPut(AXP192_LDO3, AXP202_ON);                           // switch on GPS
+    } else {
+      axp.setPowerOutPut(AXP192_LDO3, AXP202_OFF);                           // switch off GPS
+    }
+    axp.setPowerOutPut(AXP192_DCDC2, AXP202_ON);
+    axp.setPowerOutPut(AXP192_EXTEN, AXP202_OFF);
+    //axp.setPowerOutPut(AXP192_EXTEN, AXP202_ON);				// switch this on if you need it
+    axp.setDCDC1Voltage(3300);
+    // Enable ADC to measure battery current, USB voltage etc.
+    axp.adc1Enable(0xfe, true);
+    axp.adc2Enable(0x80, true);
+    axp.setChgLEDMode(AXP20X_LED_OFF);
+    axp.setPowerOutPut(AXP192_DCDC1, AXP202_ON);                          // oled do not turn off
+  #endif
+
+  // can reduce cpu power consumtion up to 20 %
+  if (adjust_cpuFreq_to > 0)
+    setCpuFrequencyMhz(adjust_cpuFreq_to);
+
+  if(!display.begin(SSD1306_SWITCHCAPVCC, SSD1306_ADDRESS)) {
+      for(;;);                                                             // Don't proceed, loop forever
+  }
+
+
+  Tcall = prepareCallsign(String(CALLSIGN));
+  #ifdef ENABLE_PREFERENCES
+    Tcall = preferences.getString(PREF_APRS_CALLSIGN, "");
+    if (Tcall.isEmpty()){
+      preferences.putString(PREF_APRS_CALLSIGN, String(CALLSIGN));
+      Tcall = preferences.getString(PREF_APRS_CALLSIGN);
+    }
+  #endif
+
+
+  writedisplaytext("LoRa-APRS","by DL9SAU & DL3EL","Build:" + buildnr,"Hello de " + Tcall,"For Factory Reset:","  press middle Button");
+  Serial.println("LoRa-APRS by DL9SAU & DL3EL Build:" + buildnr);
+  delay(2000);
+
+  #ifdef ENABLE_PREFERENCES
+    if (clear_preferences == 2){
+      //#ifdef T_BEAM_V1_0
+        if(digitalRead(BUTTON)==LOW){
+          clear_preferences = 3;
+          preferences.clear();
+          preferences.end();
+          writedisplaytext("LoRa-APRS","","Factory reset","Done!","","");
+          delay(2000);
+          ESP.restart();
+        } else {
+          writedisplaytext("LoRa-APRS","","Factory reset","Cancel","","");
+          delay(2000);
+        }
+      //#endif
+    }
+  #endif
+
+
+  #ifndef T_BEAM_V1_0
+    adc1_config_width(ADC_WIDTH_BIT_12);
+    adc1_config_channel_atten(ADC1_CHANNEL_7,ADC_ATTEN_DB_6);
+  #endif
+  batt_read();
+  writedisplaytext("LoRa-APRS","","Init:","ADC OK!","BAT: "+String(BattVolts,2),"");
+  delay(500);
+
+
+  if (!rf95.init()) {
+    writedisplaytext("LoRa-APRS","","Init:","RF95 FAILED!",":-(","");
+    for(;;); // Don't proceed, loop forever
+  }
+  writedisplaytext("LoRa-APRS","","Init:","RF95 OK!","","");
+
+  // if we are fill-in or wide2 digi, we listen only on configured main frequency
+  lora_speed_rx_curr = (rx_on_frequencies  != 2 || lora_digipeating_mode > 1) ? lora_speed : lora_speed_cross_digi;
+  lora_set_speed(lora_speed_rx_curr);
+  // prefix with KISS_END
+  Serial.printf("LoRa Speed:\t%lu\r\n", lora_speed_rx_curr);
+
+  lora_freq_rx_curr = (rx_on_frequencies  != 2 || lora_digipeating_mode > 1) ? lora_freq : lora_freq_cross_digi;
+  rf95.setFrequency(lora_freq_rx_curr);
+  Serial.printf("LoRa FREQ:\t%f\r\n", lora_freq_rx_curr);
+
+  // we tx on main and/or secondary frequency. For tx, loraSend is called (and always has desired txpower as argument)
+  rf95.setTxPower((lora_digipeating_mode < 2 || lora_cross_digipeating_mode < 1) ? txPower : txPower_cross_digi);
+  delay(500);
+
+
+  // Avoid concurrent access of processes to lora our chip
+#ifdef IF_SEMAS_WOULD_WORK
+  sema_lora_chip = xSemaphoreCreateBinary();
+#else
+  sema_lora_chip = false;
+#endif
+
+
+  // https://www.tutorialspoint.com/esp32_for_iot/esp32_for_iot_spiffs_storage.htm
+  // Launch SPIFFS file system
+  if (SPIFFS.begin(FORMAT_SPIFFS_IF_FAILED)) {
+    Serial.println("SPIFFS Mount Success");
+    //debug:
+    //listDir(SPIFFS, "/", 0);
+#ifdef ENABLE_WIFI
+    // read wifi.cfg file, interprete the json and assign some of our global variables
+    readFile(SPIFFS, "/wifi.cfg");
+#endif
+    SPIFFS.end();
+  } else {
+    Serial.println("SPIFFS Mount Failed");
+  }
+
+
+  // LORA32_21: bug in hardware. cannot run bluetooth and wifi concurrently.
+  // We wait for a bt-client connecting, up to 60s. If none connected,
+
+  // new process: GPS
+  if (gps_state) {
+    writedisplaytext(Tcall,"","Init:","Waiting for GPS","","");
+    xTaskCreate(taskGPS, "taskGPS", 5000, nullptr, 1, nullptr);
+    writedisplaytext(Tcall,"","Init:","GPS Task Created!","","");
+  }
+
+  // new process: TNC
+  #ifdef KISS_PROTOCOL
+    xTaskCreatePinnedToCore(taskTNC, "taskTNC", 10000, nullptr, 1, nullptr, xPortGetCoreID());
+  #endif
+
+
+  // We could start process webServer here.
+  // But:
+  //  - webserver and bluetooth do not work in parallel on some devices.
+  //  - webserver needs some variables to be set correctly if it starts up
+  //    (and web client requests them).
+  // -> We do the variable stuff first, and right before end of setup(),
+  //    we start the webserver (if needed)
+
+
+
+  if (sb_max_interval < nextTX){
+    sb_max_interval=nextTX;
+  }
+
+  // We have stored the manual position string in a higher precision (in case resolution more precise than 18.52m is required; i.e. for base-91 location encoding, or DAO extenstion).
   // Furthermore, 53-32.1234N is more readable in the Web-interface than 5232.1234N
   aprsLatPreset.toUpperCase(); aprsLatPreset.replace(",", "."); aprsLatPreset.trim();
   if (aprsLatPreset.length() == 11 && aprsLatPreset.indexOf('-') == 2 && aprsLatPreset.indexOf(' ') == -1 && (aprsLatPreset.endsWith("N") || aprsLatPreset.endsWith("S"))) {
@@ -1864,135 +2035,16 @@ void setup()
   for (int i=0;i<ANGLE_AVGS;i++) {                                        // set average_course to "0"
     average_course[i]=0;
   }
-
-  pinMode(TXLED, OUTPUT);
-  #ifdef T_BEAM_V1_0
-    pinMode(BUTTON, INPUT);
-  #elif T_BEAM_V0_7
-    pinMode(BUTTON, INPUT);
-  #else
-    pinMode(BUTTON, INPUT_PULLUP);
-  #endif
-  digitalWrite(TXLED, LOW);                                               // turn blue LED off
-
-  Wire.begin(I2C_SDA, I2C_SCL);
-
-  #ifdef T_BEAM_V1_0
-    if (!axp.begin(Wire, AXP192_SLAVE_ADDRESS)) {
-    }
-    axp.setLowTemp(0xFF);                                                 //SP6VWX Set low charging temperature
-    if (lora_rx_enabled || lora_digipeating_mode > 0
-          #if defined(ENABLE_BLUETOOTH) && defined(KISS_PROTOCOL)
-            || SerialBT.hasClient()
-          #endif
-        )
-      axp.setPowerOutPut(AXP192_LDO2, AXP202_ON);                            // switch LoRa chip on
-    else
-      axp.setPowerOutPut(AXP192_LDO2, AXP202_OFF);                           // switch LoRa chip off
-    if (gps_state){
-      axp.setPowerOutPut(AXP192_LDO3, AXP202_ON);                           // switch on GPS
-    } else {
-      axp.setPowerOutPut(AXP192_LDO3, AXP202_OFF);                           // switch off GPS
-    }
-    axp.setPowerOutPut(AXP192_DCDC2, AXP202_ON);
-    axp.setPowerOutPut(AXP192_EXTEN, AXP202_OFF);
-    //axp.setPowerOutPut(AXP192_EXTEN, AXP202_ON);				// switch this on if you need it
-    axp.setDCDC1Voltage(3300);
-    // Enable ADC to measure battery current, USB voltage etc.
-    axp.adc1Enable(0xfe, true);
-    axp.adc2Enable(0x80, true);
-    axp.setChgLEDMode(AXP20X_LED_OFF);
-    axp.setPowerOutPut(AXP192_DCDC1, AXP202_ON);                          // oled do not turn off
-  #endif
-  // can reduce cpu power consumtion up to 20 %
-  if (adjust_cpuFreq_to > 0)
-    setCpuFrequencyMhz(adjust_cpuFreq_to);
-
-  if(!display.begin(SSD1306_SWITCHCAPVCC, SSD1306_ADDRESS)) {
-      for(;;);                                                             // Don't proceed, loop forever
-  }
-  //writedisplaytext("LoRa-APRS","","Init:","Display OK!","","");
-
-  writedisplaytext("LoRa-APRS","by DL9SAU & DL3EL","Build:" + buildnr, "Factory reset","press","Button");
-  Serial.println("LoRa-APRS by DL9SAU & DL3EL Build:" + buildnr);
-  delay(2000);
-
-  #ifdef ENABLE_PREFERENCES
-    if (clear_preferences == 2){
-      //#ifdef T_BEAM_V1_0
-        if(digitalRead(BUTTON)==LOW){
-          clear_preferences = 3;
-          preferences.clear();
-          preferences.end();
-          writedisplaytext("LoRa-APRS","","Factory reset","Done!","","");
-          delay(2000);
-          ESP.restart();
-        } else {
-          writedisplaytext("LoRa-APRS","","Factory reset","Cancel","","");
-          delay(2000);
-        }
-      //#endif
-    }
-  #endif
-
-  Tcall = prepareCallsign(String(CALLSIGN));
-  #ifdef ENABLE_PREFERENCES
-    Tcall = preferences.getString(PREF_APRS_CALLSIGN, "");
-    if (Tcall.isEmpty()){
-      preferences.putString(PREF_APRS_CALLSIGN, String(CALLSIGN));
-      Tcall = preferences.getString(PREF_APRS_CALLSIGN);
-    }
-  #endif
-
-  if (!rf95.init()) {
-    writedisplaytext("LoRa-APRS","","Init:","RF95 FAILED!",":-(","");
-    for(;;); // Don't proceed, loop forever
-  }
-
-  if (sb_max_interval < nextTX){
-    sb_max_interval=nextTX;
-  }
+  //lastTxdistance  = 0;
 
   // we need this assurance for failback to fixed interval, if gps position is lost.
   // fixed beacon rate higher than sb_max_interval does not make sense
   if (!fixed_beacon_enabled && gps_state && fix_beacon_interval < sb_max_interval)
     fix_beacon_interval = sb_max_interval;
 
-  writedisplaytext("LoRa-APRS","","Init:","RF95 OK!","","");
-  writedisplaytext(Tcall,"","Init:","Waiting for GPS","","");
-  xTaskCreate(taskGPS, "taskGPS", 5000, nullptr, 1, nullptr);
-  writedisplaytext(Tcall,"","Init:","GPS Task Created!","","");
-  #ifndef T_BEAM_V1_0
-    adc1_config_width(ADC_WIDTH_BIT_12);
-    adc1_config_channel_atten(ADC1_CHANNEL_7,ADC_ATTEN_DB_6);
-  #endif
-  batt_read();
-  writedisplaytext("LoRa-APRS","","Init:","ADC OK!","BAT: "+String(BattVolts,2),"");
 
-  // Just to be sure: send KISS FEND before logging
-  
-  // if we are fill-in or wide2 digi, we listen only on configured main frequency
-  lora_speed_rx_curr = (rx_on_frequencies  != 2 || lora_digipeating_mode > 1) ? lora_speed : lora_speed_cross_digi;
-  lora_set_speed(lora_speed_rx_curr);
-  // prefix with KISS_END
-  Serial.printf("LoRa Speed:\t%lu\r\n", lora_speed_rx_curr);
-
-  lora_freq_rx_curr = (rx_on_frequencies  != 2 || lora_digipeating_mode > 1) ? lora_freq : lora_freq_cross_digi;
-  rf95.setFrequency(lora_freq_rx_curr);
-  Serial.printf("LoRa FREQ:\t%f\r\n", lora_freq_rx_curr);
-
-  // we tx on main and/or secondary frequency. For tx, loraSend is called (and always has desired txpower as argument)
-  rf95.setTxPower((lora_digipeating_mode < 2 || lora_cross_digipeating_mode < 1) ? txPower : txPower_cross_digi);
-  delay(250);
-  #ifdef KISS_PROTOCOL
-    xTaskCreatePinnedToCore(taskTNC, "taskTNC", 10000, nullptr, 1, nullptr, xPortGetCoreID());
-  #endif
-
-
+  // Now we are prepared to start the webserver process. First, we may start bluetooth.
 #if defined(KISS_PROTOCOL) && defined(ENABLE_BLUETOOTH)
-  // LORA32_21: bug in hardware. cannot run bluetooth and wifi concurrently.
-  // We wait for a bt-client connecting, up to 60s. If none connected,
-  // we start the webserver.
   // TTGO: webserver cunsumes abt 80mA. User may not start the webserver
   // if bt-client is connected. We'll also wait herefor clients.
   // If enable_webserver on LORA32_21 is set to 2, user
@@ -2006,7 +2058,6 @@ void setup()
 #else
   if (enable_bluetooth) {
 #endif /* ENABLE_WIFI */
-
 #ifdef BLUETOOTH_PIN
     SerialBT.setPin(BLUETOOTH_PIN);
 #endif
@@ -2027,6 +2078,7 @@ void setup()
   #if defined(LORA32_21)
         writedisplaytext("LoRa-APRS","","Init:","Waiting for BT-client","Disabling BT!","");
         SerialBT.end();
+	enable_bluetooth = false;
   #endif
       } else {
         writedisplaytext("LoRa-APRS","","Init:","Waiting for BT-clients","BT-client connected","Will NOT start WiFi!");
@@ -2037,29 +2089,17 @@ void setup()
   }
 #endif /* KISS_PROTOCOL && ENABLE_BLUETOOTH */
 
+
 #ifdef ENABLE_WIFI
-  // https://www.tutorialspoint.com/esp32_for_iot/esp32_for_iot_spiffs_storage.htm
-  // Launch SPIFFS file system
-  if (!SPIFFS.begin(FORMAT_SPIFFS_IF_FAILED)){
-    Serial.println("SPIFFS Mount Failed");
-  } else {
-   Serial.println("SPIFFS Mount Success");
-  }
-
-  //debug:
-  //listDir(SPIFFS, "/", 0);
-
-  // read wifi.cfg file, interprete the json and assign some of our global variables
-  readFile(SPIFFS, "/wifi.cfg");
-
   if (enable_webserver) {
 #if defined(KISS_PROTOCOL) && defined(ENABLE_BLUETOOTH)
     // if enabble_webserver == 2 or (enable_webserver == 1 && (no serial-bt-client is connected OR aprs-is-connecion configuried)
-    if (enable_webserver > 1 || aprsis_enabled || !SerialBT.hasClient()) {
+    if (enable_webserver > 1 || aprsis_enabled || (enable_bluetooth && !SerialBT.hasClient())) {
 #else
     {
 #endif /* KISS_PROTOCOL && ENABLE_BLUETOOTH */
       webServerCfg = {.callsign = Tcall};
+      // new process: TNC
       xTaskCreate(taskWebServer, "taskWebServer", 12000, (void*)(&webServerCfg), 1, nullptr);
       webserverStarted = true;
       writedisplaytext("LoRa-APRS","","Init:","WiFi task started","   =:-)   ","");
@@ -2074,34 +2114,27 @@ void setup()
   }
 #endif /* ENABLE_WIFI */
 
-  //lastTxdistance  = 0;
 
-#ifdef IF_SEMAS_WOULD_WORK
-  sema_lora_chip = xSemaphoreCreateBinary();
-#else
-  sema_lora_chip = false;
-#endif
+  esp_task_wdt_init(120, true); //enable panic so ESP32 restarts
+  esp_task_wdt_add(NULL); //add current thread to WDT watch
+
 
   // Hold the OLED ON at first boot.
   // oled_timeout == 0 is a special case for 'always on'.
   // If user switches off OLED (enabled_oled == false), but sets oled_timeout to 0 (always on),
   // we add SHOW_OLED_TIME to timeout (instead of 0), for keep it running for 15s after setup();
   // if enabled_oled is true and oled_timeout is 0, this does not harm.
-  oled_timer = millis()+ (oled_timeout ? oled_timeout : SHOW_OLED_TIME);
+  oled_timer = millis() + (oled_timeout ? oled_timeout : SHOW_OLED_TIME);
   time_to_refresh = millis() + showRXTime;
 
   writedisplaytext("LoRa-APRS","","Init:","FINISHED OK!","   =:-)   ","");
   //  writedisplaytext("","","","","","");
-
-  esp_task_wdt_init(120, true); //enable panic so ESP32 restarts
-  esp_task_wdt_add(NULL); //add current thread to WDT watch
 
   fillDisplayLine1();
   fillDisplayLine2();
   displayInvalidGPS();
 
   digitalWrite(TXLED, HIGH);
-
 }
 
 void enableOled() {
@@ -3020,8 +3053,9 @@ void handle_usb_serial_input(void) {
                 if (!webserverStarted) {
                   enable_webserver = 1;
                   #if defined(LORA32_21) && defined(ENABLE_BLUETOOTH)
-                    // lora32_21 hardware bug: btt and wifi are mutual exclusive
+                    // lora32_21 hardware bug: bt and wifi are mutual exclusive
                     SerialBT.end();
+                    enable_bluetooth = false;
                     delay(100);
                   #endif
                   esp_task_wdt_reset();
@@ -3338,8 +3372,9 @@ void loop()
     if (!webserverStarted) {
       enable_webserver = 1;
       #if defined(LORA32_21) && defined(ENABLE_BLUETOOTH)
-        // lora32_21 hardware bug: btt and wifi are mutual exclusive
+        // lora32_21 hardware bug: bt and wifi are mutual exclusive
         SerialBT.end();
+        enable_bluetooth = false;
         delay(100);
       #endif
       esp_task_wdt_reset();
@@ -3464,7 +3499,7 @@ void loop()
               dont_send_own_position_packets = true;
               // TODO: there are also tcp kiss devices. Instead of 'kiss_client_came_via_bluetooth', we should mark it in a session struct where we can iterate through
 #ifdef ENABLE_BLUETOOTH
-              if (SerialBT.hasClient())
+              if (enable_bluetooth && SerialBT.hasClient())
                 kiss_client_came_via_bluetooth = true;
 #endif
             }
@@ -4012,7 +4047,8 @@ behind_position_tx:
 
         Serial.print(encapsulateKISS(debug_message, CMD_HARDWARE));
         #ifdef ENABLE_BLUETOOTH
-          SerialBT.print(encapsulateKISS(debug_message, CMD_HARDWARE));
+          if (enable_bluetooth)
+            SerialBT.print(encapsulateKISS(debug_message, CMD_HARDWARE));
         #endif
       }
     #endif
