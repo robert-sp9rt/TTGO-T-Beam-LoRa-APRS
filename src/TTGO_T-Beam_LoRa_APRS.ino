@@ -218,6 +218,8 @@ boolean always_send_cseSpd_AND_altitude = false;
 // We'll use "min", "low", "mid", "high", "max" -> 2dBm (1.5mW) -> 8, 11dBm (12mW) -> 44, 15dBm (32mW) -> 60, 18dBm (63mW) ->72, 20dBm (100mW) ->80
   int8_t wifi_txpwr_mode_AP = 8;
   int8_t wifi_txpwr_mode_STA = 80;
+  String preferences_as_jsonData;
+  extern void refill_preferences_as_jsonData();
 #endif
 #ifdef ENABLE_OLED
   boolean enabled_oled = true;
@@ -319,11 +321,15 @@ int8_t wifi_connection_status_prev = -1;
 String infoApName = "";
 String infoApPass = "";
 String infoIpAddr = "";
-// für SPIFFS WLAN Credentials
+// for SPIFFS WLAN Credentials
+String stdApName = "";
+String stdApPass = "";
 String safeApName = "";
 String safeApPass = "";
 #endif
 
+#define JSON_MAX_FILE_SIZE 2560
+static StaticJsonDocument<JSON_MAX_FILE_SIZE> JSONBuffer;                         //Memory pool
 
 #define ANGLE_AVGS 3                  // angle averaging - x times
 float average_course[ANGLE_AVGS];
@@ -697,6 +703,8 @@ void send_to_aprsis(const String &s)
 #endif
 
 
+#define LORA_FLAGS_NODELAY 1
+
 void sendpacket(uint8_t sp_flags){
   if (sendpacket_was_called_twice)
     return;
@@ -708,9 +716,9 @@ void sendpacket(uint8_t sp_flags){
   prepareAPRSFrame(sp_flags);
   if (lora_tx_enabled && tx_own_beacon_from_this_device_or_fromKiss__to_frequencies) {
     if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies % 2)
-      loraSend(txPower, lora_freq, lora_speed, outString);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
+      loraSend(txPower, lora_freq, lora_speed, (sp_flags & SP_ENFORCE_COURSE) ? LORA_FLAGS_NODELAY : 0, outString);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
     if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies > 1 && lora_digipeating_mode > 1 && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq)
-      loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, outString);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
+      loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, (sp_flags & SP_ENFORCE_COURSE) ? LORA_FLAGS_NODELAY : 0, outString);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
   }
 #if defined(ENABLE_WIFI)
   if (tx_own_beacon_from_this_device_or_fromKiss__to_aprsis)
@@ -725,9 +733,12 @@ void sendpacket(uint8_t sp_flags){
  * @param lora_LTXPower
  * @param lora_FREQ
  * @param lora_SPEED
+ * @param flags
  * @param message
  */
-void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, const String &message) {
+
+
+void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, uint8_t flags, const String &message) {
   int n;
 
   if (!lora_tx_enabled)
@@ -765,6 +776,10 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, const Strin
   for (n = 0; n < 30; n++) {
     esp_task_wdt_reset();
     delay(wait_for_signal);
+    if (n == 1 && (flags & LORA_FLAGS_NODELAY)) {
+      // send without delay (on turn), we may wait one round for checking ifg channel is free
+      break;
+    }
     if (rf95.SignalDetected()) {
       continue;
     }
@@ -1250,19 +1265,60 @@ void listDir(fs::FS &fs, const char * dirname, uint8_t levels) {
    root.close();
 }
 
+
+// write configuration to file
+int writeFile(fs::FS &fs, const String &callername, const char *filename, const String &jsonData) {
+  File file = fs.open(filename, FILE_WRITE);
+  int ret = 0;
+  if (!file) {
+    do_serial_println(callername + ": failed to open file for writing");
+    return -2;
+  }
+  if (file.print(jsonData)) {
+    do_serial_println(callername + ": file written");
+  } else {
+    do_serial_println(callername + ": write failed");
+    ret = -3;
+  }
+  file.close();
+  return ret;
+}
+
+int save_to_file(const String &callername, const char *filename, const String &jsonData) {
+  int err = 0;
+  if (SPIFFS.begin(FORMAT_SPIFFS_IF_FAILED)) {
+    err = writeFile(SPIFFS, callername, filename, jsonData);
+    SPIFFS.end();
+  } else {
+    do_serial_println(callername + ": SPIFFS Mount failed, nothing written.");
+    Serial.println("SPIFFS Mount Failed");
+    err = -1;
+  }
+  return err;
+}
+
+
+
 // readFile - is more than reading a file from flash. It reads and parses json data in the file and assigns some of our variables.
 // The correct function name would be readFile_parseJson_and_assignVariable(). This is would be too ugly.
-void readFile(fs::FS &fs, const char * filename) {
-  #define JSON_MAX_FILE_SIZE 256
+boolean readFile(fs::FS &fs, const char *filename) {
+  //#define JSON_MAX_FILE_SIZE 256ß
+  //static StaticJsonDocument<JSON_MAX_FILE_SIZE> JSONBuffer;                         //Memory pool
+  //best would be, that readFile returns a pointer to the local JSONBuffer on success, else NULL
+  boolean err = false;
+  char JSONMessage[JSON_MAX_FILE_SIZE];
 
-  File file = fs.open(filename);
-  if(!file || file.isDirectory()){
+  File file = fs.open(filename, FILE_READ);
+  if (!file) {
     Serial.printf("readFile: failed to open file %s for reading\r\n", filename);
-    return;
+    return false;
+  }
+  if (file.isDirectory()) {
+    Serial.printf("readFile: %s is a directory, not a file\r\n", filename);
+    file.close();
+    return false;
   }
   Serial.printf("readFile: opened file %s for reading\r\n", filename);
-
-  char JSONMessage[JSON_MAX_FILE_SIZE];
 
   int pos = 0;
   for (; pos < JSON_MAX_FILE_SIZE-1; pos++) {
@@ -1272,29 +1328,53 @@ void readFile(fs::FS &fs, const char * filename) {
   }
   JSONMessage[pos] = 0;
 
+  // uncomment if you need to see the content of the data on SPIFFS
+  // Serial.printf("readFile, content: [%s]\r\n", JSONMessage);
+
   if (file.size() > JSON_MAX_FILE_SIZE) {
-    Serial.printf("readFile: Warning, file too big: %d Byte (max: %d)\r\n",file.size(), JSON_MAX_FILE_SIZE);
+    Serial.printf("readFile: Warning, file too big: %d Byte (max: %d)\r\n", file.size(), JSON_MAX_FILE_SIZE);
   }
 
    
   //https://arduinojson.org/v6/doc/upgrade/
-  StaticJsonDocument<JSON_MAX_FILE_SIZE> JSONBuffer;                         //Memory pool
  
   auto error = deserializeJson(JSONBuffer, JSONMessage);
   if (error) {
     Serial.print(F("deserializeJson() failed with code "));
     Serial.println(error.c_str());
+    err = true;
     goto end;
   }
 
 #ifdef	ENABLE_WIFI
   if (!strcmp(filename, "/wifi.cfg")) {
-    if (JSONBuffer.containsKey("SSID") && JSONBuffer.containsKey("password")) {
-      const char *p;
-      if ((p = JSONBuffer["SSID"]))
+    const char *p;
+    if (JSONBuffer.containsKey("SSID1") && JSONBuffer.containsKey("password1")) {
+      if ((p = JSONBuffer["SSID1"]))
         safeApName = String(p);
-      if ((p = JSONBuffer["password"]))
+      if ((p = JSONBuffer["password1"]))
         safeApPass = String(p);
+    }
+    if (JSONBuffer.containsKey("SSID2") && JSONBuffer.containsKey("password2")) {
+      if ((p = JSONBuffer["SSID2"]))
+        safeApName = String(p);
+      if ((p = JSONBuffer["password2"]))
+        safeApPass = String(p);
+    }
+
+    if (JSONBuffer.containsKey("ap_password") && (p = JSONBuffer["ap_password"]) && strlen(p) >= 8) {
+      Serial.printf("SelfAp PW: %s\r\n", p);
+      infoApPass = String(p);
+    } else {
+      Serial.printf("SelfAp PW missing: %s\r\n", p);
+    }
+
+    if (!stdApName.length() || stdApPass.length() < 8 || stdApName == "EnterSSIDofYourAccesspoint") {
+      Serial.println("SSID: " + stdApName + " missing or PW: " + stdApPass + " < 8 Byte, Filesize: " + String(file.size()));
+      stdApName = "";
+      stdApPass = "";
+    } else {
+      Serial.println("SSID: " + stdApName + ", PW: " + stdApPass + ", Filesize: " + String(file.size()));
     }
 
     if (!safeApName.length() || safeApPass.length() < 8 || safeApName == "EnterSSIDofYourAccesspoint") {
@@ -1303,74 +1383,176 @@ void readFile(fs::FS &fs, const char * filename) {
       safeApPass = "";
     } else {
       Serial.println("Fallback SSID: " + safeApName + ", PW: " + safeApPass + ", Filesize: " + String(file.size()));
-    }  
-  } else {
-#else
-  {
-#endif // ENABLE_WIFI
-    Serial.printf("Found file '%s', parsed it successfully, but I don't know what to do with the json data ;)!\r\n", filename);
+    }
+    goto end;
   }
+#endif // ENABLE_WIFI
+  if (!strcmp(filename, "/preferences.cfg")) {
+    if (JSONBuffer.containsKey(PREF_APRS_CALLSIGN)) {
+      Serial.printf("Checked preferences.cfg: is ok. Found %s: %s. Filesize: %d\r\n", PREF_APRS_CALLSIGN, JSONBuffer[PREF_APRS_CALLSIGN], file.size());
+      Serial.println("Preferences: reading from /preferences.cfg");
+      load_preferences_cfg_file();
+    } else {
+      Serial.println("Preferences: /preferences.cfg not available, using default values from flash");
+      err = true;
+    }
+    goto end;
+  }
+  Serial.printf("Found file '%s', parsed it successfully, but I don't know what to do with the json data ;)!\r\n", filename);
+  err = true;
 
 end:
   Serial.println("readFile: end");
   file.close();
+  if (err)
+    return false;
+
+  return true;
 }
 
 
-// + SETUP --------------------------------------------------------------+//
-void setup()
+
+String jsonElementFromPreferenceCFGString(const char *preferenceName, const char *preferenceNameInit){
+  const char *p;
+  String value;
+  if ((p = JSONBuffer[preferenceName])) value = String(p);
+  //if (preferenceNameInit) preferences.putBool(preferenceNameInit, true);
+  //preferences.putString(preferenceName, value);
+  Serial.println("getPreferences.cfg " + String(preferenceName) + ": " + value);
+  return value;
+}
+
+int jsonElementFromPreferenceCFGInt(const char *preferenceName, const char *preferenceNameInit){
+  int value_int = JSONBuffer[preferenceName];
+  //if (preferenceNameInit) preferences.putBool(preferenceNameInit, true);
+  //preferences.putInt(preferenceName, value);
+  Serial.println("getPreferences.cfg " + String(preferenceName) + ": " + String(value_int));
+  return value_int;
+}
+
+double jsonElementFromPreferenceCFGDouble(const char *preferenceName, const char *preferenceNameInit){
+  double value_d = JSONBuffer[preferenceName];
+  //if (preferenceNameInit) preferences.putBool(preferenceNameInit, true);
+  //preferences.putDouble(preferenceName, value);
+  Serial.printf("getPreferences.cfg %s: %8.4f\n",preferenceName,value_d);
+  return value_d;
+}
+
+boolean jsonElementFromPreferenceCFGBool(const char *preferenceName, const char *preferenceNameInit){
+  boolean value_b = JSONBuffer[preferenceName];;
+  //if (preferenceNameInit) preferences.putBool(preferenceNameInit, true);
+  //preferences.putBool(preferenceName, value);
+  Serial.printf("getPreferences.cfg %s: %d\n",preferenceName,value_b);
+  return value_b;
+}
+
+
+void load_preferences_cfg_file()
 {
+  String s = "";
 
-  // Our BUILD_NUMBER. The define is not available in the WEBSERVR -> we need to assign a global variable
-  buildnr = BUILD_NUMBER;
+#ifdef ENABLE_WIFI
+  enable_webserver = jsonElementFromPreferenceCFGInt(PREF_WIFI_ENABLE,PREF_WIFI_ENABLE_INIT);
+  tncServer_enabled = jsonElementFromPreferenceCFGBool(PREF_TNCSERVER_ENABLE,PREF_TNCSERVER_ENABLE_INIT);
+  gpsServer_enabled = jsonElementFromPreferenceCFGBool(PREF_GPSSERVER_ENABLE,PREF_GPSSERVER_ENABLE_INIT);
+  wifi_do_failback_to_mode_AP = jsonElementFromPreferenceCFGBool(PREF_WIFI_STA_ALLOW_FAILBACK_TO_MODE_AP_AFTER_ONCE_CONNECTED,PREF_WIFI_STA_ALLOW_FAILBACK_TO_MODE_AP_AFTER_ONCE_CONNECTED_INIT);
+  wifi_txpwr_mode_AP = jsonElementFromPreferenceCFGInt(PREF_WIFI_TXPWR_MODE_AP,PREF_WIFI_TXPWR_MODE_AP_INIT);
+  wifi_txpwr_mode_STA = jsonElementFromPreferenceCFGInt(PREF_WIFI_TXPWR_MODE_STA,PREF_WIFI_TXPWR_MODE_STA_INIT);
+  s = jsonElementFromPreferenceCFGString(PREF_SYSLOG_SERVER,0);
+  preferences.putString(PREF_SYSLOG_SERVER, s);
+  s = jsonElementFromPreferenceCFGString(PREF_NTP_SERVER,0);
+  preferences.putString(PREF_NTP_SERVER, s);
 
-#ifdef T_BEAM_V0_7 /*
-  adcAttachPin(35);
-  adcStart(35);
-  analogReadResolution(10);
-  analogSetAttenuation(ADC_6db); */
-  pinMode(35, INPUT);
-  //adc1_config_width(ADC_WIDTH_BIT_12);
-  //adc1_config_channel_atten(ADC1_CHANNEL_7,ADC_ATTEN_DB_11);
+#endif // ENABLE_WIFI
+  lora_freq = jsonElementFromPreferenceCFGDouble(PREF_LORA_FREQ_PRESET,PREF_LORA_FREQ_PRESET_INIT);
+  lora_speed = jsonElementFromPreferenceCFGInt(PREF_LORA_SPEED_PRESET,PREF_LORA_SPEED_PRESET_INIT);
+  lora_rx_enabled = jsonElementFromPreferenceCFGBool(PREF_LORA_RX_ENABLE,PREF_LORA_RX_ENABLE_INIT);
+  lora_tx_enabled = jsonElementFromPreferenceCFGBool(PREF_LORA_TX_ENABLE,PREF_LORA_TX_ENABLE_INIT);
+  txPower = jsonElementFromPreferenceCFGInt(PREF_LORA_TX_POWER,PREF_LORA_TX_POWER_INIT);
+  lora_automatic_cr_adaption = jsonElementFromPreferenceCFGBool(PREF_LORA_AUTOMATIC_CR_ADAPTION_PRESET,PREF_LORA_AUTOMATIC_CR_ADAPTION_PRESET_INIT);
+  lora_add_snr_rssi_to_path = jsonElementFromPreferenceCFGInt(PREF_LORA_ADD_SNR_RSSI_TO_PATH_PRESET,PREF_LORA_ADD_SNR_RSSI_TO_PATH_PRESET_INIT);
+  kiss_add_snr_rssi_to_path_at_position_without_digippeated_flag = jsonElementFromPreferenceCFGBool(PREF_LORA_ADD_SNR_RSSI_TO_PATH_END_AT_KISS_PRESET,PREF_LORA_ADD_SNR_RSSI_TO_PATH_END_AT_KISS_PRESET_INIT);
+  lora_digipeating_mode = jsonElementFromPreferenceCFGBool(PREF_APRS_DIGIPEATING_MODE_PRESET,PREF_APRS_DIGIPEATING_MODE_PRESET_INIT);
+  lora_cross_digipeating_mode = jsonElementFromPreferenceCFGInt(PREF_APRS_CROSS_DIGIPEATING_MODE_PRESET,PREF_APRS_CROSS_DIGIPEATING_MODE_PRESET_INIT);
+  tx_own_beacon_from_this_device_or_fromKiss__to_frequencies = jsonElementFromPreferenceCFGInt(PREF_LORA_TX_BEACON_AND_KISS_TO_FREQUENCIES_PRESET,PREF_LORA_TX_BEACON_AND_KISS_TO_FREQUENCIES_PRESET_INIT);
+  send_status_message_to_aprsis = jsonElementFromPreferenceCFGBool(PREF_LORA_TX_STATUSMESSAGE_TO_APRSIS_PRESET,PREF_LORA_TX_STATUSMESSAGE_TO_APRSIS_PRESET_INIT);
+  tx_own_beacon_from_this_device_or_fromKiss__to_aprsis = jsonElementFromPreferenceCFGBool(PREF_LORA_TX_BEACON_AND_KISS_TO_APRSIS_PRESET,PREF_LORA_TX_BEACON_AND_KISS_TO_APRSIS_PRESET_INIT);
+  lora_freq_cross_digi = jsonElementFromPreferenceCFGDouble(PREF_LORA_FREQ_CROSSDIGI_PRESET,PREF_LORA_FREQ_CROSSDIGI_PRESET_INIT);
+  lora_speed_cross_digi = jsonElementFromPreferenceCFGInt(PREF_LORA_SPEED_CROSSDIGI_PRESET,PREF_LORA_SPEED_CROSSDIGI_PRESET_INIT);
+  txPower_cross_digi = jsonElementFromPreferenceCFGInt(PREF_LORA_TX_POWER_CROSSDIGI_PRESET,PREF_LORA_TX_POWER_CROSSDIGI_PRESET_INIT);
+  rx_on_frequencies = jsonElementFromPreferenceCFGInt(PREF_LORA_RX_ON_FREQUENCIES_PRESET,PREF_LORA_RX_ON_FREQUENCIES_PRESET_INIT);
+
+  aprsSymbolTable = jsonElementFromPreferenceCFGString(PREF_APRS_SYMBOL_TABLE,0);
+  aprsSymbol = jsonElementFromPreferenceCFGString(PREF_APRS_SYMBOL,0);
+  aprsComment = jsonElementFromPreferenceCFGString(PREF_APRS_COMMENT,PREF_APRS_COMMENT_INIT);
+  relay_path = jsonElementFromPreferenceCFGString(PREF_APRS_RELAY_PATH,PREF_APRS_RELAY_PATH_INIT);
+  showAltitude = jsonElementFromPreferenceCFGBool(PREF_APRS_SHOW_ALTITUDE,PREF_APRS_SHOW_ALTITUDE_INIT);
+  altitude_ratio = jsonElementFromPreferenceCFGInt(PREF_APRS_ALTITUDE_RATIO,PREF_APRS_ALTITUDE_RATIO);
+  always_send_cseSpd_AND_altitude = jsonElementFromPreferenceCFGBool(PREF_APRS_ALWAYS_SEND_CSE_SPEED_AND_ALTITUDE,PREF_APRS_ALWAYS_SEND_CSE_SPEED_AND_ALTITUDE_INIT);  
+  gps_state = jsonElementFromPreferenceCFGBool(PREF_APRS_GPS_EN,PREF_APRS_GPS_EN_INIT);
+  acceptOwnPositionReportsViaKiss = jsonElementFromPreferenceCFGBool(PREF_ACCEPT_OWN_POSITION_REPORTS_VIA_KISS,PREF_ACCEPT_OWN_POSITION_REPORTS_VIA_KISS_INIT);
+  gps_allow_sleep_while_kiss = jsonElementFromPreferenceCFGBool(PREF_GPS_ALLOW_SLEEP_WHILE_KISS,PREF_GPS_ALLOW_SLEEP_WHILE_KISS_INIT);
+  showBattery = jsonElementFromPreferenceCFGBool(PREF_APRS_SHOW_BATTERY,PREF_APRS_SHOW_BATTERY_INIT);
+  enable_tel = jsonElementFromPreferenceCFGBool(PREF_ENABLE_TNC_SELF_TELEMETRY,PREF_ENABLE_TNC_SELF_TELEMETRY);
+  tel_interval = jsonElementFromPreferenceCFGInt(PREF_TNC_SELF_TELEMETRY_INTERVAL,PREF_TNC_SELF_TELEMETRY_INTERVAL_INIT);
+  tel_sequence = jsonElementFromPreferenceCFGInt(PREF_TNC_SELF_TELEMETRY_SEQ,PREF_TNC_SELF_TELEMETRY_SEQ_INIT);
+  tel_mic = jsonElementFromPreferenceCFGInt(PREF_TNC_SELF_TELEMETRY_MIC,PREF_TNC_SELF_TELEMETRY_MIC_INIT);
+  tel_path = jsonElementFromPreferenceCFGString(PREF_TNC_SELF_TELEMETRY_PATH,PREF_TNC_SELF_TELEMETRY_PATH_INIT);
+  aprsLatPreset = jsonElementFromPreferenceCFGString(PREF_APRS_LATITUDE_PRESET,PREF_APRS_LATITUDE_PRESET_INIT);
+  aprsLonPreset = jsonElementFromPreferenceCFGString(PREF_APRS_LONGITUDE_PRESET,PREF_APRS_LONGITUDE_PRESET_INIT);
+  jsonElementFromPreferenceCFGString(PREF_APRS_SENDER_BLACKLIST,PREF_APRS_SENDER_BLACKLIST_INIT);
+  fixed_beacon_enabled = jsonElementFromPreferenceCFGBool(PREF_APRS_FIXED_BEACON_PRESET,PREF_APRS_FIXED_BEACON_PRESET);
+  fix_beacon_interval = jsonElementFromPreferenceCFGInt(PREF_APRS_FIXED_BEACON_INTERVAL_PRESET,PREF_APRS_FIXED_BEACON_INTERVAL_PRESET_INIT) * 1000;
+
+// + SMART BEACONING
+  sb_min_interval = jsonElementFromPreferenceCFGInt(PREF_APRS_SB_MIN_INTERVAL_PRESET,PREF_APRS_SB_MIN_INTERVAL_PRESET_INIT) * 1000;
+  if (sb_min_interval < 10000) sb_min_interval = 10000;
+  sb_max_interval = jsonElementFromPreferenceCFGInt(PREF_APRS_SB_MAX_INTERVAL_PRESET,PREF_APRS_SB_MAX_INTERVAL_PRESET_INIT) * 1000;
+  if (sb_max_interval <= sb_min_interval) sb_max_interval = sb_min_interval + 1000;
+  sb_min_speed = (float) jsonElementFromPreferenceCFGInt(PREF_APRS_SB_MIN_SPEED_PRESET,PREF_APRS_SB_MIN_SPEED_PRESET_INIT);
+  if (sb_min_speed < 0) sb_min_speed = 0;
+  sb_max_speed = (float ) jsonElementFromPreferenceCFGInt(PREF_APRS_SB_MAX_SPEED_PRESET,PREF_APRS_SB_MAX_SPEED_PRESET_INIT);
+  if (sb_max_speed <= sb_min_speed) sb_max_speed = sb_min_speed +1;
+  sb_angle = jsonElementFromPreferenceCFGDouble(PREF_APRS_SB_ANGLE_PRESET,PREF_APRS_SB_ANGLE_PRESET_INIT);
+  sb_turn_slope = jsonElementFromPreferenceCFGInt(PREF_APRS_SB_TURN_SLOPE_PRESET,PREF_APRS_SB_TURN_SLOPE_PRESET_INIT);
+  sb_turn_time = jsonElementFromPreferenceCFGInt(PREF_APRS_SB_TURN_TIME_PRESET,PREF_APRS_SB_TURN_TIME_PRESET_INIT);
+  showRXTime = jsonElementFromPreferenceCFGInt(PREF_DEV_SHOW_RX_TIME,PREF_DEV_SHOW_RX_TIME_INIT) * 1000;
+
+// Read OLED RX Timer
+  oled_timeout = jsonElementFromPreferenceCFGInt(PREF_DEV_SHOW_OLED_TIME,PREF_DEV_SHOW_OLED_TIME_INIT) * 1000;
+  shutdown_delay_time = jsonElementFromPreferenceCFGInt(PREF_DEV_AUTO_SHUT_PRESET,PREF_DEV_AUTO_SHUT_PRESET_INIT) * 1000;
+  shutdown_active = jsonElementFromPreferenceCFGBool(PREF_DEV_AUTO_SHUT,PREF_DEV_AUTO_SHUT_INIT);
+  reboot_interval = (uint32_t ) jsonElementFromPreferenceCFGInt(PREF_DEV_REBOOT_INTERVAL,PREF_DEV_REBOOT_INTERVAL_INIT) *60*60*1000L;
+  show_cmt = jsonElementFromPreferenceCFGBool(PREF_APRS_SHOW_CMT,PREF_APRS_SHOW_CMT_INIT);
+  rate_limit_message_text = jsonElementFromPreferenceCFGBool(PREF_APRS_COMMENT_RATELIMIT_PRESET,PREF_APRS_COMMENT_RATELIMIT_PRESET_INIT);
+#ifdef ENABLE_BLUETOOTH
+   enable_bluetooth = jsonElementFromPreferenceCFGBool(PREF_DEV_BT_EN,PREF_DEV_BT_EN_INIT);
+#endif
+//prüfen ob das reicht, wg. neuem Schlüssel
+   usb_serial_data_type = jsonElementFromPreferenceCFGInt(PREF_DEV_USBSERIAL_DATA_TYPE,PREF_DEV_USBSERIAL_DATA_TYPE_INIT);
+   enabled_oled  = jsonElementFromPreferenceCFGBool(PREF_DEV_OL_EN,PREF_DEV_OL_EN_INIT);
+   adjust_cpuFreq_to = jsonElementFromPreferenceCFGInt(PREF_DEV_CPU_FREQ,PREF_DEV_CPU_FREQ_INIT);
+
+// APRSIS settings
+#ifdef ENABLE_WIFI
+    aprsis_enabled = jsonElementFromPreferenceCFGBool(PREF_APRSIS_EN,PREF_APRSIS_EN_INIT);
+    aprsis_host = jsonElementFromPreferenceCFGString(PREF_APRSIS_SERVER_NAME,PREF_APRSIS_SERVER_NAME_INIT);
+    aprsis_port = jsonElementFromPreferenceCFGInt(PREF_APRSIS_SERVER_PORT,PREF_APRSIS_SERVER_PORT_INIT);
+    aprsis_filter = jsonElementFromPreferenceCFGString(PREF_APRSIS_FILTER,PREF_APRSIS_FILTER_INIT);
+    aprsis_callsign = jsonElementFromPreferenceCFGString(PREF_APRSIS_CALLSIGN,PREF_APRSIS_CALLSIGN_INIT);
+    aprsis_password = jsonElementFromPreferenceCFGString(PREF_APRSIS_PASSWORD,PREF_APRSIS_PASSWORD_INIT);
+    aprsis_data_allow_inet_to_rf = jsonElementFromPreferenceCFGInt(PREF_APRSIS_ALLOW_INET_TO_RF,PREF_APRSIS_ALLOW_INET_TO_RF_INIT);
 #endif
 
-  SPI.begin(SPI_sck,SPI_miso,SPI_mosi,SPI_ss);    //DO2JMG Heltec Patch
-  Serial.begin(115200);
+}
 
-  #ifdef BUZZER
-    // framwork-arduinoespressif32 library now warns if frequency is too high:
-    // ledc: requested frequency and duty resolution can not be achieved, try reducing freq_hz or duty_resolution. div_param=50
-    // [E][esp32-hal-ledc.c:75] ledcSetup(): ledc setup failed!
-    // Examples in documentation use 5000. If your buzzer does not work correctly, please find a correct value,
-    // and report us (along with the info which CPU frequency you configured).
-    //ledcSetup(0,1E5,12);
-    ledcSetup(0,5000,12);
-    ledcAttachPin(BUZZER,0);
-    ledcWriteTone(0,0);  // turn off buzzer on start
-  #endif
-
-  #ifdef DIGI_PATH
-    relay_path = DIGI_PATH;
-  #else
-    relay_path = "";
-  #endif
-
-  #ifdef FIXED_BEACON_EN
-    fixed_beacon_enabled = true;
-  #endif
-
-// This section loads values from saved preferences,
-// if available.
-// https://randomnerdtutorials.com/esp32-save-data-permanently-preferences/
 
 #ifdef ENABLE_PREFERENCES
-    int clear_preferences = 0;
-    if(digitalRead(BUTTON)==LOW){
-      clear_preferences = 1;
-    }
+// This function loads values from saved preferences (from flash), if available.
+// https://randomnerdtutorials.com/esp32-save-data-permanently-preferences/
 
-    preferences.begin("cfg", false);
-
+void load_preferences_from_flash()
+{
 #ifdef ENABLE_WIFI
     if (!preferences.getBool(PREF_WIFI_ENABLE_INIT)){
       preferences.putBool(PREF_WIFI_ENABLE_INIT, true);
@@ -1827,6 +2009,100 @@ void setup()
     aprsis_data_allow_inet_to_rf = preferences.getInt(PREF_APRSIS_ALLOW_INET_TO_RF);
 #endif
 
+    refill_preferences_as_jsonData();
+}
+#endif // ENABLE_PREFERENCES
+
+
+// + SETUP --------------------------------------------------------------+//
+void setup()
+{
+
+  // for diagnostics
+  uint32_t t_setup_entered = millis();
+
+  // Our BUILD_NUMBER. The define is not available in the WEBSERVR -> we need to assign a global variable
+  buildnr = BUILD_NUMBER;
+
+  SPI.begin(SPI_sck,SPI_miso,SPI_mosi,SPI_ss);    //DO2JMG Heltec Patch
+  Serial.begin(115200);
+
+  // Enable OLED as soon as possible, for better disgnostics
+  Wire.begin(I2C_SDA, I2C_SCL);
+  if (!display.begin(SSD1306_SWITCHCAPVCC, SSD1306_ADDRESS)) {
+      for(;;);                                                             // Don't proceed, loop forever
+  }
+ writedisplaytext("LoRa-APRS","by DL9SAU & DL3EL","Build:" + buildnr,"Hello!","For Factory Reset:","  press middle Button");
+  delay(2000);  // 2s delay to be safe that serial.print works
+  Serial.println("System Start-Up");
+
+
+  #ifdef BUZZER
+    // framwork-arduinoespressif32 library now warns if frequency is too high:
+    // ledc: requested frequency and duty resolution can not be achieved, try reducing freq_hz or duty_resolution. div_param=50
+    // [E][esp32-hal-ledc.c:75] ledcSetup(): ledc setup failed!
+    // Examples in documentation use 5000. If your buzzer does not work correctly, please find a correct value,
+    // and report us (along with the info which CPU frequency you configured).
+    //ledcSetup(0,1E5,12);
+    ledcSetup(0,5000,12);
+    ledcAttachPin(BUZZER,0);
+    ledcWriteTone(0,0);  // turn off buzzer on start
+  #endif
+
+  #ifdef DIGI_PATH
+    relay_path = DIGI_PATH;
+  #else
+    relay_path = "";
+  #endif
+
+  #ifdef FIXED_BEACON_EN
+    fixed_beacon_enabled = true;
+  #endif
+
+
+  #ifdef ENABLE_PREFERENCES
+    int clear_preferences = 0;
+    if(digitalRead(BUTTON)==LOW){
+      clear_preferences = 1;
+    }
+
+    preferences.begin("cfg", false);
+
+    // https://www.tutorialspoint.com/esp32_for_iot/esp32_for_iot_spiffs_storage.htm
+    // Launch SPIFFS file system
+    if (SPIFFS.begin(FORMAT_SPIFFS_IF_FAILED)) {
+      Serial.println("SPIFFS Mount Success");
+      //debug:
+      //listDir(SPIFFS, "/", 0);
+      #ifdef ENABLE_WIFI
+        // read wifi.cfg file, interprete the json and assign some of our global variables
+        readFile(SPIFFS, "/wifi.cfg");
+      #endif
+
+      // current idea is, that if PREF_LORA_FREQ_PRESET_INIT is false, then this is a fresh reseted system.
+      // if available preference.cfg values should beused, if not, takes default values
+      if (!preferences.getBool(PREF_LORA_FREQ_PRESET_INIT)) {
+        // reseted? try to use /preferences.cfg
+        readFile(SPIFFS, "/preferences.cfg");
+        if (preferences.getString(PREF_WIFI_PASSWORD, "").isEmpty() ||
+              preferences.getString(PREF_WIFI_SSID, "").isEmpty()) {
+          preferences.putString(PREF_WIFI_SSID, stdApName);
+          preferences.putString(PREF_WIFI_PASSWORD, stdApPass);
+          preferences.putString(PREF_AP_PASSWORD, infoApPass);
+          Serial.println("WiFi: Updated remote SSID: " + stdApName);
+          Serial.println("WiFi: Updated remote PW: ***");
+        }
+      } else {
+        Serial.println("Preferences: normal start, using preferences from flash");
+      }
+      SPIFFS.end();
+    } else {
+      Serial.println("SPIFFS Mount Failed");
+    }
+
+    // always call load_preferneces_from_flash. It updates the _INIT values, and will do some value checks
+    load_preferences_from_flash();
+
     if (clear_preferences){
       delay(1000);
       if(digitalRead(BUTTON)==LOW){
@@ -1845,8 +2121,6 @@ void setup()
     pinMode(BUTTON, INPUT_PULLUP);
   #endif
   digitalWrite(TXLED, LOW);                                               // turn blue LED off
-
-  Wire.begin(I2C_SDA, I2C_SCL);
 
   #ifdef T_BEAM_V1_0
     if (!axp.begin(Wire, AXP192_SLAVE_ADDRESS)) {
@@ -1881,10 +2155,6 @@ void setup()
   if (adjust_cpuFreq_to > 0)
     setCpuFrequencyMhz(adjust_cpuFreq_to);
 
-  if(!display.begin(SSD1306_SWITCHCAPVCC, SSD1306_ADDRESS)) {
-      for(;;);                                                             // Don't proceed, loop forever
-  }
-
 
   Tcall = prepareCallsign(String(CALLSIGN));
   #ifdef ENABLE_PREFERENCES
@@ -1898,6 +2168,7 @@ void setup()
 
   writedisplaytext("LoRa-APRS","by DL9SAU & DL3EL","Build:" + buildnr,"Hello de " + Tcall,"For Factory Reset:","  press middle Button");
   Serial.println("LoRa-APRS by DL9SAU & DL3EL Build:" + buildnr);
+  Serial.println("Time used since start: (-2000ms delay)" + String(millis()-t_setup_entered-2000));
   delay(2000);
 
   #ifdef ENABLE_PREFERENCES
@@ -1906,19 +2177,29 @@ void setup()
         if(digitalRead(BUTTON)==LOW){
           clear_preferences = 3;
           preferences.clear();
+//          use_preferences_cfg();
           preferences.end();
-          writedisplaytext("LoRa-APRS","","Factory reset","Done!","","");
+          writedisplaytext("LoRa-APRS","","Reset to /preferences.cfg","","if availabe","now booting");
           delay(2000);
           ESP.restart();
         } else {
-          writedisplaytext("LoRa-APRS","","Factory reset","Cancel","","");
+          writedisplaytext("LoRa-APRS","","Factory reset","canceled","","");
           delay(2000);
         }
       //#endif
     }
   #endif
 
-
+  
+  #ifdef T_BEAM_V0_7
+    //adcAttachPin(35);
+    //adcStart(35);
+    //analogReadResolution(10);
+    //analogSetAttenuation(ADC_6db);
+    pinMode(35, INPUT);
+    //adc1_config_width(ADC_WIDTH_BIT_12);
+    //adc1_config_channel_atten(ADC1_CHANNEL_7,ADC_ATTEN_DB_11);
+  #endif
   #ifndef T_BEAM_V1_0
     adc1_config_width(ADC_WIDTH_BIT_12);
     adc1_config_channel_atten(ADC1_CHANNEL_7,ADC_ATTEN_DB_6);
@@ -1955,22 +2236,6 @@ void setup()
 #else
   sema_lora_chip = false;
 #endif
-
-
-  // https://www.tutorialspoint.com/esp32_for_iot/esp32_for_iot_spiffs_storage.htm
-  // Launch SPIFFS file system
-  if (SPIFFS.begin(FORMAT_SPIFFS_IF_FAILED)) {
-    Serial.println("SPIFFS Mount Success");
-    //debug:
-    //listDir(SPIFFS, "/", 0);
-#ifdef ENABLE_WIFI
-    // read wifi.cfg file, interprete the json and assign some of our global variables
-    readFile(SPIFFS, "/wifi.cfg");
-#endif
-    SPIFFS.end();
-  } else {
-    Serial.println("SPIFFS Mount Failed");
-  }
 
 
   // LORA32_21: bug in hardware. cannot run bluetooth and wifi concurrently.
@@ -2911,7 +3176,28 @@ void handle_usb_serial_input(void) {
         } else {
           //  some commands need an non-binary agument
           #ifdef ENABLE_PREFERENCES
-            if (cmd == "preferences") {
+            if (cmd == "save_preferences_cfg") {
+              refill_preferences_as_jsonData();
+              Serial.println("*** save_preferences_cfg:");
+              if (!preferences_as_jsonData.isEmpty()) {
+                int ret = save_to_file("TNC", "/preferences.cfg", preferences_as_jsonData);
+                if (ret >= 0)
+                  Serial.println("*** save_preferences_cfg: ok");
+                else
+                  Serial.printf("*** save_preferences_cfg: error %d\r\n", ret);
+              } else {
+                  Serial.println("*** save_preferences_cfg: BUG (empty)");
+              }
+              inputBuf = "";
+              return;
+            } else if (cmd == "show_preferences") {
+              Serial.println("*** show_preferenes:");
+              refill_preferences_as_jsonData();
+              Serial.println(preferences_as_jsonData);
+              Serial.printf("\r\n***\r\n");
+              inputBuf = "";
+              return;
+            } else if (cmd == "preferences") {
               Serial.println("*** preferences: error: preferences command needs to be implemented ;)");
               #if defined(ENABLE_SYSLOG) && defined(ENABLE_WIFI)
                 syslog_log(LOG_WARNING, String("usb-serial: preferences: user entered preferences command. Yet not implemented."));
@@ -2951,13 +3237,16 @@ void handle_usb_serial_input(void) {
             Serial.println("  echo <on|off>");
             Serial.println("  kiss on");
             Serial.println("  logging <on|off>");
+#ifdef ENABLE_PREFERENCES
+            Serial.println("  preferences          (needs to bei implemented)");
+            Serial.println("  show_preferences     (shows preferences from flash)");
+            Serial.println("  save_preferences_cfg (saves running config to /preferences.cfg in filesystem)");
+            Serial.println("  preferences (needs to bei implemented)");
+#endif
             Serial.println("  trace <on|off>");
             Serial.println("  reboot");
 #ifdef T_BEAM_V1_0
             Serial.println("  shutdown");
-#endif
-#ifdef ENABLE_PREFERENCES
-            Serial.println("  preferences (needs to bei implemented)");
 #endif
 #ifdef	ENABLE_WIFI
             Serial.println("  wifi <on|off>");
@@ -3107,15 +3396,15 @@ void handle_usb_serial_input(void) {
           #endif
           if (lora_tx_enabled) {
             if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies % 2) {
-              loraSend(txPower, lora_freq, lora_speed, inputBuf);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
+              loraSend(txPower, lora_freq, lora_speed, 0, inputBuf);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
               esp_task_wdt_reset();
             }
             if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies > 1 && lora_digipeating_mode > 1 && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq) {
-              loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, inputBuf);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
+              loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, 0, inputBuf);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
               esp_task_wdt_reset();
             }
             enableOled(); // enable OLED
-            writedisplaytext("((KISSTX))","","","","","");
+            writedisplaytext("((KISSTX))","",inputBuf,"","","");
             time_to_refresh = millis() + showRXTime;
           } else {
             Serial.println("*** Warning: lora tx must be enabled! Not sending to RF");
@@ -3580,11 +3869,11 @@ void loop()
 
         if (lora_tx_enabled) {
           if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies % 2)
-            loraSend(txPower, lora_freq, lora_speed, String(data));  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
+            loraSend(txPower, lora_freq, lora_speed, 0, String(data));  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
           if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies > 1 && lora_digipeating_mode > 1 && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq)
-            loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, String(data));  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
+            loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, 0, String(data));  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
           enableOled(); // enable OLED
-          writedisplaytext("((KISSTX))","","","","","");
+          writedisplaytext("((KISSTX))","",String(data),"","","");
           time_to_refresh = millis() + showRXTime;
         }
 
@@ -3779,7 +4068,7 @@ out:
             // word 'NOGATE' part of the header? Don't gate it
             q = strstr(lora_TXBUFF_for_digipeating, ",NOGATE");
             if (!q || q > strchr(lora_TXBUFF_for_digipeating, ':')) {
-              loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, String(lora_TXBUFF_for_digipeating));  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
+              loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, 0, String(lora_TXBUFF_for_digipeating));  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
               enableOled(); // enable OLED
               writedisplaytext("  ((TX cross-digi))", "", String(lora_TXBUFF_for_digipeating), "", "", "");
               time_to_refresh = millis() + showRXTime;
@@ -4061,7 +4350,7 @@ behind_position_tx:
     if ((time_lora_TXBUFF_for_digipeating_was_filled + 5*lora_digipeating_mode*1000L + (millis() % 250)) < millis()) {
       if (lora_cross_digipeating_mode < 2 && (time_lora_TXBUFF_for_digipeating_was_filled + 2* 5*lora_digipeating_mode*1000L) > millis()) {
         // if SF12: we degipeat in fastest mode CR4/5. -> if lora_speed < 300 tx in lora_speed_300.
-        loraSend(txPower, lora_freq, (lora_speed < 300) ? 300 : lora_speed, String(lora_TXBUFF_for_digipeating));  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
+        loraSend(txPower, lora_freq, (lora_speed < 300) ? 300 : lora_speed, 0, String(lora_TXBUFF_for_digipeating));  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
         writedisplaytext("  ((TX digi))", "", String(lora_TXBUFF_for_digipeating), "", "", "");
 #ifdef KISS_PROTOCOL
         sendToTNC(String(lora_TXBUFF_for_digipeating));

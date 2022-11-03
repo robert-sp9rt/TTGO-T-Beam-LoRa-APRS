@@ -636,6 +636,12 @@
             </div>
             <div class="grid-container full">
                 Click <a href="/cfg">here</a> to view your configuration.
+                <form action="/save2fs" method="post">
+                    <div>
+                        <input class="button-primary" type="submit" value="save2fs">
+                    </div>
+                </form>
+
             </div>
         </article>
     </section>
@@ -707,22 +713,45 @@
                </ul>
             </div>
             <div class="grid-container full">
-              <h5 class="u-full-width">extended Wifi Config:</h5>
+              <h5 class="u-full-width">Config in Filesystem:</h5>
             </div>
             <div>
-               which WiFi is selected?<br/>
+               General<br>
                <ul>
-                 <li>first, the SSID which is configured via the WebSiet will be searched</li>
-                 <li>second, if that SSID is not found, the WiFi configured in data/wifi.cfg will be searched</li>
-                 <li>third, if that SSID is also not found, a local accesspoint with the SSID "call AP" will be created. After connected to, this Webserver will be reachable with the IP Address 192.168.4.1</li>
+                 <li>in the directory data there could be two files: wifi.cfg and preferences.cfg.</li>
+                 <li>Each file should not exceed 2560 bytes.</li>
+                 <li>To upload both files to your board you have to do this via Upload File System image in PlatformIO!</li>
+                 <li>To find the 'Upload File System image' click the PlatformIO symbol (the little alien) on the left side, choose your configuration, click on 'Platform' and search for 'Upload File System image'. If you use platformio-cli, upload the filesystem as described below.</li>
                </ul>
                data/wifi.cfg<br>
                <ul>
+                 <li>wifi.cfg has to be created manually, following the json structure in the example. The names of the variables (aka keys) must not be altered</li>
                  <li>wifi.cfg in the directory data contains an SSID and password of the AP for the second try described above</li>
                  <li>the total length of this file must not exceed 256 Byte. The password must not be shorter that 8 byte. The json structure must not be changed</li>
                  <li>if something is wrong or the file is missing, the complete file will be ignored and step 2 (above) will be skipped</li>
                  <li>To upload wifi.cfg to your board you have to do this via Upload File System image in PlatformIO!</li>
                  <li>To find the 'Upload File System image' click the PlatformIO symbol (the little alien) on the left side, choose your configuration, click on 'Platform' and search for 'Upload File System image'. If you use platformio-cli, upload the filesystem as described below.</li>
+               </ul>
+               which WiFi is selected?<br/>
+               <ul>
+                 <li>first, the SSID which is configured via the WebSite will be searched, this SSID should match SSID1 in the file</li>
+                 <li>second, if that SSID is not found, the WiFi configured as SSID2 in data/wifi.cfg will be searched</li>
+                 <li>third, if that SSID is also not found, a local accesspoint with the SSID "call AP" will be created. After connected to, this Webserver will be reachable with the IP Address 192.168.4.1. The password for the selfAP can be preconfigured with the key "ap_password" in this file</li>
+               </ul>
+               data/preferences.cfg<br>
+               <ul>
+                 <li>preferences.cfg can be created by the system, if you press "SAVE2FS" in the Update section of the site.
+                 <li>if you want to changes items of the preferences, you have to start with the data shown in the configuration view of this WebSite. Be sure to deleted everything before the "{". Again the keys must not be altered. The file then has to be placed into the data directory on your system using the name preferences.cfg.
+               </ul>
+               which config is selected?<br/>
+               <ul>
+                 <li>during startup it will be checked, if there is a prevously used config stored in the system. Normally that is the config, you enter via the webserver. This will be used, if available.</li>
+                 <li>If the previously stored config is not available (i.e., after a complete system erase or a factory reset), it will be checked, if a correct file data/preferences.cfg is availabe. If yes, it will be used. If not, the system comes up with the default values.</li>
+               </ul>
+               Factory reset<br/>
+               <ul>
+                 <li>if factory reset is selected (either via the right button or the webserver), the system will start up with the config saved in data/preferences.cfg. So if you are in the field, make sure, that you have a working setup stored there and be carefull when overwriting.</li>
+                 <li>If you really need a fresh system with the compiled default configuration, you have to delete the file data/preferences.cfg on the board, before you do a factory reset.</li>
                </ul>
                Platform.IO CLI<br>
                <ul>

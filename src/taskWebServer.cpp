@@ -86,6 +86,8 @@ String defApPassword = "xxxxxxxxxx";
 String wifi_password = "";
 String wifi_ssid = "";
 
+// last i/o to aprsis-connection (needed for anti-idle timer)
+uint32_t t_aprsis_lastRXorTX = 0L;
 
 // needed for aprsis igate functionality
 String aprsis_status = "Disconnected";
@@ -104,7 +106,8 @@ extern ulong lora_speed;
 extern uint8_t txPower_cross_digi;
 extern ulong lora_speed_cross_digi;
 extern double lora_freq_cross_digi;
-extern void loraSend(byte, float, ulong, const String &);
+extern void loraSend(byte, float, ulong, uint8_t , const String &);
+extern int save_to_file(const String &, const char *, const String &);
 
 IPAddress IP_NULL(0,0,0,0);
 IPAddress IP_SUBNET_NULL(0,0,0,0);
@@ -116,8 +119,10 @@ extern boolean send_status_message_to_aprsis;
 String aprsis_time_last_successful_connect = "";
 int aprsis_connect_tries = 0;
 extern char gps_time_s[];
-
 String aprs_callsign;
+
+// keep config stored in this global variable
+extern String preferences_as_jsonData;
 
 WebServer server(80);
 #ifdef KISS_PROTOCOL
@@ -362,7 +367,9 @@ void handle_Restore() {
   ESP.restart();
 }
 
-void handle_Cfg() {
+
+void refill_preferences_as_jsonData()
+{
   String s;
   String jsonData = "{";
   jsonData += String("\"") + PREF_WIFI_PASSWORD + "\": \"" + jsonEscape((preferences.getString(PREF_WIFI_PASSWORD, "").isEmpty() ? String("") : "*")) + R"(",)";
@@ -457,7 +464,31 @@ void handle_Cfg() {
   jsonData += jsonLineFromString("OledLine5", OledLine5.c_str(), true);
 
   jsonData += "}";
-  server.send(200,"application/json", jsonData);
+  // Store copy of jsonData in our global variable
+  preferences_as_jsonData = String(jsonData);
+}
+
+void handle_saveCfg2FS() {
+  // https://www.tutorialspoint.com/esp32_for_iot/esp32_for_iot_spiffs_storage.htm
+  // Launch SPIFFS file system
+  #if defined(ENABLE_SYSLOG)
+    syslog_log(LOG_INFO, String("WebServer: Button save Config to Filesystem pressed."));
+    do_serial_println("WebServer: Button save Config to Filesystem pressed.");
+  #endif
+
+  refill_preferences_as_jsonData();
+  if (!preferences_as_jsonData.isEmpty()) {
+    save_to_file("Webserver", "/preferences.cfg", preferences_as_jsonData);
+  }
+
+  server.sendHeader("Location", "/");
+  server.send(302,"text/html", "");
+}
+
+
+void handle_Cfg() {
+  refill_preferences_as_jsonData();
+  server.send(200,"application/json", preferences_as_jsonData);
 }
 
 void handle_ReceivedList() {
@@ -914,9 +945,9 @@ void handle_SaveAPRSCfg() {
 
 void handle_saveDeviceCfg(){
   #if defined(ENABLE_SYSLOG)
-    syslog_log(LOG_INFO, String("WebServer: handle_SaveAPPRSCfg()"));
+    syslog_log(LOG_INFO, String("WebServer: handle_SaveDeviceCfg()"));
   #endif
-  do_serial_println("WebServer: WebServer: handle_SaveAPRSCfgs()");
+  do_serial_println("WebServer: WebServer: handle_SaveDeviceCfg()");
   preferences.putBool(PREF_DEV_BT_EN, server.hasArg(PREF_DEV_BT_EN));
   if (server.hasArg(PREF_DEV_USBSERIAL_DATA_TYPE)){
     preferences.putInt(PREF_DEV_USBSERIAL_DATA_TYPE, server.arg(PREF_DEV_USBSERIAL_DATA_TYPE).toInt());
@@ -1217,10 +1248,10 @@ void do_send_status_message_about_connect_to_aprsis(void) {
   if (lora_tx_enabled && tx_own_beacon_from_this_device_or_fromKiss__to_frequencies) {
     esp_task_wdt_reset();
     if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies % 2)
-      loraSend(txPower, lora_freq, lora_speed, outString);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
+      loraSend(txPower, lora_freq, lora_speed, 0, outString);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
     esp_task_wdt_reset();
     if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies > 1 && lora_digipeating_mode > 1 && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq)
-      loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, outString);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
+      loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, 0, outString);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
   }
 
   esp_task_wdt_reset();
@@ -1386,6 +1417,7 @@ void read_from_aprsis(void) {
 
   if (s) {
     //aprsis_status = "OK";
+    t_aprsis_lastRXorTX = millis();
     s.trim();
     if (s.isEmpty()) {
       err = 2;
@@ -1536,10 +1568,10 @@ void read_from_aprsis(void) {
         return;
       if (aprsis_data_allow_inet_to_rf % 2) {
         esp_task_wdt_reset();
-        loraSend(txPower, lora_freq, lora_speed, third_party_packet);
+        loraSend(txPower, lora_freq, lora_speed, 0, third_party_packet);
       }
       if (aprsis_data_allow_inet_to_rf > 1 && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq) {
-        loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, third_party_packet);
+        loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, 0, third_party_packet);
         esp_task_wdt_reset();
       }
     }
@@ -1574,6 +1606,7 @@ void send_to_aprsis()
         String s_data = String(buf) + (lora_tx_enabled ? ",qAR," : ",qAO,") + aprsis_callsign + q + "\r\n";
         aprsis_status = "OK, toAPRSIS: " + s_data; aprsis_status.trim();
         aprsis_client.print(s_data);
+        t_aprsis_lastRXorTX = millis();
         esp_task_wdt_reset();
       }
     }
@@ -1601,6 +1634,7 @@ void send_to_aprsis()
   server.on("/received_list", handle_ReceivedList);
   server.on("/save_aprs_cfg", handle_SaveAPRSCfg);
   server.on("/save_device_cfg", handle_saveDeviceCfg);
+  server.on("/save2fs", handle_saveCfg2FS);
   server.on("/restore", handle_Restore);
   server.on("/update", HTTP_POST, []() {
 #if defined(ENABLE_SYSLOG)
@@ -1810,6 +1844,12 @@ void send_to_aprsis()
             // forward packets to APRSIS
             send_to_aprsis();
           }
+
+	  // anti-idle timer for the tcp session
+          if (aprsis_client.connected() && millis() - t_aprsis_lastRXorTX > 2*60*1000L) {
+            aprsis_client.print("#\r\n");
+            t_aprsis_lastRXorTX = millis();
+	  }
 
         } else {
 
