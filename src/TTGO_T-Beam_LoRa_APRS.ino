@@ -2168,7 +2168,7 @@ void setup()
 
   writedisplaytext("LoRa-APRS","by DL9SAU & DL3EL","Build:" + buildnr,"Hello de " + Tcall,"For Factory Reset:","  press middle Button");
   Serial.println("LoRa-APRS by DL9SAU & DL3EL Build:" + buildnr);
-  Serial.println("Time used since start: (-2000ms delay)" + String(millis()-t_setup_entered-2000));
+  Serial.println("Time used since start (-2000ms delay): " + String(millis()-t_setup_entered-2000));
   delay(2000);
 
   #ifdef ENABLE_PREFERENCES
@@ -3194,7 +3194,7 @@ void handle_usb_serial_input(void) {
               Serial.println("*** show_preferenes:");
               refill_preferences_as_jsonData();
               Serial.println(preferences_as_jsonData);
-              Serial.printf("\r\n***\r\n");
+              Serial.printf("n***\r\n");
               inputBuf = "";
               return;
             } else if (cmd == "preferences") {
