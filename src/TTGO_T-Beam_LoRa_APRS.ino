@@ -1275,9 +1275,9 @@ int writeFile(fs::FS &fs, const String &callername, const char *filename, const 
     return -2;
   }
   if (file.print(jsonData)) {
-    do_serial_println(callername + ": file written");
+    do_serial_println(callername + ": file " + filename + " written");
   } else {
-    do_serial_println(callername + ": write failed");
+    do_serial_println(callername + ": write of " + filename + " failed!");
     ret = -3;
   }
   file.close();
@@ -2172,7 +2172,7 @@ void setup()
 
   writedisplaytext("LoRa-APRS","by DL9SAU & DL3EL","Build:" + buildnr,"Hello de " + Tcall,"For Factory Reset:","  press middle Button");
   Serial.println("LoRa-APRS by DL9SAU & DL3EL Build:" + buildnr);
-  Serial.println("Time used since start (-2000ms delay): " + String(millis()-t_setup_entered-2000));
+  Serial.println("Time used since start (-2000ms delay): " + String(millis()-t_setup_entered-2000) + "ms");
   delay(2000);
 
   #ifdef ENABLE_PREFERENCES

@@ -625,23 +625,34 @@
         </div>
         <article>
             <div class="grid-container full">
+                <h5 class="u-full-width">View configuration</h5>
+            </div>
+            <div class="grid-container full">
+                Click <a href="/cfg">here</a> to view (backup) your current settings.
+            </div>
+            <div class="grid-container full">
+                <h5 class="u-full-width">Firmware update</h5>
+            </div>
+            <div class="grid-container full">
                 <form action="/update" method="post" enctype="multipart/form-data" id="upload_form" onsubmit="updateFileUpload(event)">
                     <div>
-                        <label id="file-input" for="file">Choose file...</label>
+                        <label id="file-input" for="file">Choose firmware_file.bin ...</label>
                         <div><progress id="file-progress" max="100"></progress></div>
                         <input type="file" name="update" id="file" onchange="onFileChange(this)">
-                        <input class="button-primary" type="submit" value="Update">
+                        <input class="button-primary" type="submit" value="Update firmware">
                     </div>
                 </form>
             </div>
             <div class="grid-container full">
-                Click <a href="/cfg">here</a> to view your configuration.
+                <h5 class="u-full-width">Save configuration</h5>
+            </div>
+            <div class="grid-container full">
+                Save configuration to tracker's filesystem (/preferences.cfg)
                 <form action="/save2fs" method="post">
                     <div>
                         <input class="button-primary" type="submit" value="save2fs">
                     </div>
                 </form>
-
             </div>
         </article>
     </section>
@@ -718,9 +729,9 @@
             <div>
                General<br>
                <ul>
-                 <li>in the directory data there could be two files: wifi.cfg and preferences.cfg.</li>
+                 <li>There could be two files: wifi.cfg and preferences.cfg. You find them are in sources tree in the directory "data/". </li>
                  <li>Each file should not exceed 2560 bytes.</li>
-                 <li>To upload both files to your board you have to do this via Upload File System image in PlatformIO!</li>
+                 <li>To upload both files to SPIFFS of your board, you have to do this via Upload File System image in PlatformIO!</li>
                  <li>To find the 'Upload File System image' click the PlatformIO symbol (the little alien) on the left side, choose your configuration, click on 'Platform' and search for 'Upload File System image'. If you use platformio-cli, upload the filesystem as described below.</li>
                </ul>
                data/wifi.cfg<br>
