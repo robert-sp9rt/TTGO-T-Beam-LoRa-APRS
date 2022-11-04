@@ -1308,6 +1308,10 @@ boolean readFile(fs::FS &fs, const char *filename) {
   boolean err = false;
   char JSONMessage[JSON_MAX_FILE_SIZE];
 
+  if (!SPIFFS.exists(filename)) {
+    Serial.printf("readFile: %s does not exist\r\n", filename);
+    return false;
+  }
   File file = fs.open(filename, FILE_READ);
   if (!file) {
     Serial.printf("readFile: failed to open file %s for reading\r\n", filename);
