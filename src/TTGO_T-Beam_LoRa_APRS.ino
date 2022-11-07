@@ -1,5 +1,5 @@
 // Tracker for LoRA APRS
-// from OE1ACM and OE3CJB redesigned by SQ9MDD
+// from OE1ACM and OE3CJB redesigned by SQ9MDD .
 // KISS ans Bluetooth by SQ5RWU
 // TTGO T-Beam v1.0 only
 //
@@ -1355,9 +1355,9 @@ boolean readFile(fs::FS &fs, const char *filename) {
     const char *p;
     if (JSONBuffer.containsKey("SSID1") && JSONBuffer.containsKey("password1")) {
       if ((p = JSONBuffer["SSID1"]))
-        safeApName = String(p);
+        stdApName = String(p);
       if ((p = JSONBuffer["password1"]))
-        safeApPass = String(p);
+        stdApPass = String(p);
     }
     if (JSONBuffer.containsKey("SSID2") && JSONBuffer.containsKey("password2")) {
       if ((p = JSONBuffer["SSID2"]))
@@ -1366,12 +1366,10 @@ boolean readFile(fs::FS &fs, const char *filename) {
         safeApPass = String(p);
     }
 
-    if (JSONBuffer.containsKey("ap_password") && (p = JSONBuffer["ap_password"]) && strlen(p) >= 8) {
-      Serial.printf("SelfAp PW: %s\r\n", p);
-      infoApPass = String(p);
-    } else {
-      Serial.printf("SelfAp PW missing: %s\r\n", p);
+    if (JSONBuffer.containsKey("ap_password") && (p = JSONBuffer["ap_password"])) {
+        infoApPass = String(p);
     }
+
 
     if (!stdApName.length() || stdApPass.length() < 8 || stdApName == "EnterSSIDofYourAccesspoint") {
       Serial.println("SSID: " + stdApName + " missing or PW: " + stdApPass + " < 8 Byte, Filesize: " + String(file.size()));
@@ -1388,9 +1386,17 @@ boolean readFile(fs::FS &fs, const char *filename) {
     } else {
       Serial.println("Fallback SSID: " + safeApName + ", PW: " + safeApPass + ", Filesize: " + String(file.size()));
     }
+
+    if (!infoApPass.length() || infoApPass.length() < 8) {
+      Serial.println("SelfAp PW missing: " + infoApPass);
+    } else {
+      Serial.println("SelfAp PW: " + infoApPass);
+    }
+
     goto end;
   }
 #endif // ENABLE_WIFI
+
   if (!strcmp(filename, "/preferences.cfg")) {
     if (JSONBuffer.containsKey(PREF_APRS_CALLSIGN)) {
       Serial.printf("Checked preferences.cfg: is ok. Found %s: %s. Filesize: %d\r\n", PREF_APRS_CALLSIGN, JSONBuffer[PREF_APRS_CALLSIGN], file.size());
