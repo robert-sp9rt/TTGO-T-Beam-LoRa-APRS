@@ -107,6 +107,7 @@ extern uint8_t txPower_cross_digi;
 extern ulong lora_speed_cross_digi;
 extern double lora_freq_cross_digi;
 extern void loraSend(byte, float, ulong, uint8_t , const String &);
+extern void load_preferences_from_flash(void);
 extern int save_to_file(const String &, const char *, const String &);
 
 IPAddress IP_NULL(0,0,0,0);
@@ -243,11 +244,13 @@ void handle_SaveWifiCfg() {
 
   if (!server.hasArg(PREF_WIFI_SSID) || !server.hasArg(PREF_WIFI_PASSWORD) || !server.hasArg(PREF_AP_PASSWORD)){
     server.send(500, "text/plain", "Invalid request, make sure all fields are set");
+    return;
   }
 
   // Mode STA:
   if (!server.arg(PREF_WIFI_SSID).length()){
     server.send(403, "text/plain", "Empty SSID");
+    return;
   } else {
     // Update SSID
     preferences.putString(PREF_WIFI_SSID, server.arg(PREF_WIFI_SSID));
@@ -256,6 +259,7 @@ void handle_SaveWifiCfg() {
 
   if (server.arg(PREF_WIFI_PASSWORD)!="*" && server.arg(PREF_WIFI_PASSWORD).length()>0 && server.arg(PREF_WIFI_PASSWORD).length()<8){
     server.send(403, "text/plain", "WiFi Password must be minimum 8 character");
+    return;
   } else {
     if (server.arg(PREF_WIFI_PASSWORD)!="*") {
       // Update WiFi password
@@ -275,6 +279,7 @@ void handle_SaveWifiCfg() {
   // Mode AP:
   if (server.arg(PREF_AP_PASSWORD)!="*" && server.arg(PREF_AP_PASSWORD).length()<8){
     server.send(403, "text/plain", "AP Password must be minimum 8 character");
+    return;
   } else {
     if (server.arg(PREF_AP_PASSWORD)!="*") {
       // Update AP password
@@ -308,6 +313,9 @@ void handle_SaveWifiCfg() {
     s.trim();
   }
   preferences.putString(PREF_SYSLOG_SERVER, s);
+
+  // runtime reconfiguration with changed settings
+  load_preferences_from_flash();
 
   server.sendHeader("Location", "/");
   server.send(302,"text/html", "");
@@ -938,6 +946,9 @@ void handle_SaveAPRSCfg() {
   preferences.putBool(PREF_APRS_SHOW_CMT, server.hasArg(PREF_APRS_SHOW_CMT));
   preferences.putBool(PREF_APRS_COMMENT_RATELIMIT_PRESET, server.hasArg(PREF_APRS_COMMENT_RATELIMIT_PRESET));
 
+  // runtime reconfiguration with changed settings
+  load_preferences_from_flash();
+
   server.sendHeader("Location", "/");
   server.send(302,"text/html", "");
 
@@ -973,6 +984,10 @@ void handle_saveDeviceCfg(){
       cpufreq = 10;
     preferences.putInt(PREF_DEV_CPU_FREQ, cpufreq);
   }
+
+  // runtime reconfiguration with changed settings
+  load_preferences_from_flash();
+
   server.sendHeader("Location", "/");
   server.send(302,"text/html", "");
 }
