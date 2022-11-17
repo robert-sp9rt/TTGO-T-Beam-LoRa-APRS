@@ -159,7 +159,6 @@ String aprsPresetShown = "P";
 // as we now collect the gps_data at the beginning of loop(), also the speed ist from there, we should not query gps.speed.kmph directly later on
 // the same show be done with course and alti (later)
 // after successful data retrieval, gps_isValid becomes true (or turn false, if retrieval fails)
-// all by DL3EL
 boolean gps_isValid = false;
 int gps_speed_kmph = 0;
 int gps_speed_kmph_oled = 0;
@@ -240,7 +239,6 @@ String OledLine2 = "";    // WebServer Info (CLI|AP|dis), next beacon (SB|FB), G
 String OledLine3 = "";    // Position
 String OledLine4 = "";    // speed, course, altitude
 String OledLine5 = "";    // sat info, batt info
-int OLED_refresh = 1000;
 
 #if defined(ENABLE_TNC_SELF_TELEMETRY) && defined(KISS_PROTOCOL)
   time_t nextTelemetryFrame;
@@ -853,6 +851,24 @@ void batt_read(){
 }
 
 
+void setup_oled_timer_values() {
+  // Hold the OLED ON at first boot (or duriing soft_reconfiguration)
+  // oled_timeout == 0 is a special case for 'always on'.
+  // If user switches off OLED (enabled_oled == false), but sets oled_timeout to 0 (always on),
+  // we add SHOW_OLED_TIME to timeout (instead of 0), for keep it running for 15s after setup();
+  // if enabled_oled is true and oled_timeout is 0, this does not harm.
+  oled_timer = millis() + (oled_timeout ? oled_timeout : SHOW_OLED_TIME);
+  time_to_refresh = millis() + showRXTime;
+}
+
+void enableOled() {
+  if (!enabled_oled)
+    return;
+  // This function enables OLED display after pressing a button
+  oled_timer = millis() + oled_timeout;
+}
+
+
 void writedisplaytext(String HeaderTxt, String Line1, String Line2, String Line3, String Line4, String Line5) {
   batt_read();
 #ifdef notdef
@@ -894,7 +910,8 @@ void writedisplaytext(String HeaderTxt, String Line1, String Line2, String Line3
   display.display();
   // if oled is continuosly on, refresh every second (DL3EL)
   if (oled_timeout == 0) {
-    time_to_refresh = millis() + OLED_refresh;
+    // refrsh display once a second
+    time_to_refresh = millis() + 1000;
   } else {
     time_to_refresh = millis() + showRXTime;
   }
@@ -907,39 +924,43 @@ void writedisplaytext(String HeaderTxt, String Line1, String Line2, String Line3
   OledLine5 = Line5;
 }
 
-// in refresh_display umbenannt werden
-void display_refresh1s() {
-  static uint32_t display_next_refresh = 0L;
-  static struct tm timeinfo; 
+void timer_once_a_second() {
+  static uint32_t t_next_run = 0L;
+  struct tm timeinfo;
 
-  if (millis() < display_next_refresh)
+  if (millis() < t_next_run)
     return;
   
-  display_next_refresh = millis() + OLED_refresh;
-// einmal Sekunde soll die Uhrzeit aktualisiert werden
+  t_next_run = millis() + 1000;
+  // update gps time string once a second
   if (getLocalTime(&timeinfo)) {
     strftime(gps_time_s, sizeof(gps_time_s), "%H:%M:%S", &timeinfo);
   }
-  fillDisplayLine1(); //update time & uptime
   
-  display.clearDisplay();
-  display.setTextColor(WHITE);
-  display.setTextSize(2);
-  display.setCursor(0,0);
-  display.println(OledHdr);
-  display.setTextSize(1);
-  display.setCursor(0,16);
-  display.println(OledLine1);
-  display.setCursor(0,26);
-  display.println(OledLine2);
-  display.setCursor(0,36);
-  display.println(OledLine3);
-  display.setCursor(0,46);
-  display.println(OledLine4);
-  display.setCursor(0,56);
-  display.println(OledLine5);
-  display.display();
+  // Ticker blinks upper left corner to indicate system is running
+  // only when OLED is on
+  if (display_is_on) {
+    // refresh display once a second
+    fillDisplayLine1(); //update time & uptime
 
+    display.clearDisplay();
+    display.setTextColor(WHITE);
+    display.setTextSize(2);
+    display.setCursor(0,0);
+    display.println(OledHdr);
+    display.setTextSize(1);
+    display.setCursor(0,16);
+    display.println(OledLine1);
+    display.setCursor(0,26);
+    display.println(OledLine2);
+    display.setCursor(0,36);
+    display.println(OledLine3);
+    display.setCursor(0,46);
+    display.println(OledLine4);
+    display.setCursor(0,56);
+    display.println(OledLine5);
+    display.display();
+  }
 }
 
 
@@ -1151,6 +1172,17 @@ String prepareCallsign(const String& callsign){
     }
   }
   return tmpString;
+}
+
+void set_callsign() {
+  Tcall = prepareCallsign(String(CALLSIGN));
+  #ifdef ENABLE_PREFERENCES
+    Tcall = preferences.getString(PREF_APRS_CALLSIGN, "");
+    if (Tcall.isEmpty()){
+      preferences.putString(PREF_APRS_CALLSIGN, String(CALLSIGN));
+      Tcall = preferences.getString(PREF_APRS_CALLSIGN);
+    }
+  #endif
 }
 
 #if defined(ENABLE_TNC_SELF_TELEMETRY) && defined(KISS_PROTOCOL)
@@ -1399,7 +1431,8 @@ boolean readFile(fs::FS &fs, const char *filename) {
 
   if (!strcmp(filename, "/preferences.cfg")) {
     if (JSONBuffer.containsKey(PREF_APRS_CALLSIGN)) {
-      Serial.printf("Checked preferences.cfg: is ok. Found %s: %s. Filesize: %d\r\n", PREF_APRS_CALLSIGN, JSONBuffer[PREF_APRS_CALLSIGN], file.size());
+      // Serial.printf("Checked preferences.cfg: is ok. Found %s: %s. Filesize: %d\r\n", PREF_APRS_CALLSIGN, JSONBuffer[PREF_APRS_CALLSIGN], file.size());
+      Serial.printf("Checked preferences.cfg: is ok. Found %s. Filesize: %d\r\n", PREF_APRS_CALLSIGN, file.size());
       Serial.println("Preferences: reading from /preferences.cfg");
       load_preferences_cfg_file();
     } else {
@@ -1420,6 +1453,39 @@ end:
   return true;
 }
 
+
+void init_and_validate_aprs_position_and_icon() {
+  // We have stored the manual position string in a higher precision (in case resolution more precise than 18.52m is required; i.e. for base-91 location encoding, or DAO extenstion).
+  // Furthermore, 53-32.1234N is more readable in the Web-interface than 5232.1234N
+  aprsLatPreset.toUpperCase(); aprsLatPreset.replace(",", "."); aprsLatPreset.trim();
+  if (aprsLatPreset.length() == 11 && aprsLatPreset.indexOf('-') == 2 && aprsLatPreset.indexOf(' ') == -1 && (aprsLatPreset.endsWith("N") || aprsLatPreset.endsWith("S"))) {
+    char buf[9];
+    const char *p = aprsLatPreset.c_str();
+    sprintf(buf, "%.2s%.5s%c", p, p+3, p[10]);
+    aprsLatPreset = String(buf);
+  }
+
+  // 001-20.5000E is more readable in the Web-interface than 00120.5000E, and could not be mis-interpreted as 120.5 degrees east  (== 120 deg 30' 0" E)
+  aprsLonPreset.toUpperCase(); aprsLonPreset.replace(",", "."); aprsLonPreset.trim();
+  if (aprsLonPreset.length() == 12 && aprsLonPreset.indexOf('-') == 3 && aprsLonPreset.indexOf(' ') == -1 && (aprsLonPreset.endsWith("E") || aprsLonPreset.endsWith("W"))) {
+    char buf[10];
+    const char *p = aprsLonPreset.c_str();
+    sprintf(buf, "%.3s%.5s%c", p, p+4, p[11]);
+    aprsLonPreset = String(buf);
+  }
+
+  // assure valid transmissions, even on wrong configurations
+  if (aprsLatPreset.length() != 8 || !(aprsLatPreset.endsWith("N") || aprsLatPreset.endsWith("S")) || aprsLatPreset.c_str()[4] != '.')
+    aprsLatPreset = String("0000.00N");
+  if (aprsLonPreset.length() != 9 || !(aprsLonPreset.endsWith("E") || aprsLonPreset.endsWith("W")) || aprsLonPreset.c_str()[5] != '.')
+    aprsLonPreset = String("00000.00E");
+  if (aprsSymbolTable.length() != 1)
+    aprsSymbolTable = String("/");
+  if (aprsSymbol.length() != 1)
+    aprsSymbol = String("[");
+
+  Serial.printf("APRS fixed position set to %s %s; icon: table %s symbol %s\r\n", aprsLatPreset.c_str(), aprsLonPreset.c_str(), aprsSymbolTable, aprsSymbol);
+}
 
 
 String jsonElementFromPreferenceCFGString(const char *preferenceName, const char *preferenceNameInit){
@@ -1444,7 +1510,7 @@ double jsonElementFromPreferenceCFGDouble(const char *preferenceName, const char
   double value_d = JSONBuffer[preferenceName];
   //if (preferenceNameInit) preferences.putBool(preferenceNameInit, true);
   //preferences.putDouble(preferenceName, value);
-  Serial.printf("getPreferences.cfg %s: %8.4f\n",preferenceName,value_d);
+  Serial.printf("getPreferences.cfg %s: %8.4f\r\n",preferenceName, value_d);
   return value_d;
 }
 
@@ -1452,7 +1518,7 @@ boolean jsonElementFromPreferenceCFGBool(const char *preferenceName, const char 
   boolean value_b = JSONBuffer[preferenceName];;
   //if (preferenceNameInit) preferences.putBool(preferenceNameInit, true);
   //preferences.putBool(preferenceName, value);
-  Serial.printf("getPreferences.cfg %s: %d\n",preferenceName,value_b);
+  Serial.printf("getPreferences.cfg %s: %d\r\n",preferenceName,value_b);
   return value_b;
 }
 
@@ -1518,6 +1584,9 @@ void load_preferences_cfg_file()
   sb_min_interval = jsonElementFromPreferenceCFGInt(PREF_APRS_SB_MIN_INTERVAL_PRESET,PREF_APRS_SB_MIN_INTERVAL_PRESET_INIT) * 1000;
   if (sb_min_interval < 10000) sb_min_interval = 10000;
   sb_max_interval = jsonElementFromPreferenceCFGInt(PREF_APRS_SB_MAX_INTERVAL_PRESET,PREF_APRS_SB_MAX_INTERVAL_PRESET_INIT) * 1000;
+  // sb max interval not < 90s.
+  if (sb_max_interval < 90000L)
+    sb_max_interval = 90000L;
   if (sb_max_interval <= sb_min_interval) sb_max_interval = sb_min_interval + 1000;
   sb_min_speed = (float) jsonElementFromPreferenceCFGInt(PREF_APRS_SB_MIN_SPEED_PRESET,PREF_APRS_SB_MIN_SPEED_PRESET_INIT);
   if (sb_min_speed < 0) sb_min_speed = 0;
@@ -1538,7 +1607,7 @@ void load_preferences_cfg_file()
 #ifdef ENABLE_BLUETOOTH
    enable_bluetooth = jsonElementFromPreferenceCFGBool(PREF_DEV_BT_EN,PREF_DEV_BT_EN_INIT);
 #endif
-//prüfen ob das reicht, wg. neuem Schlüssel
+   // TOOD: verify if it's sufficient, due to the new key
    usb_serial_data_type = jsonElementFromPreferenceCFGInt(PREF_DEV_USBSERIAL_DATA_TYPE,PREF_DEV_USBSERIAL_DATA_TYPE_INIT);
    enabled_oled  = jsonElementFromPreferenceCFGBool(PREF_DEV_OL_EN,PREF_DEV_OL_EN_INIT);
    adjust_cpuFreq_to = jsonElementFromPreferenceCFGInt(PREF_DEV_CPU_FREQ,PREF_DEV_CPU_FREQ_INIT);
@@ -1860,6 +1929,9 @@ void load_preferences_from_flash()
       preferences.putInt(PREF_APRS_SB_MAX_INTERVAL_PRESET, sb_max_interval/1000);
     }
     sb_max_interval = preferences.getInt(PREF_APRS_SB_MAX_INTERVAL_PRESET) * 1000;
+    // sb max interval not < 90s.
+    if (sb_max_interval < 90000L)
+      sb_max_interval = 90000L;
     if (sb_max_interval <= sb_min_interval) sb_max_interval = sb_min_interval + 1000;
 
     if (!preferences.getBool(PREF_APRS_SB_MIN_SPEED_PRESET_INIT)){
@@ -1896,13 +1968,14 @@ void load_preferences_from_flash()
 
 // 
 
+    // Read OLED RX Timer
     if (!preferences.getBool(PREF_DEV_SHOW_RX_TIME_INIT)){
       preferences.putBool(PREF_DEV_SHOW_RX_TIME_INIT, true);
       preferences.putInt(PREF_DEV_SHOW_RX_TIME, showRXTime/1000);
     }
     showRXTime = preferences.getInt(PREF_DEV_SHOW_RX_TIME) * 1000;
 
-    // Read OLED RX Timer
+    // Read OLED Timeout
     if (!preferences.getBool(PREF_DEV_SHOW_OLED_TIME_INIT)){
       preferences.putBool(PREF_DEV_SHOW_OLED_TIME_INIT, true);
       preferences.putInt(PREF_DEV_SHOW_OLED_TIME, oled_timeout/1000);
@@ -2024,6 +2097,81 @@ void load_preferences_from_flash()
 #endif // ENABLE_PREFERENCES
 
 
+
+void setup_phase2_soft_reconfiguration(boolean runtime_reconfiguration) {
+
+
+  if (runtime_reconfiguration) {
+    digitalWrite(TXLED, LOW);
+    Serial.printf("Init after reloading preferences for Callsign:%s\r\n", Tcall.c_str());
+    set_callsign();
+    Serial.printf("APRS Callsign:%s\r\n", Tcall.c_str());
+  }
+
+  #ifdef T_BEAM_V1_0
+    // switch LoRa chip on or off
+    axp.setPowerOutPut(AXP192_LDO2, (lora_rx_enabled || lora_digipeating_mode > 0) ? AXP202_ON : AXP202_OFF);
+
+    if (gps_state){
+      axp.setPowerOutPut(AXP192_LDO3, AXP202_ON);                           // switch on GPS
+    } else {
+      axp.setPowerOutPut(AXP192_LDO3, AXP202_OFF);                          // switch off GPS
+    }
+    Serial.printf("GPS powered %s\r\n", gps_state ? "on" : "off");
+
+    //axp.setPowerOutPut(AXP192_EXTEN, AXP202_ON);                          // switch this on if you need it
+  #else
+    gps_state = false;
+  #endif
+  gps_state_before_autochange = false;
+
+  // can reduce cpu power consumtion up to 20 %
+  if (adjust_cpuFreq_to > 0) {
+    Serial.print("CPU Freq ad"); Serial.flush();
+    setCpuFrequencyMhz(adjust_cpuFreq_to);
+    // ..survived
+    Serial.printf("justed to:%d\r\n", adjust_cpuFreq_to);
+  }
+
+  // LoRa Chip config
+  // if we are fill-in or wide2 digi, we listen only on configured main frequency
+  lora_speed_rx_curr = (rx_on_frequencies  != 2 || lora_digipeating_mode > 1) ? lora_speed : lora_speed_cross_digi;
+  lora_set_speed(lora_speed_rx_curr);
+  Serial.printf("LoRa Speed:\t%lu\r\n", lora_speed_rx_curr);
+
+  lora_freq_rx_curr = (rx_on_frequencies  != 2 || lora_digipeating_mode > 1) ? lora_freq : lora_freq_cross_digi;
+  rf95.setFrequency(lora_freq_rx_curr);
+  Serial.printf("LoRa FREQ:\t%f\r\n", lora_freq_rx_curr);
+
+  // we tx on main and/or secondary frequency. For tx, loraSend is called (and always has desired txpower as argument)
+  rf95.setTxPower((lora_digipeating_mode < 2 || lora_cross_digipeating_mode < 1) ? txPower : txPower_cross_digi);
+
+  Serial.printf("LoRa PWR: %d, LoRa PWR XDigi: %d, RX Enable: %d, TX Enable: %d\r\n", txPower, txPower_cross_digi, lora_rx_enabled, lora_tx_enabled);
+
+  // APRS fixed location and icon settings
+  init_and_validate_aprs_position_and_icon();
+
+  // init smart beaconing angle average
+  for (int i=0;i<ANGLE_AVGS;i++) {                                        // set average_course to "0"
+    average_course[i]=0;
+  }
+
+  // We need this assurance for failback to fixed interval, if gps position is lost.
+  // fixed beacon rate higher than sb_max_interval does not make sense
+  if (!fixed_beacon_enabled && gps_state && fix_beacon_interval < sb_max_interval)
+    fix_beacon_interval = (sb_max_interval > 120000 ? sb_max_interval : 120000);
+
+
+  if (runtime_reconfiguration) {
+    setup_oled_timer_values();
+  } // else: in setup() during boot, we have several unpredictable delays. That's why it's not called here
+
+
+  if (runtime_reconfiguration)
+    digitalWrite(TXLED, HIGH);
+}
+
+
 // + SETUP --------------------------------------------------------------+//
 void setup()
 {
@@ -2042,7 +2190,7 @@ void setup()
   if (!display.begin(SSD1306_SWITCHCAPVCC, SSD1306_ADDRESS)) {
       for(;;);                                                             // Don't proceed, loop forever
   }
- writedisplaytext("LoRa-APRS","by DL9SAU & DL3EL","Build:" + buildnr,"Hello!","For Factory Reset:","  press middle Button");
+  writedisplaytext("LoRa-APRS","by DL9SAU & DL3EL","Build:" + buildnr,"Hello!","For Factory Reset:","  press middle Button");
   delay(2000);  // 2s delay to be safe that serial.print works
   Serial.println("System Start-Up");
 
@@ -2136,20 +2284,6 @@ void setup()
     if (!axp.begin(Wire, AXP192_SLAVE_ADDRESS)) {
     }
     axp.setLowTemp(0xFF);                                                 //SP6VWX Set low charging temperature
-    if (lora_rx_enabled || lora_digipeating_mode > 0
-          // no: bluetooth has not been configured at this point
-          // #if defined(ENABLE_BLUETOOTH) && defined(KISS_PROTOCOL)
-          //   || SerialBT.hasClient()
-          // #endif
-        )
-      axp.setPowerOutPut(AXP192_LDO2, AXP202_ON);                            // switch LoRa chip on
-    else
-      axp.setPowerOutPut(AXP192_LDO2, AXP202_OFF);                           // switch LoRa chip off
-    if (gps_state){
-      axp.setPowerOutPut(AXP192_LDO3, AXP202_ON);                           // switch on GPS
-    } else {
-      axp.setPowerOutPut(AXP192_LDO3, AXP202_OFF);                           // switch off GPS
-    }
     axp.setPowerOutPut(AXP192_DCDC2, AXP202_ON);
     axp.setPowerOutPut(AXP192_EXTEN, AXP202_OFF);
     //axp.setPowerOutPut(AXP192_EXTEN, AXP202_ON);				// switch this on if you need it
@@ -2165,17 +2299,7 @@ void setup()
   if (adjust_cpuFreq_to > 0)
     setCpuFrequencyMhz(adjust_cpuFreq_to);
 
-
-  Tcall = prepareCallsign(String(CALLSIGN));
-  #ifdef ENABLE_PREFERENCES
-    Tcall = preferences.getString(PREF_APRS_CALLSIGN, "");
-    if (Tcall.isEmpty()){
-      preferences.putString(PREF_APRS_CALLSIGN, String(CALLSIGN));
-      Tcall = preferences.getString(PREF_APRS_CALLSIGN);
-    }
-  #endif
-
-
+  set_callsign();
   writedisplaytext("LoRa-APRS","by DL9SAU & DL3EL","Build:" + buildnr,"Hello de " + Tcall,"For Factory Reset:","  press middle Button");
   Serial.println("LoRa-APRS by DL9SAU & DL3EL Build:" + buildnr);
   Serial.println("Time used since start (-2000ms delay): " + String(millis()-t_setup_entered-2000) + "ms");
@@ -2225,18 +2349,7 @@ void setup()
   }
   writedisplaytext("LoRa-APRS","","Init:","RF95 OK!","","");
 
-  // if we are fill-in or wide2 digi, we listen only on configured main frequency
-  lora_speed_rx_curr = (rx_on_frequencies  != 2 || lora_digipeating_mode > 1) ? lora_speed : lora_speed_cross_digi;
-  lora_set_speed(lora_speed_rx_curr);
-  // prefix with KISS_END
-  Serial.printf("LoRa Speed:\t%lu\r\n", lora_speed_rx_curr);
-
-  lora_freq_rx_curr = (rx_on_frequencies  != 2 || lora_digipeating_mode > 1) ? lora_freq : lora_freq_cross_digi;
-  rf95.setFrequency(lora_freq_rx_curr);
-  Serial.printf("LoRa FREQ:\t%f\r\n", lora_freq_rx_curr);
-
-  // we tx on main and/or secondary frequency. For tx, loraSend is called (and always has desired txpower as argument)
-  rf95.setTxPower((lora_digipeating_mode < 2 || lora_cross_digipeating_mode < 1) ? txPower : txPower_cross_digi);
+  setup_phase2_soft_reconfiguration(0);
   delay(500);
 
 
@@ -2247,9 +2360,6 @@ void setup()
   sema_lora_chip = false;
 #endif
 
-
-  // LORA32_21: bug in hardware. cannot run bluetooth and wifi concurrently.
-  // We wait for a bt-client connecting, up to 60s. If none connected,
 
   // new process: GPS
   if (gps_state) {
@@ -2269,59 +2379,12 @@ void setup()
   //  - webserver and bluetooth do not work in parallel on some devices.
   //  - webserver needs some variables to be set correctly if it starts up
   //    (and web client requests them).
-  // -> We do the variable stuff first, and right before end of setup(),
-  //    we start the webserver (if needed)
+  // -> We already finished variable stuff above, or do it right before end of setup().
+  //    Now we are prepared to start the webserver process (if needed). First, we may start bluetooth.
 
-
-
-  if (sb_max_interval < nextTX){
-    sb_max_interval=nextTX;
-  }
-
-  // We have stored the manual position string in a higher precision (in case resolution more precise than 18.52m is required; i.e. for base-91 location encoding, or DAO extenstion).
-  // Furthermore, 53-32.1234N is more readable in the Web-interface than 5232.1234N
-  aprsLatPreset.toUpperCase(); aprsLatPreset.replace(",", "."); aprsLatPreset.trim();
-  if (aprsLatPreset.length() == 11 && aprsLatPreset.indexOf('-') == 2 && aprsLatPreset.indexOf(' ') == -1 && (aprsLatPreset.endsWith("N") || aprsLatPreset.endsWith("S"))) {
-    char buf[9];
-    const char *p = aprsLatPreset.c_str();
-    sprintf(buf, "%.2s%.5s%c", p, p+3, p[10]);
-    aprsLatPreset = String(buf);
-  }
-
-  // 001-20.5000E is more readable in the Web-interface than 00120.5000E, and could not be mis-interpreted as 120.5 degrees east  (== 120 deg 30' 0" E)
-  aprsLonPreset.toUpperCase(); aprsLonPreset.replace(",", "."); aprsLonPreset.trim();
-  if (aprsLonPreset.length() == 12 && aprsLonPreset.indexOf('-') == 3 && aprsLonPreset.indexOf(' ') == -1 && (aprsLonPreset.endsWith("E") || aprsLonPreset.endsWith("W"))) {
-    char buf[10];
-    const char *p = aprsLonPreset.c_str();
-    sprintf(buf, "%.3s%.5s%c", p, p+4, p[11]);
-    aprsLonPreset = String(buf);
-  }
-
-  // enforce valid transmissions even on wrong configurations
-  if (aprsSymbolTable.length() != 1)
-    aprsSymbolTable = String("/");
-  if (aprsSymbol.length() != 1)
-    aprsSymbol = String("[");
-  if (aprsLatPreset.length() != 8 || !(aprsLatPreset.endsWith("N") || aprsLatPreset.endsWith("S")) || aprsLatPreset.c_str()[4] != '.')
-    aprsLatPreset = String("0000.00N");
-  if (aprsLonPreset.length() != 9 || !(aprsLonPreset.endsWith("E") || aprsLonPreset.endsWith("W")) || aprsLonPreset.c_str()[5] != '.')
-    aprsLonPreset = String("00000.00E");
-
-  for (int i=0;i<ANGLE_AVGS;i++) {                                        // set average_course to "0"
-    average_course[i]=0;
-  }
-  //lastTxdistance  = 0;
-
-  // we need this assurance for failback to fixed interval, if gps position is lost.
-  // fixed beacon rate higher than sb_max_interval does not make sense
-  if (!fixed_beacon_enabled && gps_state && fix_beacon_interval < sb_max_interval)
-    fix_beacon_interval = sb_max_interval;
-
-
-  // Now we are prepared to start the webserver process. First, we may start bluetooth.
 #if defined(KISS_PROTOCOL) && defined(ENABLE_BLUETOOTH)
   // TTGO: webserver cunsumes abt 80mA. User may not start the webserver
-  // if bt-client is connected. We'll also wait herefor clients.
+  // if bt-client is connected. We'll also wait here for clients.
   // If enable_webserver on LORA32_21 is set to 2, user
   // likes the webserver always to be started -> do not start bluetooth.
 #if defined(ENABLE_WIFI)
@@ -2353,7 +2416,7 @@ void setup()
   #if defined(LORA32_21)
         writedisplaytext("LoRa-APRS","","Init:","Waiting for BT-client","Disabling BT!","");
         SerialBT.end();
-	enable_bluetooth = false;
+        enable_bluetooth = false;
   #endif
       } else {
         writedisplaytext("LoRa-APRS","","Init:","Waiting for BT-clients","BT-client connected","Will NOT start WiFi!");
@@ -2393,18 +2456,9 @@ void setup()
   esp_task_wdt_init(120, true); //enable panic so ESP32 restarts
   esp_task_wdt_add(NULL); //add current thread to WDT watch
 
-
-  // Hold the OLED ON at first boot.
-  // oled_timeout == 0 is a special case for 'always on'.
-  // If user switches off OLED (enabled_oled == false), but sets oled_timeout to 0 (always on),
-  // we add SHOW_OLED_TIME to timeout (instead of 0), for keep it running for 15s after setup();
-  // if enabled_oled is true and oled_timeout is 0, this does not harm.
-  oled_timer = millis() + (oled_timeout ? oled_timeout : SHOW_OLED_TIME);
-  time_to_refresh = millis() + showRXTime;
+  setup_oled_timer_values();
 
   writedisplaytext("LoRa-APRS","","Init:","FINISHED OK!","   =:-)   ","");
-  //  writedisplaytext("","","","","","");
-
   fillDisplayLine1();
   fillDisplayLine2();
   displayInvalidGPS();
@@ -2412,12 +2466,6 @@ void setup()
   digitalWrite(TXLED, HIGH);
 }
 
-void enableOled() {
-  if (!enabled_oled)
-    return;
-  // This function enables OLED display after pressing a button
-  oled_timer = millis() + oled_timeout;
-}
 
 int packet_is_valid (const char *frame_start) {
   const char *p = frame_start;
@@ -3470,11 +3518,7 @@ void loop()
 
   sendpacket_was_called_twice = false;
 
-  // Ticker blinks upper left corner to indicate system is running
-  // only when OLED is on
-  if (display_is_on) {
-    display_refresh1s();
-  }  
+  timer_once_a_second();
 
   if(digitalRead(BUTTON)==LOW && key_up == true){
     key_up = false;

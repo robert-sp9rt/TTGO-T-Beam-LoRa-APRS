@@ -108,6 +108,8 @@ extern ulong lora_speed_cross_digi;
 extern double lora_freq_cross_digi;
 extern void loraSend(byte, float, ulong, uint8_t , const String &);
 extern void load_preferences_from_flash(void);
+extern void setup_phase2_soft_reconfiguration(boolean);
+
 extern int save_to_file(const String &, const char *, const String &);
 
 IPAddress IP_NULL(0,0,0,0);
@@ -316,6 +318,7 @@ void handle_SaveWifiCfg() {
 
   // runtime reconfiguration with changed settings
   load_preferences_from_flash();
+  setup_phase2_soft_reconfiguration(1);
 
   server.sendHeader("Location", "/");
   server.send(302,"text/html", "");
@@ -512,7 +515,7 @@ void handle_ReceivedList() {
   for (auto element: receivedPackets){
     char buf[64];
     strftime(buf, 64, "%Y-%m-%d %H:%M:%S", &element->rxTime);
-    auto packet_data = eceived.createNestedObject();
+    auto packet_data = received.createNestedObject();
     packet_data["time"] = String(buf);
     packet_data["packet"] = element->packet->c_str();
     packet_data["rssi"] = element->RSSI;
@@ -948,6 +951,7 @@ void handle_SaveAPRSCfg() {
 
   // runtime reconfiguration with changed settings
   load_preferences_from_flash();
+  setup_phase2_soft_reconfiguration(1);
 
   server.sendHeader("Location", "/");
   server.send(302,"text/html", "");
@@ -987,6 +991,7 @@ void handle_saveDeviceCfg(){
 
   // runtime reconfiguration with changed settings
   load_preferences_from_flash();
+  setup_phase2_soft_reconfiguration(1);
 
   server.sendHeader("Location", "/");
   server.send(302,"text/html", "");
@@ -1860,11 +1865,11 @@ void send_to_aprsis()
             send_to_aprsis();
           }
 
-	  // anti-idle timer for the tcp session
+          // anti-idle timer for the tcp session
           if (aprsis_client.connected() && millis() - t_aprsis_lastRXorTX > 2*60*1000L) {
             aprsis_client.print("#\r\n");
             t_aprsis_lastRXorTX = millis();
-	  }
+          }
 
         } else {
 

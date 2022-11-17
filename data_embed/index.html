@@ -101,7 +101,7 @@
                     </div>
                 </div>
                 <div class="grid-container full">
-                    <input class="button-primary" type="submit" value="Save">
+                    <input class="button-primary" type="submit" value="Save (reboot needed after changes in this section)">
                 </div>
             </form>
         </article>
@@ -190,7 +190,7 @@
                 </div>
                 <div class="grid-container quarters">
                     <div>
-                        <label for="aprs_callsign">Callsign and SSID</label>
+                        <label for="aprs_callsign">Callsign and SSID *</label>
                         <input class="u-full-width" type="text" minlength="3" maxlength="9" name="aprs_callsign" placeholder="NOCALL-1" id="aprs_callsign" title="your callsign with SSID">
                     </div>
                     <div>
@@ -228,6 +228,9 @@
                     <div>
                         <label for="aprs_batt">Show Battery</label>
                         <input name="aprs_batt" id="aprs_batt" type="checkbox" value="1" title=" show battery voltage after personal comment">
+                    </div>
+                    <div>
+                            *) requires reboot only if connection to aprs-is enabled
                     </div>
                     </div>
                     <div class="grid-container full">
@@ -407,6 +410,7 @@
                 </div>
                 <div class="grid-container full">
                     <h5 class="u-full-width">APRS-IS settings</h5>
+            <h6 class="u-full-width">changes in the foollowing section need a reboot to ensure correct login into APRS-IS</h6>
                 </div>
                 <div class="grid-container halves">
                   <div>
@@ -593,6 +597,7 @@
     <section>
         <div class="grid-container full">
             <h2 class="u-full-width">Actions</h2>
+            <h6 class="u-full-width">NEW: reboot after changes above only necessary, where explicitly stated</h6>
         </div>
         <article>
             <div class="grid-container quarters">
