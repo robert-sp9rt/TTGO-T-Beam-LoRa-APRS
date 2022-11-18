@@ -317,7 +317,7 @@
                 </div>
                 <div class="grid-container quarters">
                     <div>
-                        <label for="gps_enabled">GPS enabled</label>
+                        <label for="gps_enabled">GPS enabled *</label>
                         <input name="gps_enabled" id="gps_enabled" type="checkbox" value="1" title="enable or disable GPS">
                     </div>
                     <div>
@@ -327,6 +327,9 @@
                     <div>
                         <label for="gps_sleep_ok">Allow GPS sleep while own positions received via KISS</label>
                         <input name="gps_sleep_ok" id="gps_sleep_ok" type="checkbox" value="1" title="If we have a kiss client like aprsdroid, or a digipeater software, which sends own positions (with same call as ours), we pause sending own positions (neither fixed nor smart beaconing). Uncheck, if you have a display attached and still like to see your current GPS position. This option is only honored if configuration 'Accept own positions via KISS' enabled. Why? If your filter out own positions from and this device sends on it's own, it needs gps running ;)">
+                    </div>
+                    <div>
+                            *) requires reboot only if connection to aprs-is enabled
                     </div>
                 </div>
                 <div class="grid-container full">
@@ -539,7 +542,7 @@
             <div class="grid-container halves">
                 <div>
                   <label for="curPos">Current Position</label>
-                  <input type="text" name="curPos" id="curPos" readonly title="Current Postition of device [P if preset; p, if gps is invalid and used as temporary preset]">
+                  <input type="text" name="curPos" id="curPos" readonly title="Current Position of device [P if fixed mode; p, if gps is invalid and used as temporary preset]">
                 </div>
                 <div>
                   <label for="OledLine5">Satellite & Batt Info</label>

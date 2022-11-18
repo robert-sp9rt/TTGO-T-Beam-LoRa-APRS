@@ -161,7 +161,7 @@ String aprsPresetShown = "P";
 // after successful data retrieval, gps_isValid becomes true (or turn false, if retrieval fails)
 boolean gps_isValid = false;
 int gps_speed_kmph = 0;
-int gps_speed_kmph_oled = 0;
+//int gps_speed_kmph_oled = 0;
 char gps_time_s[20];// Room for len(01:02:03 04.05.2022) + 1 /* \0 */  -> 20
 
 boolean key_up = true;
@@ -316,14 +316,16 @@ int8_t WIFI_NOT_CONNECTED_TO_AP = 4;
 int8_t WIFI_RUNNING_AS_AP = 8;
 int8_t wifi_connection_status = WIFI_DISABLED;
 int8_t wifi_connection_status_prev = -1;
-String infoApName = "";
-String infoApPass = "";
-String infoIpAddr = "";
-// for SPIFFS WLAN Credentials
-String stdApName = "";
-String stdApPass = "";
-String safeApName = "";
-String safeApPass = "";
+String oled_wifi_SSID_curr = "";
+String oled_wifi_PASS_curr = "";
+String oled_wifi_IP_curr = "";
+String wifi_ModeAP_SSID;
+String wifi_ModeAP_PASS;
+String wifi_ModeSTA_SSID;
+String wifi_ModeSTA_PASS;
+// comes for SPIFFS WLAN Credentials:
+String wifi_ModeSTA_SSID_fallback;
+String wifi_ModeSTA_PASS_fallback;
 #endif
 
 #define JSON_MAX_FILE_SIZE 2560
@@ -378,7 +380,7 @@ int rx_on_frequencies = 1;			// RX freq. Only if lora_digipeating_mode < 2 (we a
 
 bool acceptOwnPositionReportsViaKiss = true;		// true: Switches off local beacons as long as a kiss device is sending positions with our local callsign. false: filters out position packets with own callsign coming from kiss (-> do not send to LoRa).
 boolean gps_allow_sleep_while_kiss = true;		// user has a kiss device attached via kiss which sends positions with own call, we don't need our gps to be turned on -> We pause sending positions by ourself (neither fixed nor smart beaconing). Except: user has a display attached to this tracker, he'll will be able to see his position because our gps does not go to sleep (-> set this to false). Why sleep? Energy saving
-boolean wifi_do_failback_to_mode_AP = true;		// Allow failback to mode AP after once connected successfully connected (after boot) to configured remote AP. Disable for igates, where you don't need your tracker to be a hotspot. You like to enable, if you use your tracker portable and it should automatically be wifi client to your home network, and be AP if you are outside.
+boolean wifi_do_fallback_to_mode_AP = true;		// Allow fallback to mode AP after once connected successfully connected (after boot) to configured remote AP. Disable for igates, where you don't need your tracker to be a hotspot. You like to enable, if you use your tracker portable and it should automatically be wifi client to your home network, and be AP if you are outside.
 boolean send_status_message_to_aprsis = true;		// Send reboot, wifi- or internet-loss as APPRS-status-message to APRS-IS
 uint8_t usb_serial_data_type = 0;		// 0: KISS. 1: Display some debug messages on serial port. 2: Display lora-received packets in TNC trace format. 3: 1+2
 						// If >0  usb-serial KISS-send and KISS-receive are stoped.
@@ -965,12 +967,11 @@ void timer_once_a_second() {
 
 
 String getSpeedCourseAlti() {
-  // muss noch umgebaut werden, so dass die Daten wie speed im loop() geholt werden (DL3EL)
   // TODO: Web configurable output in speed km/h and height m; or speed mph and height ft, or speed kn (sm/h) and height ft
   String sca = "";
   String dalt = "";
 
-  if (gps_state == true && gps_isValid) {
+  if (gps_state && gps_isValid) {
     int  dalt_int = max(-99999, min(999999, (int ) gps.altitude.meters()));
     dalt = dalt + String(dalt_int) + "m ";
     sca = String(gps_speed_kmph) + "km/h " + String(gps.course.deg(), 1) + "\xF7 " + dalt;
@@ -984,7 +985,7 @@ String getSpeedCourseAlti() {
 String getSatAndBatInfo() {
   String line5;
 
-  if (gps_state == true)
+  if (gps_state)
     line5 = "S:" + String(gps.satellites.value()) + "/" + String(int(gps.hdop.hdop()));
   else
     line5 = "S:-/-";
@@ -1387,42 +1388,42 @@ boolean readFile(fs::FS &fs, const char *filename) {
     const char *p;
     if (JSONBuffer.containsKey("SSID1") && JSONBuffer.containsKey("password1")) {
       if ((p = JSONBuffer["SSID1"]))
-        stdApName = String(p);
+        wifi_ModeSTA_SSID = String(p);
       if ((p = JSONBuffer["password1"]))
-        stdApPass = String(p);
+        wifi_ModeSTA_PASS = String(p);
     }
     if (JSONBuffer.containsKey("SSID2") && JSONBuffer.containsKey("password2")) {
       if ((p = JSONBuffer["SSID2"]))
-        safeApName = String(p);
+        wifi_ModeSTA_SSID_fallback = String(p);
       if ((p = JSONBuffer["password2"]))
-        safeApPass = String(p);
+        wifi_ModeSTA_PASS_fallback = String(p);
     }
 
     if (JSONBuffer.containsKey("ap_password") && (p = JSONBuffer["ap_password"])) {
-        infoApPass = String(p);
+        wifi_ModeAP_PASS = String(p);
     }
 
 
-    if (!stdApName.length() || stdApPass.length() < 8 || stdApName == "EnterSSIDofYourAccesspoint") {
-      Serial.println("SSID: " + stdApName + " missing or PW: " + stdApPass + " < 8 Byte, Filesize: " + String(file.size()));
-      stdApName = "";
-      stdApPass = "";
+    if (!wifi_ModeSTA_SSID.length() || wifi_ModeSTA_PASS.length() < 8 || wifi_ModeSTA_SSID == "EnterSSIDofYourAccesspoint") {
+      Serial.println("SSID: " + wifi_ModeSTA_SSID + " missing or PW: " + wifi_ModeSTA_PASS + " < 8 Byte, Filesize: " + String(file.size()));
+      wifi_ModeSTA_SSID = "";
+      wifi_ModeSTA_PASS = "";
     } else {
-      Serial.println("SSID: " + stdApName + ", PW: " + stdApPass + ", Filesize: " + String(file.size()));
+      Serial.println("SSID: " + wifi_ModeSTA_SSID + ", PW: " + wifi_ModeSTA_PASS + ", Filesize: " + String(file.size()));
     }
 
-    if (!safeApName.length() || safeApPass.length() < 8 || safeApName == "EnterSSIDofYourAccesspoint") {
-      Serial.println("SSID: " + safeApName + " missing or PW: " + safeApPass + " < 8 Byte, Filesize: " + String(file.size()));
-      safeApName = "";
-      safeApPass = "";
+    if (!wifi_ModeSTA_SSID_fallback.length() || wifi_ModeSTA_PASS_fallback.length() < 8 || wifi_ModeSTA_SSID_fallback == "EnterSSIDofYourAccesspoint") {
+      Serial.println("Fallback-SSID: " + wifi_ModeSTA_SSID_fallback + " missing or PW: " + wifi_ModeSTA_PASS_fallback + " < 8 Byte, Filesize: " + String(file.size()));
+      wifi_ModeSTA_SSID_fallback = "";
+      wifi_ModeSTA_PASS_fallback = "";
     } else {
-      Serial.println("Fallback SSID: " + safeApName + ", PW: " + safeApPass + ", Filesize: " + String(file.size()));
+      Serial.println("Fallback SSID: " + wifi_ModeSTA_SSID_fallback + ", PW: " + wifi_ModeSTA_PASS_fallback + ", Filesize: " + String(file.size()));
     }
 
-    if (!infoApPass.length() || infoApPass.length() < 8) {
-      Serial.println("SelfAp PW missing: " + infoApPass);
+    if (!wifi_ModeAP_PASS.length() || wifi_ModeAP_PASS.length() < 8) {
+      Serial.println("ModeAP PW missing: " + wifi_ModeAP_PASS);
     } else {
-      Serial.println("SelfAp PW: " + infoApPass);
+      Serial.println("ModeAP PW: " + wifi_ModeAP_PASS);
     }
 
     goto end;
@@ -1531,7 +1532,7 @@ void load_preferences_cfg_file()
   enable_webserver = jsonElementFromPreferenceCFGInt(PREF_WIFI_ENABLE,PREF_WIFI_ENABLE_INIT);
   tncServer_enabled = jsonElementFromPreferenceCFGBool(PREF_TNCSERVER_ENABLE,PREF_TNCSERVER_ENABLE_INIT);
   gpsServer_enabled = jsonElementFromPreferenceCFGBool(PREF_GPSSERVER_ENABLE,PREF_GPSSERVER_ENABLE_INIT);
-  wifi_do_failback_to_mode_AP = jsonElementFromPreferenceCFGBool(PREF_WIFI_STA_ALLOW_FAILBACK_TO_MODE_AP_AFTER_ONCE_CONNECTED,PREF_WIFI_STA_ALLOW_FAILBACK_TO_MODE_AP_AFTER_ONCE_CONNECTED_INIT);
+  wifi_do_fallback_to_mode_AP = jsonElementFromPreferenceCFGBool(PREF_WIFI_STA_ALLOW_FAILBACK_TO_MODE_AP_AFTER_ONCE_CONNECTED,PREF_WIFI_STA_ALLOW_FAILBACK_TO_MODE_AP_AFTER_ONCE_CONNECTED_INIT);
   wifi_txpwr_mode_AP = jsonElementFromPreferenceCFGInt(PREF_WIFI_TXPWR_MODE_AP,PREF_WIFI_TXPWR_MODE_AP_INIT);
   wifi_txpwr_mode_STA = jsonElementFromPreferenceCFGInt(PREF_WIFI_TXPWR_MODE_STA,PREF_WIFI_TXPWR_MODE_STA_INIT);
   s = jsonElementFromPreferenceCFGString(PREF_SYSLOG_SERVER,0);
@@ -1653,9 +1654,9 @@ void load_preferences_from_flash()
 
     if (!preferences.getBool(PREF_WIFI_STA_ALLOW_FAILBACK_TO_MODE_AP_AFTER_ONCE_CONNECTED_INIT)){
       preferences.putBool(PREF_WIFI_STA_ALLOW_FAILBACK_TO_MODE_AP_AFTER_ONCE_CONNECTED_INIT, true);
-      preferences.putBool(PREF_WIFI_STA_ALLOW_FAILBACK_TO_MODE_AP_AFTER_ONCE_CONNECTED, wifi_do_failback_to_mode_AP);
+      preferences.putBool(PREF_WIFI_STA_ALLOW_FAILBACK_TO_MODE_AP_AFTER_ONCE_CONNECTED, wifi_do_fallback_to_mode_AP);
     }
-    wifi_do_failback_to_mode_AP = preferences.getBool(PREF_WIFI_STA_ALLOW_FAILBACK_TO_MODE_AP_AFTER_ONCE_CONNECTED);
+    wifi_do_fallback_to_mode_AP = preferences.getBool(PREF_WIFI_STA_ALLOW_FAILBACK_TO_MODE_AP_AFTER_ONCE_CONNECTED);
 
     if (!preferences.getBool(PREF_WIFI_TXPWR_MODE_AP_INIT)){
       preferences.putBool(PREF_WIFI_TXPWR_MODE_AP_INIT, true);
@@ -2130,7 +2131,7 @@ void setup_phase2_soft_reconfiguration(boolean runtime_reconfiguration) {
     Serial.print("CPU Freq ad"); Serial.flush();
     setCpuFrequencyMhz(adjust_cpuFreq_to);
     // ..survived
-    Serial.printf("justed to:%d\r\n", adjust_cpuFreq_to);
+    Serial.printf("justed to: %d\r\n", adjust_cpuFreq_to);
   }
 
   // LoRa Chip config
@@ -2156,7 +2157,7 @@ void setup_phase2_soft_reconfiguration(boolean runtime_reconfiguration) {
     average_course[i]=0;
   }
 
-  // We need this assurance for failback to fixed interval, if gps position is lost.
+  // We need this assurance for fallback to fixed interval, if gps position is lost.
   // fixed beacon rate higher than sb_max_interval does not make sense
   if (!fixed_beacon_enabled && gps_state && fix_beacon_interval < sb_max_interval)
     fix_beacon_interval = (sb_max_interval > 120000 ? sb_max_interval : 120000);
@@ -2244,10 +2245,10 @@ void setup()
         readFile(SPIFFS, "/preferences.cfg");
         if (preferences.getString(PREF_WIFI_PASSWORD, "").isEmpty() ||
               preferences.getString(PREF_WIFI_SSID, "").isEmpty()) {
-          preferences.putString(PREF_WIFI_SSID, stdApName);
-          preferences.putString(PREF_WIFI_PASSWORD, stdApPass);
-          preferences.putString(PREF_AP_PASSWORD, infoApPass);
-          Serial.println("WiFi: Updated remote SSID: " + stdApName);
+          preferences.putString(PREF_WIFI_SSID, wifi_ModeSTA_SSID);
+          preferences.putString(PREF_WIFI_PASSWORD, wifi_ModeSTA_PASS);
+          preferences.putString(PREF_AP_PASSWORD, wifi_ModeAP_PASS);
+          Serial.println("WiFi: Updated remote SSID: " + wifi_ModeSTA_SSID);
           Serial.println("WiFi: Updated remote PW: ***");
         }
       } else {
@@ -3531,16 +3532,16 @@ void loop()
           enableOled(); // turn ON OLED temporary
         } else {
           fillDisplayLines3to5();
-          if (gps_state == true && gps_isValid) {
+          if (gps_state && gps_isValid) {
 #ifdef ENABLE_WIFI
-            writedisplaytext("((MAN TX))","SSID: " + infoApName,"IP: " + infoIpAddr, OledLine3, OledLine4, OledLine5);
+            writedisplaytext("((MAN TX))","SSID: " + oled_wifi_SSID_curr,"IP: " + oled_wifi_IP_curr, OledLine3, OledLine4, OledLine5);
 #else
             writedisplaytext("((MAN TX))","","",OledLine3, OledLine4, OledLine5);
 #endif
             sendpacket(SP_POS_GPS);
           } else {
 #ifdef ENABLE_WIFI
-            writedisplaytext("((FIX TX))","SSID: " + infoApName,"IP: " + infoIpAddr, OledLine3, OledLine4, OledLine5);
+            writedisplaytext("((FIX TX))","SSID: " + oled_wifi_SSID_curr,"IP: " + oled_wifi_IP_curr, OledLine3, OledLine4, OledLine5);
 #else
             writedisplaytext("((FIX TX))","","",OledLine3, OledLine4, OledLine5);
 #endif
@@ -3648,7 +3649,7 @@ void loop()
   } else if (!gps_isValid) {
     // isValid change of previous run, and still invalid
     gps_speed_kmph = 0;
-    gps_speed_kmph_oled = 0;
+    //gps_speed_kmph_oled = 0;
   }
 
 
@@ -3657,13 +3658,13 @@ void loop()
   if (wifi_connection_status_prev != wifi_connection_status) {
     enableOled(); // turn ON OLED temporary
     if (wifi_connection_status == WIFI_CONNECTED_TO_AP) {
-      writedisplaytext("((WiFi))","WiFi Client Mode","SSID: " + infoApName, "Pass: ********", "IP: " + infoIpAddr, getSatAndBatInfo());
+      writedisplaytext("((WiFi))","WiFi Client Mode","SSID: " + oled_wifi_SSID_curr, "Pass: ********", "IP: " + oled_wifi_IP_curr, getSatAndBatInfo());
     } else if (wifi_connection_status == WIFI_SEARCHING_FOR_AP) {
-      writedisplaytext("((WiFi))","WiFi Client Mode","SSID: " + infoApName, "Not in sight!", "IP: none", getSatAndBatInfo());
+      writedisplaytext("((WiFi))","WiFi Client Mode","SSID: " + oled_wifi_SSID_curr, "Not in sight!", "IP: none", getSatAndBatInfo());
     } else if (wifi_connection_status == WIFI_RUNNING_AS_AP) {
-      writedisplaytext("((WiFi))","WiFi AP Mode","SSID: " + infoApName, "Pass: " + infoApPass, "IP: " + infoIpAddr, getSatAndBatInfo());
+      writedisplaytext("((WiFi))","WiFi AP Mode","SSID: " + oled_wifi_SSID_curr, "Pass: " + oled_wifi_PASS_curr, "IP: " + oled_wifi_IP_curr, getSatAndBatInfo());
     } else {
-//      writedisplaytext("((WiFi))","WiFi off","SSID: " + infoApName, "Pass: " + infoApPass, "IP: " + infoIpAddr, getSatAndBatInfo());
+//      writedisplaytext("((WiFi))","WiFi off","SSID: " + oled_wifi_SSID_curr, "Pass: " + oled_wifi_PASS_curr, "IP: " + oled_wifi_IP_curr, getSatAndBatInfo());
       writedisplaytext("((WiFi))","WiFi off","press key long","to enable","", getSatAndBatInfo());
     }
     wifi_connection_status_prev = wifi_connection_status;
@@ -3677,7 +3678,7 @@ void loop()
     enableOled();
     fillDisplayLines3to5();
 #ifdef	ENABLE_WIFI
-    writedisplaytext("((WEB TX))","SSID: " + infoApName,"IP: " + infoIpAddr, OledLine3, OledLine4, OledLine5);
+    writedisplaytext("((WEB TX))","SSID: " + oled_wifi_SSID_curr,"IP: " + oled_wifi_IP_curr, OledLine3, OledLine4, OledLine5);
 #else
     writedisplaytext("((WEB TX))","","",OledLine3, OledLine4, OledLine5);
 #endif

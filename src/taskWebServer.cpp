@@ -30,12 +30,20 @@ extern uint8_t WIFI_CONNECTED_TO_AP;
 extern uint8_t WIFI_NOT_CONNECTED_TO_AP;
 extern int8_t WIFI_RUNNING_AS_AP;
 extern int8_t wifi_connection_status;
-extern String infoApName;
-extern String infoApPass;
-extern String infoIpAddr;
+
+extern String wifi_ModeAP_SSID;
+extern String wifi_ModeAP_PASS;
+String wifi_ModeAP_PASS_default = "xxxxxxxxxx";
+extern String wifi_ModeSTA_PASS;
+extern String wifi_ModeSTA_SSID;
+
 // credentials from wifi.cfg
-extern String safeApName;
-extern String safeApPass;
+extern String wifi_ModeSTA_SSID_fallback;
+extern String wifi_ModeSTA_PASS_fallback;
+// for displaying wifi status
+extern String oled_wifi_SSID_curr;
+extern String oled_wifi_PASS_curr;
+extern String oled_wifi_IP_curr;
 
 extern int8_t wifi_txpwr_mode_AP;
 extern int8_t wifi_txpwr_mode_STA;
@@ -44,7 +52,7 @@ extern bool tncServer_enabled;
 extern bool gpsServer_enabled;
 
 
-extern boolean wifi_do_failback_to_mode_AP;
+extern boolean wifi_do_fallback_to_mode_AP;
 extern String buildnr;
 
 // For APRS-IS connection
@@ -79,12 +87,6 @@ extern char src_call_blacklist;
 QueueHandle_t webListReceivedQueue = nullptr;
 std::list <tReceivedPacketData*> receivedPackets;
 const int MAX_RECEIVED_LIST_SIZE = 50;
-
-String apSSID = "";
-String apPassword = "";
-String defApPassword = "xxxxxxxxxx";
-String wifi_password = "";
-String wifi_ssid = "";
 
 // last i/o to aprsis-connection (needed for anti-idle timer)
 uint32_t t_aprsis_lastRXorTX = 0L;
@@ -1041,30 +1043,30 @@ void restart_AP_or_STA(void) {
   boolean start_soft_ap = first_run ? true : false;
   first_run = false;
   String log_msg;
-  String used_wifi_ssid;
-  String used_wifi_password;
+  String used_wifi_ModeSTA_SSID;
+  String used_wifi_ModeSTA_PASS;
 
-  if (wifi_ssid.length() || safeApName.length()) {
+  if (wifi_ModeSTA_SSID.length() || wifi_ModeSTA_SSID_fallback.length()) {
 
-    infoApName = "[not connected]";
-    infoApPass = "";
-    infoIpAddr = "0.0.0.0";
+    oled_wifi_SSID_curr = "[not connected]";
+    oled_wifi_PASS_curr = "";
+    oled_wifi_IP_curr = "0.0.0.0";
 
     start_soft_ap = false;
 
-    boolean successfully_associated = restart_STA(wifi_ssid, wifi_password);
+    boolean successfully_associated = restart_STA(wifi_ModeSTA_SSID, wifi_ModeSTA_PASS);
     if (successfully_associated) {
-      used_wifi_ssid = wifi_ssid;
-      used_wifi_password = wifi_password;
+      used_wifi_ModeSTA_SSID = wifi_ModeSTA_SSID;
+      used_wifi_ModeSTA_PASS = wifi_ModeSTA_PASS;
     } else {
       // second try, with the SSID and password from wifi.cfg
-      successfully_associated = restart_STA(safeApName, safeApPass);
+      successfully_associated = restart_STA(wifi_ModeSTA_SSID_fallback, wifi_ModeSTA_PASS_fallback);
       if (successfully_associated) {
-        used_wifi_ssid = safeApName;
-        used_wifi_password = safeApPass;
+        used_wifi_ModeSTA_SSID = wifi_ModeSTA_SSID_fallback;
+        used_wifi_ModeSTA_PASS = wifi_ModeSTA_PASS_fallback;
       }
     }
-    if (!successfully_associated && (!mode_sta_once_successfully_connected || wifi_do_failback_to_mode_AP)) {
+    if (!successfully_associated && (!mode_sta_once_successfully_connected || wifi_do_fallback_to_mode_AP)) {
        start_soft_ap = true;
     }
 
@@ -1076,12 +1078,10 @@ void restart_AP_or_STA(void) {
     }
 
   }
-  if (start_soft_ap)
-    do_serial_println("WiFi: Status: " + String((int ) WiFi.status()) + " SoftAP: true  (AP: " +  apSSID + ")");
-  else
-    do_serial_println("WiFi: Status: " + String((int ) WiFi.status()) + " SoftAP: false  (AP: " +  used_wifi_ssid + ")");
 
   if (start_soft_ap) {
+
+    do_serial_println("WiFi: Status: " + String((int ) WiFi.status()) + ". Will run as mode AP (SSID: '" +  wifi_ModeAP_SSID + "'");
     WiFi.disconnect();
     WiFi.softAPdisconnect();
     WiFi.mode(WIFI_AP);
@@ -1090,15 +1090,15 @@ void restart_AP_or_STA(void) {
     #ifdef ENABLE_SYSLOG
       syslog_log(LOG_INFO, log_msg);
     #endif
-    WiFi.softAP(apSSID.c_str(), apPassword.c_str());
+    WiFi.softAP(wifi_ModeAP_SSID.c_str(), wifi_ModeAP_PASS.c_str());
     wifi_connection_status = WIFI_RUNNING_AS_AP;
     esp_wifi_set_max_tx_power(wifi_txpwr_mode_AP);
 
-    infoApName = apSSID;
-    infoApPass = apPassword;
-    infoIpAddr = WiFi.softAPIP().toString();
+    oled_wifi_SSID_curr = wifi_ModeAP_SSID;
+    oled_wifi_PASS_curr = wifi_ModeAP_PASS;
+    oled_wifi_IP_curr = WiFi.softAPIP().toString();
 
-    log_msg = "WiFi: Running AP. SSID: " + infoApName + ". IP: " + infoIpAddr;
+    log_msg = "WiFi: Running AP. SSID: " + oled_wifi_SSID_curr + ". IP: " + oled_wifi_IP_curr;
     #ifdef ENABLE_SYSLOG
         syslog_log(LOG_INFO, log_msg);
     #endif
@@ -1106,25 +1106,27 @@ void restart_AP_or_STA(void) {
     wifi_connection_status = WIFI_RUNNING_AS_AP;
 
   } else if (WiFi.getMode() == WIFI_MODE_STA) {
+
+    do_serial_println("WiFi: Status: " + String((int ) WiFi.status()) + ". Will run as mode STA (remote SSID: '" +  used_wifi_ModeSTA_SSID + "'");
     // Save some battery
     //WiFi.setSleep(true);
     esp_wifi_set_ps(WIFI_PS_MAX_MODEM);
-    infoApName = used_wifi_ssid;
-    infoApPass = used_wifi_password;
+    oled_wifi_SSID_curr = used_wifi_ModeSTA_SSID;
+    oled_wifi_PASS_curr = used_wifi_ModeSTA_PASS;
     if (WiFi.status() == WL_CONNECTED) {
-      infoIpAddr = WiFi.localIP().toString();
+      oled_wifi_IP_curr = WiFi.localIP().toString();
 
       mode_sta_once_successfully_connected = true;
       wifi_connection_status = WIFI_CONNECTED_TO_AP;
 
-      log_msg = "WiFi: Connected to AP " + infoApName + "; got IP: " + infoIpAddr;
+      log_msg = "WiFi: Connected to AP " + oled_wifi_SSID_curr + "; got IP: " + oled_wifi_IP_curr;
       #ifdef ENABLE_SYSLOG
         syslog_log(LOG_INFO, log_msg);
       #endif
       do_serial_println(log_msg);
 
     } else {
-      log_msg ="WiFi: Not successfully associated with AP " + infoApName;
+      log_msg ="WiFi: Not successfully associated with AP " + oled_wifi_SSID_curr;
       wifi_connection_status = WIFI_NOT_CONNECTED_TO_AP;
       // reduce power consumption
       esp_wifi_set_max_tx_power(8);
@@ -1144,7 +1146,7 @@ void restart_AP_or_STA(void) {
   String ntp_server = preferences.getString(PREF_NTP_SERVER, "");
   ntp_server.trim();
   if (ntp_server.isEmpty()) {
-    if (infoIpAddr.startsWith("44."))
+    if (oled_wifi_IP_curr.startsWith("44."))
       ntp_server = "ntp.hc.r1.ampr.org";
     else
       ntp_server = "pool.ntp.org";
@@ -1639,7 +1641,7 @@ void send_to_aprsis()
 
 [[noreturn]] void taskWebServer(void *parameter) {
   auto *webServerCfg = (tWebServerCfg*)parameter;
-  apSSID = webServerCfg->callsign + " AP";
+  wifi_ModeAP_SSID = webServerCfg->callsign + " AP";
 
   server.on("/", handle_Index);
   server.on("/favicon.ico", handle_NotFound);
@@ -1704,12 +1706,12 @@ void send_to_aprsis()
   esp_task_wdt_init(120, true); //enable panic so ESP32 restarts
   esp_task_wdt_add(NULL); //add current thread to WDT watch
 
-  wifi_password = preferences.getString(PREF_WIFI_PASSWORD, "");
-  wifi_ssid = preferences.getString(PREF_WIFI_SSID, "");
-  apPassword = preferences.getString(PREF_AP_PASSWORD, "");
+  wifi_ModeSTA_PASS = preferences.getString(PREF_WIFI_PASSWORD, "");
+  wifi_ModeSTA_SSID = preferences.getString(PREF_WIFI_SSID, "");
+  wifi_ModeAP_PASS = preferences.getString(PREF_AP_PASSWORD, "");
   // 8 characters is requirements for WPA2
-  if (apPassword.length() < 8) {
-    apPassword = defApPassword;
+  if (wifi_ModeAP_PASS.length() < 8) {
+    wifi_ModeAP_PASS = wifi_ModeAP_PASS_default;
   }
 
 
@@ -1794,7 +1796,7 @@ void send_to_aprsis()
         }
       }
     } else {
-      if ((wifi_ssid.length() || safeApName.length()) && millis() - webserver_started > 60*1000L && WiFi.softAPgetStationNum() < 1) {
+      if ((wifi_ModeSTA_SSID.length() || wifi_ModeSTA_SSID_fallback.length()) && millis() - webserver_started > 60*1000L && WiFi.softAPgetStationNum() < 1) {
         if (aprsis_client.connected()) aprsis_client.stop();
         restart_AP_or_STA();
         webserver_started = millis();
