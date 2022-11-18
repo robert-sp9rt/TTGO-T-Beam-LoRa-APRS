@@ -2131,7 +2131,7 @@ void setup_phase2_soft_reconfiguration(boolean runtime_reconfiguration) {
     Serial.print("CPU Freq ad"); Serial.flush();
     setCpuFrequencyMhz(adjust_cpuFreq_to);
     // ..survived
-    Serial.printf("justed to: %d\r\n", adjust_cpuFreq_to);
+    Serial.printf("justed to: %d MHz\r\n", adjust_cpuFreq_to);
   }
 
   // LoRa Chip config
