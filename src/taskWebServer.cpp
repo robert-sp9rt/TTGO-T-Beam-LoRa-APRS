@@ -1081,7 +1081,7 @@ void restart_AP_or_STA(void) {
 
   if (start_soft_ap) {
 
-    do_serial_println("WiFi: Status: " + String((int ) WiFi.status()) + ". Will run as mode AP (SSID: '" +  wifi_ModeAP_SSID + "'");
+    do_serial_println("WiFi: Status: " + String((int ) WiFi.status()) + ". Will run as mode AP (SSID: '" +  wifi_ModeAP_SSID + "')");
     WiFi.disconnect();
     WiFi.softAPdisconnect();
     WiFi.mode(WIFI_AP);
@@ -1107,7 +1107,7 @@ void restart_AP_or_STA(void) {
 
   } else if (WiFi.getMode() == WIFI_MODE_STA) {
 
-    do_serial_println("WiFi: Status: " + String((int ) WiFi.status()) + ". Will run as mode STA (remote SSID: '" +  used_wifi_ModeSTA_SSID + "'");
+    do_serial_println("WiFi: Status: " + String((int ) WiFi.status()) + ". Will run as mode STA (remote SSID: '" +  used_wifi_ModeSTA_SSID + "')");
     // Save some battery
     //WiFi.setSleep(true);
     esp_wifi_set_ps(WIFI_PS_MAX_MODEM);
