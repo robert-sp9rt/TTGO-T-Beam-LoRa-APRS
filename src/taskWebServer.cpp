@@ -310,13 +310,13 @@ void handle_SaveWifiCfg() {
   if (server.hasArg(PREF_NTP_SERVER) && server.arg(PREF_NTP_SERVER).length()) {
     s = server.arg(PREF_NTP_SERVER);
     s.trim();
+    preferences.putString(PREF_NTP_SERVER, s);
   }
-  preferences.putString(PREF_NTP_SERVER, s);
   if (server.hasArg(PREF_SYSLOG_SERVER) && server.arg(PREF_SYSLOG_SERVER).length()) {
     s = server.arg(PREF_SYSLOG_SERVER);
     s.trim();
+    preferences.putString(PREF_SYSLOG_SERVER, s);
   }
-  preferences.putString(PREF_SYSLOG_SERVER, s);
 
   // runtime reconfiguration with changed settings
   load_preferences_from_flash();
