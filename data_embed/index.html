@@ -535,6 +535,16 @@
                     <input name="sh_oledtime" id="sh_oledtime" type="number" min="0" max="60" title="Turn OFF OLED after X seconds. Set 0 to disable (constantly active OLED has a refresh rate of 1s. Range 0 to 60.">
                 </div>
                 <div>
+                  <label for="units">Units</label>
+                  <select id="units" name="units">
+                    <option value="65">km/h, m (metric)</option>
+                    <option value="66">m/s, m (metric)</option>
+                    <option value="132">mph, ft (imperial)</option>
+                    <option value="136">kn, ft (aero)</option>
+                    <option value="72">kn, m (nautic)</option>
+                  </select>
+                </div>
+                <div>
                   <label for="UptimeMinutes">Uptime of Device [min]</label>
                   <input type="text" name="UptimeMinutes" id="UptimeMinutes" readonly title="uptime device in minutes">
                 </div>

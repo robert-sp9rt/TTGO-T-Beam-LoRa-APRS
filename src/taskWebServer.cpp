@@ -452,6 +452,7 @@ void refill_preferences_as_jsonData()
   jsonData += jsonLineFromPreferenceInt(PREF_DEV_REBOOT_INTERVAL);
   jsonData += jsonLineFromPreferenceInt(PREF_DEV_SHOW_OLED_TIME);
   jsonData += jsonLineFromPreferenceInt(PREF_DEV_CPU_FREQ);
+  jsonData += jsonLineFromPreferenceInt(PREF_DEV_UNITS);
   jsonData += jsonLineFromPreferenceBool(PREF_APRSIS_EN);
   jsonData += jsonLineFromPreferenceString(PREF_APRSIS_SERVER_NAME);
   jsonData += jsonLineFromPreferenceInt(PREF_APRSIS_SERVER_PORT);
@@ -989,6 +990,9 @@ void handle_saveDeviceCfg(){
     if (cpufreq != 0 && cpufreq < 10)
       cpufreq = 10;
     preferences.putInt(PREF_DEV_CPU_FREQ, cpufreq);
+  }
+  if (server.hasArg(PREF_DEV_UNITS)){
+    preferences.putInt(PREF_DEV_UNITS, server.arg(PREF_DEV_UNITS).toInt());
   }
 
   // runtime reconfiguration with changed settings

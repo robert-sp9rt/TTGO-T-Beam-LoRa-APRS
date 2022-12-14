@@ -53,7 +53,7 @@ String wifi_info;                // saving wifi info (CLI|AP|dis) for Oled. If W
 // IO config
 #ifdef T_BEAM_V1_0
   #define I2C_SDA 21
-  #define I2C_SCL 22    
+  #define I2C_SCL 22
   #define BUTTON  38                //pin number for Button on TTGO T-Beam
   #define BUZZER 15                 // enter your buzzer pin gpio
   const byte TXLED  = 4;            //pin number for LED on TX Tracker
@@ -85,19 +85,19 @@ String wifi_info;                // saving wifi info (CLI|AP|dis) for Oled. If W
   const byte TXLED  = 4;            //pin number for LED on TX Tracker
 #elif LORA32_1
   #define I2C_SDA 21
-  #define I2C_SCL 22 
+  #define I2C_SCL 22
   #define BUTTON 2                  //pin number for BUTTO
   #define BUZZER 13                 // enter your buzzer pin gpio
   const byte TXLED  = 4;            //pin number for LED on TX Tracker
 #elif HELTEC_V1
   #define I2C_SDA 4
-  #define I2C_SCL 15 
+  #define I2C_SCL 15
   #define BUTTON 2                  //pin number for BUTTO
   #define BUZZER 13                 // enter your buzzer pin gpio
   const byte TXLED  = 4;            //pin number for LED on TX Tracker
 #elif HELTEC_V2
   #define I2C_SDA 4
-  #define I2C_SCL 15    
+  #define I2C_SCL 15
   #define BUTTON 2                  //pin number for BUTTO
   #define BUZZER 13                 // enter your buzzer pin gpio
   const byte TXLED  = 4;            //pin number for LED on TX Tracker
@@ -145,6 +145,8 @@ String relay_path;
 String aprsComment = MY_COMMENT;
 String aprsLatPreset = LATITUDE_PRESET;
 String aprsLonPreset = LONGITUDE_PRESET;
+String aprsLatPreset_heigher_precision = aprsLatPreset;
+String aprsLonPreset_heigher_precision = aprsLonPreset;
 //String LatShownP = aprsLonPreset;
 //String LongShownP = aprsLonPreset;
 // "P" means original Preset, "u": Preset has been updated to the last valid position (DL3EL). "p" means, invalid gps, last known position used a temporary preset.
@@ -160,7 +162,7 @@ String aprsPresetShown = "P";
 // the same show be done with course and alti (later)
 // after successful data retrieval, gps_isValid becomes true (or turn false, if retrieval fails)
 boolean gps_isValid = false;
-int gps_speed_kmph = 0;
+int gps_speed = 0;
 //int gps_speed_kmph_oled = 0;
 char gps_time_s[20];// Room for len(01:02:03 04.05.2022) + 1 /* \0 */  -> 20
 
@@ -356,6 +358,15 @@ boolean lora_tx_enabled = true;
 #endif
 #endif
 
+#define UNITS_SPEED_KMH 1
+#define UNITS_SPEED_MS  2
+#define UNITS_SPEED_MPH 4
+#define UNITS_SPEED_KN  8
+#define UNITS_DIST_M    64
+#define UNITS_DIST_FT   128
+
+uint8_t units_speed = UNITS_SPEED_KMH;
+uint8_t units_dist = UNITS_DIST_M;
 
 // may be configured
 boolean rate_limit_message_text = true;		// ratelimit adding messate text (-> saves airtime)
@@ -393,6 +404,7 @@ boolean kiss_client_came_via_bluetooth = false;
 #endif
 
 uint16_t adjust_cpuFreq_to = 80;
+uint8_t units = UNITS_SPEED_KMH | UNITS_DIST_M;
 
 // do not configure
 boolean dont_send_own_position_packets = false;		// dynamicaly set if kiss device sends position. Maybe there are other usecases (-> kiss-independent)
@@ -521,7 +533,7 @@ out_relay_path:
     aprs_lon = aprs_lon / 26 - aprs_lon / 2710 + aprs_lon / 15384615;
 
     // altitude_ratio: 0%, 10%, 25%, 50%, 75%, 90%, 100%
-    // course change on turn has a higher priority
+    // course change on turn has a heigher priority
     boolean altitude_isValid = (gps.altitude.isValid() && gps.altitude.age() < 10000);
     boolean cseSpd_isValid = (gps.speed.isValid() && gps.speed.age() < 10000 && gps.course.isValid() && gps.course.age() < 10000);
 
@@ -932,13 +944,13 @@ void timer_once_a_second() {
 
   if (millis() < t_next_run)
     return;
-  
+
   t_next_run = millis() + 1000;
   // update gps time string once a second
   if (getLocalTime(&timeinfo)) {
     strftime(gps_time_s, sizeof(gps_time_s), "%H:%M:%S", &timeinfo);
   }
-  
+
   // Ticker blinks upper left corner to indicate system is running
   // only when OLED is on
   if (display_is_on) {
@@ -967,17 +979,34 @@ void timer_once_a_second() {
 
 
 String getSpeedCourseAlti() {
-  // TODO: Web configurable output in speed km/h and height m; or speed mph and height ft, or speed kn (sm/h) and height ft
   String sca = "";
-  String dalt = "";
+  String speed_val = "--";
+  String speed_unit = "km/h";
+  String course_val = "--";
+  String course_unit = "\xF7";
+  String alt_val = "--";
+  String alt_unit = (units_dist == UNITS_DIST_FT ? "ft" : "m");
+
+  switch (units_speed) {
+  case UNITS_SPEED_MS:
+    speed_unit = "m/s";
+    break;
+    case UNITS_SPEED_MPH:
+    speed_unit = "mph";
+    break;
+  case UNITS_SPEED_KN:
+    speed_unit = "kn";
+    break;
+  }
 
   if (gps_state && gps_isValid) {
-    int  dalt_int = max(-99999, min(999999, (int ) gps.altitude.meters()));
-    dalt = dalt + String(dalt_int) + "m ";
-    sca = String(gps_speed_kmph) + "km/h " + String(gps.course.deg(), 1) + "\xF7 " + dalt;
-  } else {
-    sca = "--km/h --\xF7 --m";
+    int alt_int = max(-99999, min(999999, (int ) (units_dist == UNITS_DIST_FT ? gps.altitude.feet() : gps.altitude.meters())));
+    speed_val = String(gps_speed);
+    course_val = String(gps.course.deg());
+    alt_unit = String(alt_int);
   }
+
+  sca = speed_val + speed_unit + " " + course_val + course_unit + " " + alt_val + alt_unit;
   return sca;
 }
 
@@ -1023,9 +1052,9 @@ String getSatAndBatInfo() {
 }
 
 void fillDisplayLine1() {
-//  static String OledLine1s = "";
-// OledLine1_time = gps_time_s;
-//  OledLine1s = " Up:" + String(millis()/1000/60) + "m";
+  //static String OledLine1s = "";
+  //OledLine1_time = gps_time_s;
+  // OledLine1s = " Up:" + String(millis()/1000/60) + "m";
 
   static uint32_t old_time = 0L;
   uint32_t t = millis() / 1000;
@@ -1062,7 +1091,7 @@ void fillDisplayLine2() {
         } else {
           wifi_info = (enable_webserver)? wifi_info + "-CLI" : wifi_info + ":off";
         }
-#else        
+#else
         wifi_info = "";
 #endif
 
@@ -1097,7 +1126,7 @@ void fillDisplayLines3to5() {
     return;
   ratelimit_until = millis() + (oled_timeout == 0 ? 1000 : showRXTime);
 
-  OledLine3 = aprsLatPreset + " " + aprsLonPreset + " " + aprsPresetShown;
+  OledLine3 = aprsLatPreset_heigher_precision + " " + aprsLonPreset_heigher_precision + " " + aprsPresetShown;
   OledLine4 = getSpeedCourseAlti();
   OledLine5 = getSatAndBatInfo();
 }
@@ -1110,7 +1139,7 @@ void displayInvalidGPS() {
   if (!gps_state){
     OledLine2 = wifi_info + " GPS dis";
   } else {
-//  show GPS age (only if last retrieval was invalid)
+    //show GPS age (only if last retrieval was invalid)
     gpsage = gps.location.age()/1000;
     gpsage_p = String(gpsage) + "s" ;
     gpsage_p = (gpsage > 60)? String(gpsage/60) + "m" : gpsage_p;
@@ -1262,40 +1291,40 @@ void sendTelemetryFrame() {
 #endif
 
 
-// SPIFFS for wifi.cfg
+// SPIFFS for wifi.cfg, preferences.cfg, ..
 void listDir(fs::FS &fs, const char * dirname, uint8_t levels) {
-// currently not use, uncomment at the end of setup() to see what is on the disk  
-   Serial.printf("Listing directory: %s\r\n", dirname);
+  // currently not use, uncomment at the end of setup() to see what is on the disk
+  Serial.printf("Listing directory: %s\r\n", dirname);
 
-   File root = fs.open(dirname);
-   if(!root) {
-      Serial.println("− failed to open directory");
-      return;
-   }
-   if (!root.isDirectory()) {
-      Serial.println(" − not a directory");
-      root.close();
-      return;
-   }
+  File root = fs.open(dirname);
+  if(!root) {
+    Serial.println("− failed to open directory");
+    return;
+  }
+  if (!root.isDirectory()) {
+    Serial.println(" − not a directory");
+    root.close();
+    return;
+  }
 
-   File file = root.openNextFile();
-   while (file){
-      if (file.isDirectory()) {
-         Serial.print("  DIR : ");
-         Serial.println(file.name());
-         if (levels){
-            listDir(fs, file.name(), levels -1);
-         }
-      } else {
-         Serial.print("  FILE: ");
-         Serial.print(file.name());
-         Serial.print("\tSIZE: ");
-         Serial.println(file.size());
+  File file = root.openNextFile();
+  while (file){
+     if (file.isDirectory()) {
+       Serial.print("  DIR : ");
+       Serial.println(file.name());
+      if (levels){
+        listDir(fs, file.name(), levels -1);
       }
-      file.close();
-      file = root.openNextFile();
-   }
-   root.close();
+    } else {
+      Serial.print("  FILE: ");
+      Serial.print(file.name());
+      Serial.print("\tSIZE: ");
+      Serial.println(file.size());
+    }
+    file.close();
+    file = root.openNextFile();
+  }
+  root.close();
 }
 
 
@@ -1372,9 +1401,9 @@ boolean readFile(fs::FS &fs, const char *filename) {
     Serial.printf("readFile: Warning, file too big: %d Byte (max: %d)\r\n", file.size(), JSON_MAX_FILE_SIZE);
   }
 
-   
+
   //https://arduinojson.org/v6/doc/upgrade/
- 
+
   auto error = deserializeJson(JSONBuffer, JSONMessage);
   if (error) {
     Serial.print(F("deserializeJson() failed with code "));
@@ -1456,30 +1485,43 @@ end:
 
 
 void init_and_validate_aprs_position_and_icon() {
-  // We have stored the manual position string in a higher precision (in case resolution more precise than 18.52m is required; i.e. for base-91 location encoding, or DAO extenstion).
+
+  // We have stored the manual position string in a heigher precision (in case resolution more precise than 18.52m is required; i.e. for base-91 location encoding, or DAO extenstion).
   // Furthermore, 53-32.1234N is more readable in the Web-interface than 5232.1234N
   aprsLatPreset.toUpperCase(); aprsLatPreset.replace(",", "."); aprsLatPreset.trim();
   if (aprsLatPreset.length() == 11 && aprsLatPreset.indexOf('-') == 2 && aprsLatPreset.indexOf(' ') == -1 && (aprsLatPreset.endsWith("N") || aprsLatPreset.endsWith("S"))) {
+    aprsLatPreset_heigher_precision = aprsLatPreset;
     char buf[9];
     const char *p = aprsLatPreset.c_str();
     sprintf(buf, "%.2s%.5s%c", p, p+3, p[10]);
     aprsLatPreset = String(buf);
+    // No, display is too small for gg-mm.ddddN ggg-mm.ddddE P
+    //if (!(units & UNITS_SPEED_KN))
+      aprsLatPreset_heigher_precision = aprsLatPreset;
   }
 
   // 001-20.5000E is more readable in the Web-interface than 00120.5000E, and could not be mis-interpreted as 120.5 degrees east  (== 120 deg 30' 0" E)
   aprsLonPreset.toUpperCase(); aprsLonPreset.replace(",", "."); aprsLonPreset.trim();
   if (aprsLonPreset.length() == 12 && aprsLonPreset.indexOf('-') == 3 && aprsLonPreset.indexOf(' ') == -1 && (aprsLonPreset.endsWith("E") || aprsLonPreset.endsWith("W"))) {
+    aprsLonPreset_heigher_precision = aprsLonPreset;
     char buf[10];
     const char *p = aprsLonPreset.c_str();
     sprintf(buf, "%.3s%.5s%c", p, p+4, p[11]);
     aprsLonPreset = String(buf);
+    // No, display is too small for gg-mm.ddddN ggg-mm.ddddE P
+    //if (!(units & UNITS_SPEED_KN))
+      aprsLonPreset_heigher_precision = aprsLonPreset;
   }
 
   // assure valid transmissions, even on wrong configurations
-  if (aprsLatPreset.length() != 8 || !(aprsLatPreset.endsWith("N") || aprsLatPreset.endsWith("S")) || aprsLatPreset.c_str()[4] != '.')
+  if (aprsLatPreset.length() != 8 || !(aprsLatPreset.endsWith("N") || aprsLatPreset.endsWith("S")) || aprsLatPreset.c_str()[4] != '.') {
     aprsLatPreset = String("0000.00N");
-  if (aprsLonPreset.length() != 9 || !(aprsLonPreset.endsWith("E") || aprsLonPreset.endsWith("W")) || aprsLonPreset.c_str()[5] != '.')
+    aprsLatPreset_heigher_precision = aprsLatPreset;
+  }
+  if (aprsLonPreset.length() != 9 || !(aprsLonPreset.endsWith("E") || aprsLonPreset.endsWith("W")) || aprsLonPreset.c_str()[5] != '.') {
     aprsLonPreset = String("00000.00E");
+    aprsLonPreset_heigher_precision = aprsLonPreset;
+  }
   if (aprsSymbolTable.length() != 1)
     aprsSymbolTable = String("/");
   if (aprsSymbol.length() != 1)
@@ -1565,7 +1607,7 @@ void load_preferences_cfg_file()
   relay_path = jsonElementFromPreferenceCFGString(PREF_APRS_RELAY_PATH,PREF_APRS_RELAY_PATH_INIT);
   showAltitude = jsonElementFromPreferenceCFGBool(PREF_APRS_SHOW_ALTITUDE,PREF_APRS_SHOW_ALTITUDE_INIT);
   altitude_ratio = jsonElementFromPreferenceCFGInt(PREF_APRS_ALTITUDE_RATIO,PREF_APRS_ALTITUDE_RATIO);
-  always_send_cseSpd_AND_altitude = jsonElementFromPreferenceCFGBool(PREF_APRS_ALWAYS_SEND_CSE_SPEED_AND_ALTITUDE,PREF_APRS_ALWAYS_SEND_CSE_SPEED_AND_ALTITUDE_INIT);  
+  always_send_cseSpd_AND_altitude = jsonElementFromPreferenceCFGBool(PREF_APRS_ALWAYS_SEND_CSE_SPEED_AND_ALTITUDE,PREF_APRS_ALWAYS_SEND_CSE_SPEED_AND_ALTITUDE_INIT);
   gps_state = jsonElementFromPreferenceCFGBool(PREF_APRS_GPS_EN,PREF_APRS_GPS_EN_INIT);
   acceptOwnPositionReportsViaKiss = jsonElementFromPreferenceCFGBool(PREF_ACCEPT_OWN_POSITION_REPORTS_VIA_KISS,PREF_ACCEPT_OWN_POSITION_REPORTS_VIA_KISS_INIT);
   gps_allow_sleep_while_kiss = jsonElementFromPreferenceCFGBool(PREF_GPS_ALLOW_SLEEP_WHILE_KISS,PREF_GPS_ALLOW_SLEEP_WHILE_KISS_INIT);
@@ -1612,6 +1654,7 @@ void load_preferences_cfg_file()
    usb_serial_data_type = jsonElementFromPreferenceCFGInt(PREF_DEV_USBSERIAL_DATA_TYPE,PREF_DEV_USBSERIAL_DATA_TYPE_INIT);
    enabled_oled  = jsonElementFromPreferenceCFGBool(PREF_DEV_OL_EN,PREF_DEV_OL_EN_INIT);
    adjust_cpuFreq_to = jsonElementFromPreferenceCFGInt(PREF_DEV_CPU_FREQ,PREF_DEV_CPU_FREQ_INIT);
+   units = jsonElementFromPreferenceCFGInt(PREF_DEV_UNITS,PREF_DEV_UNITS_INIT);
 
 // APRSIS settings
 #ifdef ENABLE_WIFI
@@ -1670,7 +1713,7 @@ void load_preferences_from_flash()
     }
     wifi_txpwr_mode_STA = preferences.getInt(PREF_WIFI_TXPWR_MODE_STA);
 #endif // ENABLE_WIFI
-    
+
     // LoRa transmission settings
 
     if (!preferences.getBool(PREF_LORA_FREQ_PRESET_INIT)){
@@ -1678,7 +1721,7 @@ void load_preferences_from_flash()
       preferences.putDouble(PREF_LORA_FREQ_PRESET, lora_freq);
     }
     lora_freq = preferences.getDouble(PREF_LORA_FREQ_PRESET);
-    
+
     if (!preferences.getBool(PREF_LORA_SPEED_PRESET_INIT)){
       preferences.putBool(PREF_LORA_SPEED_PRESET_INIT, true);
       preferences.putInt(PREF_LORA_SPEED_PRESET, lora_speed);
@@ -1756,7 +1799,7 @@ void load_preferences_from_flash()
       preferences.putDouble(PREF_LORA_FREQ_CROSSDIGI_PRESET, lora_freq_cross_digi);
     }
     lora_freq_cross_digi = preferences.getDouble(PREF_LORA_FREQ_CROSSDIGI_PRESET);
-    
+
     if (!preferences.getBool(PREF_LORA_SPEED_CROSSDIGI_PRESET_INIT)){
       preferences.putBool(PREF_LORA_SPEED_CROSSDIGI_PRESET_INIT, true);
       preferences.putInt(PREF_LORA_SPEED_CROSSDIGI_PRESET, lora_speed_cross_digi);
@@ -1916,7 +1959,7 @@ void load_preferences_from_flash()
     }
     fix_beacon_interval = preferences.getInt(PREF_APRS_FIXED_BEACON_INTERVAL_PRESET) * 1000;
 
-// + SMART BEACONING
+// SMART BEACONING
 
     if (!preferences.getBool(PREF_APRS_SB_MIN_INTERVAL_PRESET_INIT)){
       preferences.putBool(PREF_APRS_SB_MIN_INTERVAL_PRESET_INIT, true);
@@ -1967,7 +2010,7 @@ void load_preferences_from_flash()
     }
     sb_turn_time = preferences.getInt(PREF_APRS_SB_TURN_TIME_PRESET);
 
-// 
+//
 
     // Read OLED RX Timer
     if (!preferences.getBool(PREF_DEV_SHOW_RX_TIME_INIT)){
@@ -1982,7 +2025,7 @@ void load_preferences_from_flash()
       preferences.putInt(PREF_DEV_SHOW_OLED_TIME, oled_timeout/1000);
     }
     oled_timeout = preferences.getInt(PREF_DEV_SHOW_OLED_TIME) * 1000;
-    
+
     if (!preferences.getBool(PREF_DEV_AUTO_SHUT_PRESET_INIT)){
       preferences.putBool(PREF_DEV_AUTO_SHUT_PRESET_INIT, true);
       preferences.putInt(PREF_DEV_AUTO_SHUT_PRESET, shutdown_delay_time/1000);
@@ -2039,13 +2082,19 @@ void load_preferences_from_flash()
       preferences.putBool(PREF_DEV_OL_EN_INIT, true);
       preferences.putBool(PREF_DEV_OL_EN,enabled_oled);
     }
-    enabled_oled  = preferences.getBool(PREF_DEV_OL_EN); 
+    enabled_oled  = preferences.getBool(PREF_DEV_OL_EN);
 
     if (!preferences.getBool(PREF_DEV_CPU_FREQ_INIT)){
       preferences.putBool(PREF_DEV_CPU_FREQ_INIT, true);
       preferences.putInt(PREF_DEV_CPU_FREQ, adjust_cpuFreq_to);
     }
     adjust_cpuFreq_to = preferences.getInt(PREF_DEV_CPU_FREQ);
+
+    if (!preferences.getBool(PREF_DEV_UNITS_INIT)){
+      preferences.putBool(PREF_DEV_UNITS_INIT, true);
+      preferences.putInt(PREF_DEV_UNITS, units);
+    }
+    units = preferences.getInt(PREF_DEV_UNITS);
 
 
 // APRSIS settings
@@ -2157,8 +2206,13 @@ void setup_phase2_soft_reconfiguration(boolean runtime_reconfiguration) {
     average_course[i]=0;
   }
 
+  units_speed = units & 15;
+  units_dist = (units &= ~15);
+  gps_speed = 0;
+  fillDisplayLines3to5();
+
   // We need this assurance for fallback to fixed interval, if gps position is lost.
-  // fixed beacon rate higher than sb_max_interval does not make sense
+  // fixed beacon rate heigher than sb_max_interval does not make sense
   if (!fixed_beacon_enabled && gps_state && fix_beacon_interval < sb_max_interval)
     fix_beacon_interval = (sb_max_interval > 120000 ? sb_max_interval : 120000);
 
@@ -2312,7 +2366,6 @@ void setup()
         if(digitalRead(BUTTON)==LOW){
           clear_preferences = 3;
           preferences.clear();
-//          use_preferences_cfg();
           preferences.end();
           writedisplaytext("LoRa-APRS","","Reset to /preferences.cfg","","if availabe","now booting");
           delay(2000);
@@ -2325,7 +2378,7 @@ void setup()
     }
   #endif
 
-  
+
   #ifdef T_BEAM_V0_7
     //adcAttachPin(35);
     //adcStart(35);
@@ -3085,7 +3138,7 @@ char *s_min_nn(uint32_t min_nnnnn, int high_precision) {
   return buf;
 }
 
-String create_lat_aprs(const char *delimiter, RawDegrees lat) {
+String create_lat_aprs(const char *delimiter, RawDegrees lat, int precision) {
   char str[20];
   char n_s = 'N';
   if (lat.negative) {
@@ -3096,11 +3149,11 @@ String create_lat_aprs(const char *delimiter, RawDegrees lat) {
   // we like sprintf's float up-rounding.
   // but sprintf % may round to 60.00 -> 5360.00 (53° 60min is a wrong notation
   // ;)
-  sprintf(str, "%02d%s%s%c", lat.deg, delimiter ? delimiter : "", s_min_nn(lat.billionths, 0), n_s);
+  sprintf(str, "%02d%s%s%c", lat.deg, delimiter ? delimiter : "", s_min_nn(lat.billionths, precision > 2 ? precision : 0), n_s);
   return String(str);
 }
 
-String create_long_aprs(const char *delimiter, RawDegrees lng) {
+String create_long_aprs(const char *delimiter, RawDegrees lng, int precision) {
   char str[20];
   char e_w = 'E';
   if (lng.negative) {
@@ -3108,10 +3161,27 @@ String create_long_aprs(const char *delimiter, RawDegrees lng) {
   }
   if (delimiter && strlen(delimiter) > 1)
     delimiter = 0;
-  sprintf(str, "%03d%s%s%c", lng.deg, delimiter ? delimiter : "", s_min_nn(lng.billionths, 0), e_w);
+  sprintf(str, "%03d%s%s%c", lng.deg, delimiter ? delimiter : "", s_min_nn(lng.billionths, precision > 2 ? precision : 0), e_w);
   return String(str);
 }
 
+
+void update_speed_from_gps() {
+  switch (units_speed) {
+  case UNITS_SPEED_MS:
+    gps_speed = gps.speed.mps();
+    break;
+  case UNITS_SPEED_MPH:
+    gps_speed = gps.speed.mph();
+    break;
+  case UNITS_SPEED_KN:
+    gps_speed = gps.speed.knots();
+    break;
+  case UNITS_SPEED_KMH: // fall through
+  default:
+    gps_speed = gps.speed.kmph();
+  }
+}
 
 // usb-serial tnc emulator
 
@@ -3578,7 +3648,7 @@ void loop()
     }
   }
 
-// time is now taken from system time and updates once per second in display_blinker
+  // time is now taken from system time and updates once per second in display_blinker
 
   // LatShownP  = gg-mm.dd[N|S]
   // aprsLatPreset = ggmm.dd[N|S]
@@ -3586,12 +3656,13 @@ void loop()
   gps_isValid = false;
   if (gps_state && gps.hdop.hdop() < 8) {
     if (gps.speed.isValid() && gps.speed.age() < 10000) {
-      if (gps.speed.isUpdated())
-        gps_speed_kmph = gps.speed.kmph();
+      if (gps.speed.isUpdated()) {
+        update_speed_from_gps();
+      }
     } // else: assume we still move with last speed
   }
-  if (gps.location.isValid() && gps.location.age() < 10000) {
 
+  if (gps.location.isValid() && gps.location.age() < 10000) {
     gps_isValid = true;
 
     if (gps.location.isUpdated()) {
@@ -3606,8 +3677,18 @@ void loop()
       // Updating this every 200ms is enough for getting this resolution at speed of 18.52*3.6*5 = 333.36km/h.
       // aprsLatPreset and aprsLonPreset are used for displaying. The transmission uses the true value.
       if (millis() >  ratelimit_until) {
-        aprsLatPreset = create_lat_aprs("", gps.location.rawLat());
-        aprsLonPreset = create_long_aprs("", gps.location.rawLng());
+        // always encode aprsLatPreset in notation ddmm.nn (N/S) and aprsLonPreset in notation dddmm.nn (E/W)
+        aprsLatPreset = create_lat_aprs("", gps.location.rawLat(), 2);
+        aprsLonPreset = create_long_aprs("", gps.location.rawLng(), 2);
+        // heigher precision 1/1000 arc-minute, if not > 36 knots (valid gps measurered speed). Idea behind:
+        // 18.52 m/s are 36kn. We need abt 1s time for understanding the whole displayed line -> resolution of > 2 decimal points is not needed
+        // If we consider gps age of < 2s, we use 18kt as limit
+        boolean may_use_heigh_precision = (gps.speed.knots() < 18 && gps.speed.isValid() && gps.speed.age() < 2000);
+        // No, unforunately, the display is too small for additional degrees-"-"-delimiter
+        //aprsLatPreset_heigher_precision = create_lat_aprs((units & UNITS_SPEED_KN) ? "-" : "", gps.location.rawLat(), may_use_heigh_precision ? 3 : 2);
+        //aprsLonPreset_heigher_precision = create_long_aprs((units & UNITS_SPEED_KN) ? "-" : "", gps.location.rawLng(), may_use_heigh_precision ? 3 : 2);
+        aprsLatPreset_heigher_precision = create_lat_aprs("", gps.location.rawLat(), may_use_heigh_precision ? 3 : 2);
+        aprsLonPreset_heigher_precision = create_long_aprs("", gps.location.rawLng(), may_use_heigh_precision ? 3 : 2);
         aprsPresetShown = "";
         ratelimit_until = millis() + 200;
       }
@@ -3627,7 +3708,7 @@ void loop()
       if (dist > 15 || (millis()-lastTxdistance_millis) > 3*60*10000) {
         lastTxLat = currLat;
         lastTxLng = currLng;
-        gps_speed_kmph_oled = gps_speed_kmph;
+        gps_speed_kmph_oled = gps_speed;
         lastTxdistance_millis = millis();
       } else {
         gps_speed_kmph_oled = 0;
@@ -3639,16 +3720,21 @@ void loop()
     // String functions are cpu consuming. We adust string aprsPresetShown only if we changed status.
     if (!gps_isValid) {
       // update to the old values
-      gps_speed_kmph = gps.speed.kmph();
-      aprsLatPreset = create_lat_aprs("", gps.location.rawLat());
-      aprsLonPreset = create_long_aprs("", gps.location.rawLng());
+      update_speed_from_gps();
+      aprsLatPreset = create_lat_aprs("", gps.location.rawLat(), 2);
+      aprsLonPreset = create_long_aprs("", gps.location.rawLng(), 2);
+      // No, unforunately, the display is too small, even for gg-mm.ddN ggg-mm.ddE
+      //aprsLatPreset_heigher_precision = create_lat_aprs((units & UNITS_SPEED_KN) ? "-" : "", gps.location.rawLat(), 2);
+      //aprsLonPreset_heigher_precision = create_long_aprs((units & UNITS_SPEED_KN) ? "-" : "", gps.location.rawLng(), 2);
+      aprsLatPreset_heigher_precision = aprsLatPreset;
+      aprsLonPreset_heigher_precision = aprsLonPreset;
       aprsPresetShown = "p";
     } else {
       aprsPresetShown = "";
     }
   } else if (!gps_isValid) {
     // isValid change of previous run, and still invalid
-    gps_speed_kmph = 0;
+    gps_speed = 0;
     //gps_speed_kmph_oled = 0;
   }
 
@@ -3664,11 +3750,11 @@ void loop()
     } else if (wifi_connection_status == WIFI_RUNNING_AS_AP) {
       writedisplaytext("((WiFi))","WiFi AP Mode","SSID: " + oled_wifi_SSID_curr, "Pass: " + oled_wifi_PASS_curr, "IP: " + oled_wifi_IP_curr, getSatAndBatInfo());
     } else {
-//      writedisplaytext("((WiFi))","WiFi off","SSID: " + oled_wifi_SSID_curr, "Pass: " + oled_wifi_PASS_curr, "IP: " + oled_wifi_IP_curr, getSatAndBatInfo());
+      //writedisplaytext("((WiFi))","WiFi off","SSID: " + oled_wifi_SSID_curr, "Pass: " + oled_wifi_PASS_curr, "IP: " + oled_wifi_IP_curr, getSatAndBatInfo());
       writedisplaytext("((WiFi))","WiFi off","press key long","to enable","", getSatAndBatInfo());
     }
     wifi_connection_status_prev = wifi_connection_status;
-//  initial fill of line2
+    // initial fill of line2
     fillDisplayLine2();
   }
 #endif
@@ -3711,7 +3797,7 @@ void loop()
     enableOled();
     //---------------
     t_lock = true;
-//  re-enable webserver, if was set to off.
+    // re-enable webserver, if was set to off.
 #ifdef	ENABLE_WIFI
     if (!webserverStarted) {
       enable_webserver = 1;
@@ -3735,7 +3821,7 @@ void loop()
       do_send_status_message_about_reboot_to_aprsis();
 #endif
       ESP.restart();
-    }  
+    }
 #endif
   }
 
@@ -3888,7 +3974,7 @@ void loop()
                       break;
                     wide_hop = strstr(wide_hop+8, ",WIDE");
                   }
-                } 
+                }
                 if (!wide_hop)
                   add_our_call = false;
                 else {
@@ -4155,7 +4241,7 @@ invalid_packet:
 #endif
    }
   }
-  
+
   if (lora_rx_enabled && rx_on_frequencies == 3 && lora_digipeating_mode < 2) {
     static uint8_t slot_table[9][10] = {
       { 0, 1, 1, 1, 1, 1, 1, 1, 1, 1 }, // 1:9
@@ -4352,7 +4438,7 @@ behind_position_tx:
         displayInvalidGPS();
       }
     } else {
-// refresh  time 
+      // refresh  time
       fillDisplayLine1();
     }
   }

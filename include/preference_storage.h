@@ -148,6 +148,8 @@ static const char *const PREF_DEV_SHOW_OLED_TIME = "sh_oledtime"; // set OLED ti
 static const char *const PREF_DEV_SHOW_OLED_TIME_INIT = "sh_oledtime_i";
 static const char *const PREF_DEV_CPU_FREQ = "cpufreq";
 static const char *const PREF_DEV_CPU_FREQ_INIT = "cpufreq_i";
+static const char *const PREF_DEV_UNITS = "units";
+static const char *const PREF_DEV_UNITS_INIT = "units_i";
 
 
 // APRSIS settings
