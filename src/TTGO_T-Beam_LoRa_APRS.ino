@@ -215,12 +215,16 @@ boolean always_send_cseSpd_AND_altitude = false;
   boolean webserverStarted = false;
   boolean tncServer_enabled = false;
   boolean gpsServer_enabled = false;
-// Mapping Table {Power, max_tx_power} = {{8, 2}, {20, 5}, {28, 7}, {34, 8}, {44, 11}, {52, 13}, {56, 14}, {60, 15}, {66, 16}, {72, 18}, {80,20}}.
-// We'll use "min", "low", "mid", "high", "max" -> 2dBm (1.5mW) -> 8, 11dBm (12mW) -> 44, 15dBm (32mW) -> 60, 18dBm (63mW) ->72, 20dBm (100mW) ->80
+  // Mapping Table {Power, max_tx_power} = {{8, 2}, {20, 5}, {28, 7}, {34, 8}, {44, 11}, {52, 13}, {56, 14}, {60, 15}, {66, 16}, {72, 18}, {80,20}}.
+  // We'll use "min", "low", "mid", "high", "max" -> 2dBm (1.5mW) -> 8, 11dBm (12mW) -> 44, 15dBm (32mW) -> 60, 18dBm (63mW) ->72, 20dBm (100mW) ->80
   int8_t wifi_txpwr_mode_AP = 8;
   int8_t wifi_txpwr_mode_STA = 80;
-  String preferences_as_jsonData;
   extern void refill_preferences_as_jsonData();
+#else
+  void refill_preferences_as_jsonData() { ; };
+#endif
+#ifdef ENABLE_PREFERENCES
+String preferences_as_jsonData;
 #endif
 #ifdef ENABLE_OLED
   boolean enabled_oled = true;
@@ -321,13 +325,15 @@ int8_t wifi_connection_status_prev = -1;
 String oled_wifi_SSID_curr = "";
 String oled_wifi_PASS_curr = "";
 String oled_wifi_IP_curr = "";
+// needed here for SPIFFS WLAN Credentials:
 String wifi_ModeAP_SSID;
 String wifi_ModeAP_PASS;
 String wifi_ModeSTA_SSID;
 String wifi_ModeSTA_PASS;
-// comes for SPIFFS WLAN Credentials:
-String wifi_ModeSTA_SSID_fallback;
-String wifi_ModeSTA_PASS_fallback;
+// AP Array, currently max 10 APs possible
+#define MAX_AP_CNT 10                  // max number of possible APs
+struct AccessPoint APs[MAX_AP_CNT];
+int apcnt = 0;
 #endif
 
 #define JSON_MAX_FILE_SIZE 2560
@@ -1291,9 +1297,33 @@ void sendTelemetryFrame() {
 #endif
 
 
-// SPIFFS for wifi.cfg, preferences.cfg, ..
+#ifdef	ENABLE_WIFI
+// setup wifi variables. AP-array: first element with preferences from flash. increase apcnt if successfull.
+void init_wifi_STA_and_AP_settings() {
+    wifi_ModeSTA_SSID = "";
+    wifi_ModeSTA_PASS = "";
+    apcnt = 0;
+    if (!preferences.getString(PREF_WIFI_PASSWORD, "").isEmpty() & !preferences.getString(PREF_WIFI_SSID, "").isEmpty()) {
+      // save old wifi credentials on pos 1, assuming that thhis is the best chance to reconnect
+      wifi_ModeSTA_PASS = preferences.getString(PREF_WIFI_PASSWORD, "");
+      wifi_ModeSTA_SSID = preferences.getString(PREF_WIFI_SSID, "");
+      strncpy(APs[apcnt].ssid, wifi_ModeSTA_SSID.c_str(),sizeof(APs[apcnt].ssid)-1);
+      strncpy(APs[apcnt].pw, wifi_ModeSTA_PASS.c_str(),sizeof(APs[apcnt].pw)-1);
+      Serial.printf("Preferences AP %s found with PW %s and stored at pos %d\r\n", APs[apcnt].ssid, APs[apcnt].pw, apcnt);
+      apcnt = 1;
+    }
+
+    if (!preferences.getString(PREF_AP_PASSWORD, "").isEmpty()) {
+      wifi_ModeAP_PASS = preferences.getString(PREF_AP_PASSWORD, "");
+      Serial.printf("Preferences Self-AP PW found %s and stored\r\n", wifi_ModeAP_PASS.c_str());
+    }
+}
+#endif // ENABLE_WIFI
+
+
+// SPIFFS for wifi.cfg
 void listDir(fs::FS &fs, const char * dirname, uint8_t levels) {
-  // currently not use, uncomment at the end of setup() to see what is on the disk
+
   Serial.printf("Listing directory: %s\r\n", dirname);
 
   File root = fs.open(dirname);
@@ -1308,16 +1338,19 @@ void listDir(fs::FS &fs, const char * dirname, uint8_t levels) {
   }
 
   File file = root.openNextFile();
-  while (file){
-     if (file.isDirectory()) {
-       Serial.print("  DIR : ");
+  while (file) {
+    if (file.isDirectory()) {
+      Serial.print("  DIR : ");
        Serial.println(file.name());
-      if (levels){
-        listDir(fs, file.name(), levels -1);
-      }
+       if (levels){
+          listDir(fs, file.name(), levels -1);
+       }
     } else {
       Serial.print("  FILE: ");
       Serial.print(file.name());
+      if (strlen(file.name()) < 12) {
+        Serial.print("\t");
+      }
       Serial.print("\tSIZE: ");
       Serial.println(file.size());
     }
@@ -1364,7 +1397,7 @@ int save_to_file(const String &callername, const char *filename, const String &j
 // readFile - is more than reading a file from flash. It reads and parses json data in the file and assigns some of our variables.
 // The correct function name would be readFile_parseJson_and_assignVariable(). This is would be too ugly.
 boolean readFile(fs::FS &fs, const char *filename) {
-  //#define JSON_MAX_FILE_SIZE 256ß
+  //#define JSON_MAX_FILE_SIZE 2560
   //static StaticJsonDocument<JSON_MAX_FILE_SIZE> JSONBuffer;                         //Memory pool
   //best would be, that readFile returns a pointer to the local JSONBuffer on success, else NULL
   boolean err = false;
@@ -1406,7 +1439,7 @@ boolean readFile(fs::FS &fs, const char *filename) {
 
   auto error = deserializeJson(JSONBuffer, JSONMessage);
   if (error) {
-    Serial.print(F("deserializeJson() failed with code "));
+    Serial.print(F("readFile: deserializeJson() failed with code "));
     Serial.println(error.c_str());
     err = true;
     goto end;
@@ -1414,64 +1447,122 @@ boolean readFile(fs::FS &fs, const char *filename) {
 
 #ifdef	ENABLE_WIFI
   if (!strcmp(filename, "/wifi.cfg")) {
+    String wifi_ssid_old = "";
+    String wifi_password_old = "";
+
+    // read old data structure, if available
     const char *p;
     if (JSONBuffer.containsKey("SSID1") && JSONBuffer.containsKey("password1")) {
       if ((p = JSONBuffer["SSID1"]))
-        wifi_ModeSTA_SSID = String(p);
+        wifi_ssid_old = String(p);
       if ((p = JSONBuffer["password1"]))
-        wifi_ModeSTA_PASS = String(p);
+        wifi_password_old = String(p);
+      if (!wifi_ssid_old.length() || wifi_password_old.length() < 8 || wifi_ssid_old == "EnterSSIDofYourAccesspoint") {
+        wifi_ssid_old = "";
+        wifi_password_old = "";
+      } else {
+        if (apcnt < MAX_AP_CNT && strcmp(wifi_ssid_old.c_str(), wifi_ModeSTA_SSID.c_str()) && strcmp(wifi_password_old.c_str(), wifi_ModeSTA_PASS.c_str())) {
+          strncpy(APs[apcnt].ssid, wifi_ssid_old.c_str(), sizeof(APs[apcnt].ssid)-1);
+          strncpy(APs[apcnt].pw, wifi_password_old.c_str(), sizeof(APs[apcnt].pw)-1);
+          Serial.printf("readFile: wifi.cfg, old structure AP %s found with PW %s (%d)\r\n", APs[apcnt].ssid, APs[apcnt].pw,apcnt);
+          apcnt++;
+        } else {
+          Serial.printf("readFile: wifi.cfg, Preferences AP %s found with PW %s in wifi.cfg and not stored again\r\n", wifi_ModeSTA_SSID.c_str(), wifi_ModeSTA_PASS.c_str());
+        }
+      }
     }
     if (JSONBuffer.containsKey("SSID2") && JSONBuffer.containsKey("password2")) {
       if ((p = JSONBuffer["SSID2"]))
-        wifi_ModeSTA_SSID_fallback = String(p);
+        wifi_ssid_old = String(p);
       if ((p = JSONBuffer["password2"]))
-        wifi_ModeSTA_PASS_fallback = String(p);
+        wifi_password_old = String(p);
+      if (!wifi_ssid_old.length() || wifi_password_old.length() < 8 || wifi_ssid_old == "EnterSSIDofYourAccesspoint") {
+        wifi_ssid_old = "";
+        wifi_password_old = "";
+      } else {
+        if (apcnt < MAX_AP_CNT && strcmp(wifi_ssid_old.c_str(), wifi_ModeSTA_SSID.c_str()) && strcmp(wifi_password_old.c_str(), wifi_ModeSTA_PASS.c_str())) {
+          strncpy(APs[apcnt].ssid, wifi_ssid_old.c_str(),sizeof(APs[apcnt].ssid)-1);
+          strncpy(APs[apcnt].pw, wifi_password_old.c_str(),sizeof(APs[apcnt].pw)-1);
+          Serial.printf("readFile: wifi.cfg, old structure AP %s found with PW %s (%d)\r\n", APs[apcnt].ssid, APs[apcnt].pw,apcnt);
+          apcnt++;
+        } else {
+          Serial.printf("readFile: wifi.cfg, Preferences AP %s found with PW %s in wifi.cfg and not stored again\r\n", wifi_ModeSTA_SSID.c_str(), wifi_ModeSTA_PASS.c_str());
+        }
+      }
     }
 
-    if (JSONBuffer.containsKey("ap_password") && (p = JSONBuffer["ap_password"])) {
-        wifi_ModeAP_PASS = String(p);
+    // Key for self AP password: new syntax: "SelfAP_PW" ; old syntax: "ap_password"
+    if ( (JSONBuffer.containsKey("SelfAP_PW") && (p = JSONBuffer["SelfAP_PW"])) ||
+         (JSONBuffer.containsKey("ap_password") && (p = JSONBuffer["ap_password"])) ) {
+        String ap_password = String(p);
+        if (ap_password.length() && ap_password.length() > 7) {
+          wifi_ModeAP_PASS = ap_password;
+          Serial.printf("readFile: wifi.cfg, valid Self-AP PW to be used %s\r\n", wifi_ModeAP_PASS.c_str());
+        }
     }
 
+    if (JSONBuffer.containsKey("AP")) {
+      for (JsonObject AccessPoint : JSONBuffer["AP"].as<JsonArray>()) {
+        if (strcmp(AccessPoint["SSID"], wifi_ModeSTA_SSID.c_str()) && strcmp(AccessPoint["password"], wifi_ModeSTA_PASS.c_str())) {
+          strncpy(APs[apcnt].ssid, AccessPoint["SSID"], sizeof(APs[apcnt].ssid)-1);
+          strncpy(APs[apcnt].pw, AccessPoint["password"], sizeof(APs[apcnt].pw)-1);
+          // delay(3000); // uncomment if serial prints are not showing
+          // uncomment if you need to see the content of the data on SPIFFS
+          // Serial.printf("readFile: content JSON: [%d] [%s %s]\r\n", apcnt, APs[apcnt].ssid, APs[apcnt].pw);
 
-    if (!wifi_ModeSTA_SSID.length() || wifi_ModeSTA_PASS.length() < 8 || wifi_ModeSTA_SSID == "EnterSSIDofYourAccesspoint") {
-      Serial.println("SSID: " + wifi_ModeSTA_SSID + " missing or PW: " + wifi_ModeSTA_PASS + " < 8 Byte, Filesize: " + String(file.size()));
-      wifi_ModeSTA_SSID = "";
-      wifi_ModeSTA_PASS = "";
+          if (!sizeof(APs[apcnt].ssid) || sizeof(APs[apcnt].pw) < 8 || !strcmp(APs[apcnt].ssid, "EnterSSIDofYourAccesspoint") || !strcmp(APs[apcnt].ssid, "EnterSSIDofYour2ndAccesspoint")) {
+            delay(3000); // something is wrong, make sure, that msg is displayed
+            Serial.printf("readFile: SSID: %s missing or PW: %s < 8 Byte, Filesize: %d\r\n", APs[apcnt].ssid,APs[apcnt].pw,file.size());
+          } else {
+            if (!apcnt) {
+              // take first configured AP as active, if nothing has been found in flash
+              // keyword "prio=1" will override
+              wifi_ModeSTA_SSID = String(APs[apcnt].ssid);
+              wifi_ModeSTA_PASS = String(APs[apcnt].pw);
+            } else {
+              if (AccessPoint["prio"]) {
+                strcpy(APs[0].ssid, APs[apcnt].ssid);
+                strcpy(APs[0].pw, APs[apcnt].pw);
+                strcpy(APs[apcnt].ssid, wifi_ModeSTA_SSID.c_str());
+                strcpy(APs[apcnt].pw, wifi_ModeSTA_PASS.c_str());
+                wifi_ModeSTA_SSID = String(APs[0].ssid);
+                wifi_ModeSTA_PASS = String(APs[0].pw);
+              }
+            }
+            Serial.printf("readFile: wifi.cfg, valid AP %s found with PW %s (%d)\r\n", APs[apcnt].ssid, APs[apcnt].pw,apcnt);
+            apcnt++;
+          }
+        } else {
+            Serial.printf("readFile: wifi.cfg, Preferences AP %s found with PW %s in wifi.cfg and not stored again\r\n", wifi_ModeSTA_SSID.c_str(), wifi_ModeSTA_PASS.c_str());
+        }
+        if (apcnt == MAX_AP_CNT) {
+          Serial.printf("readFile: wifi.cfg, maximum Number of possible APs (%d) reached.\r\n", MAX_AP_CNT);
+          break;
+        }
+      }
     } else {
-      Serial.println("SSID: " + wifi_ModeSTA_SSID + ", PW: " + wifi_ModeSTA_PASS + ", Filesize: " + String(file.size()));
+      delay(3000); // something is wrong, make sure, that msg is displayed
+      Serial.println("readFile: wifi.cfg, no valid AP found)");
     }
-
-    if (!wifi_ModeSTA_SSID_fallback.length() || wifi_ModeSTA_PASS_fallback.length() < 8 || wifi_ModeSTA_SSID_fallback == "EnterSSIDofYourAccesspoint") {
-      Serial.println("Fallback-SSID: " + wifi_ModeSTA_SSID_fallback + " missing or PW: " + wifi_ModeSTA_PASS_fallback + " < 8 Byte, Filesize: " + String(file.size()));
-      wifi_ModeSTA_SSID_fallback = "";
-      wifi_ModeSTA_PASS_fallback = "";
-    } else {
-      Serial.println("Fallback SSID: " + wifi_ModeSTA_SSID_fallback + ", PW: " + wifi_ModeSTA_PASS_fallback + ", Filesize: " + String(file.size()));
-    }
-
-    if (!wifi_ModeAP_PASS.length() || wifi_ModeAP_PASS.length() < 8) {
-      Serial.println("ModeAP PW missing: " + wifi_ModeAP_PASS);
-    } else {
-      Serial.println("ModeAP PW: " + wifi_ModeAP_PASS);
-    }
-
+    Serial.printf("readFile: wifi.cfg, %d valid entries found. AP %s is selected as frist priority\r\n", apcnt, wifi_ModeSTA_SSID.c_str());
     goto end;
   }
+
 #endif // ENABLE_WIFI
 
   if (!strcmp(filename, "/preferences.cfg")) {
     if (JSONBuffer.containsKey(PREF_APRS_CALLSIGN)) {
       // Serial.printf("Checked preferences.cfg: is ok. Found %s: %s. Filesize: %d\r\n", PREF_APRS_CALLSIGN, JSONBuffer[PREF_APRS_CALLSIGN], file.size());
-      Serial.printf("Checked preferences.cfg: is ok. Found %s. Filesize: %d\r\n", PREF_APRS_CALLSIGN, file.size());
-      Serial.println("Preferences: reading from /preferences.cfg");
+      Serial.printf("reafFile: Checked preferences.cfg: is ok. Found %s. Filesize: %d\r\n", PREF_APRS_CALLSIGN, file.size());
+      Serial.println("reafFile: Preferences: reading from /preferences.cfg");
       load_preferences_cfg_file();
     } else {
-      Serial.println("Preferences: /preferences.cfg not available, using default values from flash");
+      Serial.println("reafFile: Preferences: /preferences.cfg not available, using default values from flash");
       err = true;
     }
     goto end;
   }
-  Serial.printf("Found file '%s', parsed it successfully, but I don't know what to do with the json data ;)!\r\n", filename);
+  Serial.printf("reafFile: Found file '%s', parsed it successfully, but I don't know what to do with the json data ;)!\r\n", filename);
   err = true;
 
 end:
@@ -1527,7 +1618,7 @@ void init_and_validate_aprs_position_and_icon() {
   if (aprsSymbol.length() != 1)
     aprsSymbol = String("[");
 
-  Serial.printf("APRS fixed position set to %s %s; icon: table %s symbol %s\r\n", aprsLatPreset.c_str(), aprsLonPreset.c_str(), aprsSymbolTable, aprsSymbol);
+  Serial.printf("APRS fixed position set to %s %s; icon: table %s symbol %s\r\n", aprsLatPreset.c_str(), aprsLonPreset.c_str(), aprsSymbolTable.c_str(), aprsSymbol.c_str());
 }
 
 
@@ -2281,6 +2372,10 @@ void setup()
 
     preferences.begin("cfg", false);
 
+    #ifdef ENABLE_WIFI
+      init_wifi_STA_and_AP_settings();
+    #endif
+
     // https://www.tutorialspoint.com/esp32_for_iot/esp32_for_iot_spiffs_storage.htm
     // Launch SPIFFS file system
     if (SPIFFS.begin(FORMAT_SPIFFS_IF_FAILED)) {
@@ -2297,14 +2392,16 @@ void setup()
       if (!preferences.getBool(PREF_LORA_FREQ_PRESET_INIT)) {
         // reseted? try to use /preferences.cfg
         readFile(SPIFFS, "/preferences.cfg");
-        if (preferences.getString(PREF_WIFI_PASSWORD, "").isEmpty() ||
+        #ifdef ENABLE_WIFI
+          if (preferences.getString(PREF_WIFI_PASSWORD, "").isEmpty() ||
               preferences.getString(PREF_WIFI_SSID, "").isEmpty()) {
-          preferences.putString(PREF_WIFI_SSID, wifi_ModeSTA_SSID);
-          preferences.putString(PREF_WIFI_PASSWORD, wifi_ModeSTA_PASS);
-          preferences.putString(PREF_AP_PASSWORD, wifi_ModeAP_PASS);
-          Serial.println("WiFi: Updated remote SSID: " + wifi_ModeSTA_SSID);
-          Serial.println("WiFi: Updated remote PW: ***");
-        }
+            preferences.putString(PREF_WIFI_SSID, wifi_ModeSTA_SSID);
+            preferences.putString(PREF_WIFI_PASSWORD, wifi_ModeSTA_PASS);
+            preferences.putString(PREF_AP_PASSWORD, wifi_ModeAP_PASS);
+            Serial.println("WiFi: Updated remote SSID: " + wifi_ModeSTA_SSID);
+            Serial.println("WiFi: Updated remote PW: ***");
+          }
+        #endif
       } else {
         Serial.println("Preferences: normal start, using preferences from flash");
       }
@@ -3322,8 +3419,11 @@ void handle_usb_serial_input(void) {
             } else if (cmd == "show_preferences") {
               Serial.println("*** show_preferenes:");
               refill_preferences_as_jsonData();
-              Serial.println(preferences_as_jsonData);
-              Serial.printf("n***\r\n");
+              // local copy
+              String s = String(preferences_as_jsonData);
+              s.replace("\n", "\r\n");
+              Serial.print(s);
+              Serial.printf("***\r\n");
               inputBuf = "";
               return;
             } else if (cmd == "preferences") {
@@ -3331,6 +3431,16 @@ void handle_usb_serial_input(void) {
               #if defined(ENABLE_SYSLOG) && defined(ENABLE_WIFI)
                 syslog_log(LOG_WARNING, String("usb-serial: preferences: user entered preferences command. Yet not implemented."));
               #endif
+              inputBuf = "";
+              return;
+            } else if (cmd == "dir") {
+              if (SPIFFS.begin(FORMAT_SPIFFS_IF_FAILED)) {
+                listDir(SPIFFS, "/", 0);
+                SPIFFS.end();
+              } else {
+                Serial.println("*** dir: SPIFFS Mount Failed");
+              }
+              Serial.printf("***\r\n");
               inputBuf = "";
               return;
             }
@@ -3370,7 +3480,7 @@ void handle_usb_serial_input(void) {
             Serial.println("  preferences          (needs to bei implemented)");
             Serial.println("  show_preferences     (shows preferences from flash)");
             Serial.println("  save_preferences_cfg (saves running config to /preferences.cfg in filesystem)");
-            Serial.println("  preferences (needs to bei implemented)");
+            Serial.println("  dir                  (lists SPIFFS directory)");
 #endif
             Serial.println("  trace <on|off>");
             Serial.println("  reboot");

@@ -7,6 +7,8 @@
 #include <ArduinoJson.h>
 #include <esp_task_wdt.h>
 
+#ifdef ENABLE_WIFI
+
 /**
  * @see board_build.embed_txtfiles in platformio.ini
  */
@@ -34,12 +36,11 @@ extern int8_t wifi_connection_status;
 extern String wifi_ModeAP_SSID;
 extern String wifi_ModeAP_PASS;
 String wifi_ModeAP_PASS_default = "xxxxxxxxxx";
-extern String wifi_ModeSTA_PASS;
-extern String wifi_ModeSTA_SSID;
+// AP Array, currently max 9 APs possible (plus 1 with SSID Self-AP with password)
+#define MAX_AP_CNT 10                  // max number of possible APs
+extern struct AccessPoint APs[MAX_AP_CNT];
+extern int apcnt;
 
-// credentials from wifi.cfg
-extern String wifi_ModeSTA_SSID_fallback;
-extern String wifi_ModeSTA_PASS_fallback;
 // for displaying wifi status
 extern String oled_wifi_SSID_curr;
 extern String oled_wifi_PASS_curr;
@@ -128,6 +129,7 @@ String aprs_callsign;
 
 // keep config stored in this global variable
 extern String preferences_as_jsonData;
+String wifi_config_as_jsonData;
 
 WebServer server(80);
 #ifdef KISS_PROTOCOL
@@ -383,108 +385,107 @@ void handle_Restore() {
 
 void refill_preferences_as_jsonData()
 {
-  String s;
-  String jsonData = "{";
-  jsonData += String("\"") + PREF_WIFI_PASSWORD + "\": \"" + jsonEscape((preferences.getString(PREF_WIFI_PASSWORD, "").isEmpty() ? String("") : "*")) + R"(",)";
-  jsonData += String("\"") + PREF_AP_PASSWORD + "\": \"" + jsonEscape((preferences.getString(PREF_AP_PASSWORD, "").isEmpty() ? String("") : "*")) + R"(",)";
-  jsonData += jsonLineFromPreferenceInt(PREF_WIFI_ENABLE);
-  jsonData += jsonLineFromPreferenceString(PREF_WIFI_SSID);
-  jsonData += jsonLineFromPreferenceBool(PREF_WIFI_STA_ALLOW_FAILBACK_TO_MODE_AP_AFTER_ONCE_CONNECTED);
-  jsonData += jsonLineFromPreferenceInt(PREF_WIFI_TXPWR_MODE_AP);
-  jsonData += jsonLineFromPreferenceInt(PREF_WIFI_TXPWR_MODE_STA);
-  jsonData += jsonLineFromPreferenceBool(PREF_TNCSERVER_ENABLE);
-  jsonData += jsonLineFromPreferenceBool(PREF_GPSSERVER_ENABLE);
-  jsonData += jsonLineFromPreferenceString(PREF_NTP_SERVER);
-  jsonData += jsonLineFromPreferenceString(PREF_SYSLOG_SERVER);
-  jsonData += jsonLineFromPreferenceDouble(PREF_LORA_FREQ_PRESET);
-  jsonData += jsonLineFromPreferenceInt(PREF_LORA_SPEED_PRESET);
-  jsonData += jsonLineFromPreferenceBool(PREF_LORA_RX_ENABLE);
-  jsonData += jsonLineFromPreferenceBool(PREF_LORA_TX_ENABLE);
-  jsonData += jsonLineFromPreferenceInt(PREF_LORA_TX_POWER);
-  jsonData += jsonLineFromPreferenceBool(PREF_LORA_AUTOMATIC_CR_ADAPTION_PRESET);
-  jsonData += jsonLineFromPreferenceInt(PREF_LORA_ADD_SNR_RSSI_TO_PATH_PRESET);
-  jsonData += jsonLineFromPreferenceBool(PREF_LORA_ADD_SNR_RSSI_TO_PATH_END_AT_KISS_PRESET);
-  jsonData += jsonLineFromPreferenceInt(PREF_APRS_DIGIPEATING_MODE_PRESET);
-  jsonData += jsonLineFromPreferenceInt(PREF_APRS_CROSS_DIGIPEATING_MODE_PRESET);
-  jsonData += jsonLineFromPreferenceInt(PREF_LORA_TX_BEACON_AND_KISS_TO_FREQUENCIES_PRESET);
-  jsonData += jsonLineFromPreferenceBool(PREF_LORA_TX_BEACON_AND_KISS_TO_APRSIS_PRESET);
-  jsonData += jsonLineFromPreferenceBool(PREF_LORA_TX_STATUSMESSAGE_TO_APRSIS_PRESET);
-  jsonData += jsonLineFromPreferenceDouble(PREF_LORA_FREQ_CROSSDIGI_PRESET);
-  jsonData += jsonLineFromPreferenceInt(PREF_LORA_SPEED_CROSSDIGI_PRESET);
-  jsonData += jsonLineFromPreferenceInt(PREF_LORA_TX_POWER_CROSSDIGI_PRESET);
-  jsonData += jsonLineFromPreferenceInt(PREF_LORA_RX_ON_FREQUENCIES_PRESET);
-  jsonData += jsonLineFromPreferenceString(PREF_APRS_CALLSIGN);
-  jsonData += jsonLineFromPreferenceString(PREF_APRS_RELAY_PATH);
-  jsonData += jsonLineFromPreferenceString(PREF_APRS_SYMBOL_TABLE);
-  jsonData += jsonLineFromPreferenceString(PREF_APRS_SYMBOL);
-  jsonData += jsonLineFromPreferenceString(PREF_APRS_COMMENT);
-  jsonData += jsonLineFromPreferenceString(PREF_APRS_LATITUDE_PRESET);
-  jsonData += jsonLineFromPreferenceString(PREF_APRS_LONGITUDE_PRESET);
-  jsonData += jsonLineFromPreferenceString(PREF_APRS_SENDER_BLACKLIST);
-  jsonData += jsonLineFromPreferenceInt(PREF_APRS_FIXED_BEACON_INTERVAL_PRESET);
-  jsonData += jsonLineFromPreferenceInt(PREF_APRS_SB_MIN_INTERVAL_PRESET);
-  jsonData += jsonLineFromPreferenceInt(PREF_APRS_SB_MAX_INTERVAL_PRESET);
-  jsonData += jsonLineFromPreferenceInt(PREF_APRS_SB_MIN_SPEED_PRESET);
-  jsonData += jsonLineFromPreferenceInt(PREF_APRS_SB_MAX_SPEED_PRESET);
-  jsonData += jsonLineFromPreferenceDouble(PREF_APRS_SB_ANGLE_PRESET);
-  jsonData += jsonLineFromPreferenceInt(PREF_APRS_SB_TURN_SLOPE_PRESET);
-  jsonData += jsonLineFromPreferenceInt(PREF_APRS_SB_TURN_TIME_PRESET);
-  jsonData += jsonLineFromPreferenceBool(PREF_APRS_SHOW_BATTERY);
-  jsonData += jsonLineFromPreferenceBool(PREF_APRS_FIXED_BEACON_PRESET);
-  //jsonData += jsonLineFromPreferenceBool(PREF_APRS_SHOW_ALTITUDE);
-  jsonData += jsonLineFromPreferenceInt(PREF_APRS_ALTITUDE_RATIO);
-  jsonData += jsonLineFromPreferenceBool(PREF_APRS_ALWAYS_SEND_CSE_SPEED_AND_ALTITUDE);
-  jsonData += jsonLineFromPreferenceBool(PREF_APRS_GPS_EN);
-  jsonData += jsonLineFromPreferenceBool(PREF_ACCEPT_OWN_POSITION_REPORTS_VIA_KISS);
-  jsonData += jsonLineFromPreferenceBool(PREF_GPS_ALLOW_SLEEP_WHILE_KISS);
-  jsonData += jsonLineFromPreferenceBool(PREF_ENABLE_TNC_SELF_TELEMETRY);
-  jsonData += jsonLineFromPreferenceInt(PREF_TNC_SELF_TELEMETRY_INTERVAL);
-  jsonData += jsonLineFromPreferenceInt(PREF_TNC_SELF_TELEMETRY_MIC);
-  jsonData += jsonLineFromPreferenceString(PREF_TNC_SELF_TELEMETRY_PATH);
-  jsonData += jsonLineFromPreferenceBool(PREF_DEV_OL_EN);
-  jsonData += jsonLineFromPreferenceBool(PREF_APRS_SHOW_CMT);
-  jsonData += jsonLineFromPreferenceBool(PREF_APRS_COMMENT_RATELIMIT_PRESET);
-  jsonData += jsonLineFromPreferenceBool(PREF_DEV_BT_EN);
-  jsonData += jsonLineFromPreferenceInt(PREF_DEV_USBSERIAL_DATA_TYPE);
-  jsonData += jsonLineFromPreferenceInt(PREF_DEV_SHOW_RX_TIME);
-  jsonData += jsonLineFromPreferenceBool(PREF_DEV_AUTO_SHUT);
-  jsonData += jsonLineFromPreferenceInt(PREF_DEV_AUTO_SHUT_PRESET);
-  jsonData += jsonLineFromPreferenceInt(PREF_DEV_REBOOT_INTERVAL);
-  jsonData += jsonLineFromPreferenceInt(PREF_DEV_SHOW_OLED_TIME);
-  jsonData += jsonLineFromPreferenceInt(PREF_DEV_CPU_FREQ);
-  jsonData += jsonLineFromPreferenceInt(PREF_DEV_UNITS);
-  jsonData += jsonLineFromPreferenceBool(PREF_APRSIS_EN);
-  jsonData += jsonLineFromPreferenceString(PREF_APRSIS_SERVER_NAME);
-  jsonData += jsonLineFromPreferenceInt(PREF_APRSIS_SERVER_PORT);
-  jsonData += jsonLineFromPreferenceString(PREF_APRSIS_FILTER);
-  jsonData += jsonLineFromPreferenceString(PREF_APRSIS_CALLSIGN);
-  jsonData += jsonLineFromPreferenceString(PREF_APRSIS_PASSWORD);
-  jsonData += jsonLineFromPreferenceInt(PREF_APRSIS_ALLOW_INET_TO_RF);
-  jsonData += jsonLineFromDouble("lora_freq_rx_curr", lora_freq_rx_curr);
-  jsonData += jsonLineFromString("aprsis_status", aprsis_status.c_str());
-  jsonData += jsonLineFromInt("FreeHeap", ESP.getFreeHeap());
-  jsonData += jsonLineFromInt("HeapSize", ESP.getHeapSize());
-  jsonData += jsonLineFromInt("FreeSketchSpace", ESP.getFreeSketchSpace());
-  jsonData += jsonLineFromInt("PSRAMSize", ESP.getPsramSize());
-  jsonData += jsonLineFromInt("PSRAMFree", ESP.getFreePsram());
-  s = aprsLatPreset + " " + aprsLonPreset + " [" + (aprsPresetShown == "" ? "GPS" : aprsPresetShown) + "]";
-  jsonData += jsonLineFromString("curPos", s.c_str());
-  jsonData += jsonLineFromInt("UptimeMinutes", millis()/1000/60);
-  jsonData += jsonLineFromString("OledLine1", OledLine1.c_str());
-  jsonData += jsonLineFromString("OledLine2", OledLine2.c_str());
-  jsonData += jsonLineFromString("OledLine3", OledLine3.c_str());
-  s = String(OledLine4); s.replace("\xF7", "°");
-  jsonData += jsonLineFromString("OledLine4", s.c_str());
-  jsonData += jsonLineFromString("OledLine5", OledLine5.c_str(), true);
+  String s_tmp;
+  String s = "{";
+  s = "\n  " + String("\"") + PREF_WIFI_PASSWORD + "\": \"" + jsonEscape((preferences.getString(PREF_WIFI_PASSWORD, "").isEmpty() ? String("") : "*")) + R"(",)";
+  s = "\n  " +  String("\"") + PREF_AP_PASSWORD + "\": \"" + jsonEscape((preferences.getString(PREF_AP_PASSWORD, "").isEmpty() ? String("") : "*")) + R"(",)";
+  s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_WIFI_ENABLE);
+  s = s + "\n  " +  jsonLineFromPreferenceString(PREF_WIFI_SSID);
+  s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_WIFI_STA_ALLOW_FAILBACK_TO_MODE_AP_AFTER_ONCE_CONNECTED);
+  s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_WIFI_TXPWR_MODE_AP);
+  s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_WIFI_TXPWR_MODE_STA);
+  s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_TNCSERVER_ENABLE);
+  s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_GPSSERVER_ENABLE);
+  s = s + "\n  " +  jsonLineFromPreferenceString(PREF_NTP_SERVER);
+  s = s + "\n  " +  jsonLineFromPreferenceString(PREF_SYSLOG_SERVER);
+  s = s + "\n  " +  jsonLineFromPreferenceDouble(PREF_LORA_FREQ_PRESET);
+  s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_LORA_SPEED_PRESET);
+  s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_LORA_RX_ENABLE);
+  s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_LORA_TX_ENABLE);
+  s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_LORA_TX_POWER);
+  s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_LORA_AUTOMATIC_CR_ADAPTION_PRESET);
+  s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_LORA_ADD_SNR_RSSI_TO_PATH_PRESET);
+  s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_LORA_ADD_SNR_RSSI_TO_PATH_END_AT_KISS_PRESET);
+  s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_APRS_DIGIPEATING_MODE_PRESET);
+  s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_APRS_CROSS_DIGIPEATING_MODE_PRESET);
+  s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_LORA_TX_BEACON_AND_KISS_TO_FREQUENCIES_PRESET);
+  s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_LORA_TX_BEACON_AND_KISS_TO_APRSIS_PRESET);
+  s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_LORA_TX_STATUSMESSAGE_TO_APRSIS_PRESET);
+  s = s + "\n  " +  jsonLineFromPreferenceDouble(PREF_LORA_FREQ_CROSSDIGI_PRESET);
+  s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_LORA_SPEED_CROSSDIGI_PRESET);
+  s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_LORA_TX_POWER_CROSSDIGI_PRESET);
+  s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_LORA_RX_ON_FREQUENCIES_PRESET);
+  s = s + "\n  " +  jsonLineFromPreferenceString(PREF_APRS_CALLSIGN);
+  s = s + "\n  " +  jsonLineFromPreferenceString(PREF_APRS_RELAY_PATH);
+  s = s + "\n  " +  jsonLineFromPreferenceString(PREF_APRS_SYMBOL_TABLE);
+  s = s + "\n  " +  jsonLineFromPreferenceString(PREF_APRS_SYMBOL);
+  s = s + "\n  " +  jsonLineFromPreferenceString(PREF_APRS_COMMENT);
+  s = s + "\n  " +  jsonLineFromPreferenceString(PREF_APRS_LATITUDE_PRESET);
+  s = s + "\n  " +  jsonLineFromPreferenceString(PREF_APRS_LONGITUDE_PRESET);
+  s = s + "\n  " +  jsonLineFromPreferenceString(PREF_APRS_SENDER_BLACKLIST);
+  s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_APRS_FIXED_BEACON_INTERVAL_PRESET);
+  s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_APRS_SB_MIN_INTERVAL_PRESET);
+  s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_APRS_SB_MAX_INTERVAL_PRESET);
+  s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_APRS_SB_MIN_SPEED_PRESET);
+  s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_APRS_SB_MAX_SPEED_PRESET);
+  s = s + "\n  " +  jsonLineFromPreferenceDouble(PREF_APRS_SB_ANGLE_PRESET);
+  s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_APRS_SB_TURN_SLOPE_PRESET);
+  s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_APRS_SB_TURN_TIME_PRESET);
+  s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_APRS_SHOW_BATTERY);
+  s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_APRS_FIXED_BEACON_PRESET);
+  //s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_APRS_SHOW_ALTITUDE);
+  s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_APRS_ALTITUDE_RATIO);
+  s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_APRS_ALWAYS_SEND_CSE_SPEED_AND_ALTITUDE);
+  s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_APRS_GPS_EN);
+  s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_ACCEPT_OWN_POSITION_REPORTS_VIA_KISS);
+  s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_GPS_ALLOW_SLEEP_WHILE_KISS);
+  s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_ENABLE_TNC_SELF_TELEMETRY);
+  s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_TNC_SELF_TELEMETRY_INTERVAL);
+  s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_TNC_SELF_TELEMETRY_MIC);
+  s = s + "\n  " +  jsonLineFromPreferenceString(PREF_TNC_SELF_TELEMETRY_PATH);
+  s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_DEV_OL_EN);
+  s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_APRS_SHOW_CMT);
+  s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_APRS_COMMENT_RATELIMIT_PRESET);
+  s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_DEV_BT_EN);
+  s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_DEV_USBSERIAL_DATA_TYPE);
+  s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_DEV_SHOW_RX_TIME);
+  s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_DEV_AUTO_SHUT);
+  s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_DEV_AUTO_SHUT_PRESET);
+  s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_DEV_REBOOT_INTERVAL);
+  s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_DEV_SHOW_OLED_TIME);
+  s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_DEV_CPU_FREQ);
+  s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_DEV_UNITS);
+  s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_APRSIS_EN);
+  s = s + "\n  " +  jsonLineFromPreferenceString(PREF_APRSIS_SERVER_NAME);
+  s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_APRSIS_SERVER_PORT);
+  s = s + "\n  " +  jsonLineFromPreferenceString(PREF_APRSIS_FILTER);
+  s = s + "\n  " +  jsonLineFromPreferenceString(PREF_APRSIS_CALLSIGN);
+  s = s + "\n  " +  jsonLineFromPreferenceString(PREF_APRSIS_PASSWORD);
+  s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_APRSIS_ALLOW_INET_TO_RF);
+  s = s + "\n  " +  jsonLineFromDouble("lora_freq_rx_curr", lora_freq_rx_curr);
+  s = s + "\n  " +  jsonLineFromString("aprsis_status", aprsis_status.c_str());
+  s = s + "\n  " +  jsonLineFromInt("FreeHeap", ESP.getFreeHeap());
+  s = s + "\n  " +  jsonLineFromInt("HeapSize", ESP.getHeapSize());
+  s = s + "\n  " +  jsonLineFromInt("FreeSketchSpace", ESP.getFreeSketchSpace());
+  s = s + "\n  " +  jsonLineFromInt("PSRAMSize", ESP.getPsramSize());
+  s = s + "\n  " +  jsonLineFromInt("PSRAMFree", ESP.getFreePsram());
+  s_tmp = aprsLatPreset + " " + aprsLonPreset + " [" + (aprsPresetShown == "" ? "GPS" : aprsPresetShown) + "]";
+  s = s + jsonLineFromString("curPos", s_tmp.c_str());
+  s = s + "\n  " +  jsonLineFromInt("UptimeMinutes", millis()/1000/60);
+  s = s + "\n  " +  jsonLineFromString("OledLine1", OledLine1.c_str());
+  s = s + "\n  " +  jsonLineFromString("OledLine2", OledLine2.c_str());
+  s = s + "\n  " +  jsonLineFromString("OledLine3", OledLine3.c_str());
+  s_tmp = String(OledLine4); s_tmp.replace("\xF7", "°");
+  s = s + "\n  " +  jsonLineFromString("OledLine4", s_tmp.c_str());
+  s = s + "\n  " +  jsonLineFromString("OledLine5", OledLine5.c_str(), true);
 
-  jsonData += "}";
+  s += "\n}";
   // Store copy of jsonData in our global variable
-  preferences_as_jsonData = String(jsonData);
+  preferences_as_jsonData = String(s);
+
 }
 
 void handle_saveCfg2FS() {
-  // https://www.tutorialspoint.com/esp32_for_iot/esp32_for_iot_spiffs_storage.htm
-  // Launch SPIFFS file system
   #if defined(ENABLE_SYSLOG)
     syslog_log(LOG_INFO, String("WebServer: Button save Config to Filesystem pressed."));
     do_serial_println("WebServer: Button save Config to Filesystem pressed.");
@@ -492,6 +493,7 @@ void handle_saveCfg2FS() {
 
   refill_preferences_as_jsonData();
   if (!preferences_as_jsonData.isEmpty()) {
+    // Launches SPIFFS file system
     save_to_file("Webserver", "/preferences.cfg", preferences_as_jsonData);
   }
 
@@ -499,10 +501,63 @@ void handle_saveCfg2FS() {
   server.send(302,"text/html", "");
 }
 
-
 void handle_Cfg() {
   refill_preferences_as_jsonData();
   server.send(200,"application/json", preferences_as_jsonData);
+}
+
+void fill_wifi_config_as_jsonData() {
+  int pos;
+  String s = "{\n  \"AP\": [\n";
+  if (apcnt) {
+    for (pos = 0 ; pos < apcnt; pos++) {
+      s += "    {\n      ";
+      s = s + "\"SSID\": \"" + jsonEscape(String(APs[pos].ssid)) + "\"" + "\n";
+      s += "      ";
+      s = s + "\"password\": \"" + jsonEscape(String(APs[pos].pw)) + "\"" + "\n";
+      if (!pos) {
+        s += "      ";
+	s += "\"prio\": 1\n";
+      }
+      s += "    }";
+      if (pos < apcnt-1)
+	s += ",";
+      s += "\n";
+    }
+  } else {
+    s += "    {\n      ";
+    s = s + "\"SSID\": \"" + jsonEscape(preferences.getString(PREF_WIFI_PASSWORD, "")) + "\",\n";
+    s += "      ";
+    s = s + "\"password\": \"" + jsonEscape(preferences.getString(PREF_WIFI_PASSWORD, "")) + "\"\n";
+    s += "    }\n";
+  }
+  s += "  ],\n\n";
+  s = s + "  \"SelfAP_PW\": \"" + jsonEscape(preferences.getString(PREF_AP_PASSWORD)) + "\"\n";
+
+  s += "}\n";
+
+  wifi_config_as_jsonData = String(s);
+}
+
+void handle_saveWifi2FS() {
+  #if defined(ENABLE_SYSLOG)
+    syslog_log(LOG_INFO, String("WebServer: Button save WifiConfig to Filesystem pressed."));
+    do_serial_println("WebServer: Button save WifiConfig to Filesystem pressed.");
+  #endif
+
+  fill_wifi_config_as_jsonData();
+  if (!wifi_config_as_jsonData.isEmpty()) {
+    // Launches SPIFFS file system
+    save_to_file("Webserver", "/wifi.cfg", wifi_config_as_jsonData);
+  }
+
+  server.sendHeader("Location", "/");
+  server.send(302,"text/html", "");
+}
+
+void handle_WifiCfg() {
+  fill_wifi_config_as_jsonData();
+  server.send(200,"application/json", wifi_config_as_jsonData);
 }
 
 void handle_ReceivedList() {
@@ -1026,14 +1081,16 @@ boolean restart_STA(String use_ssid, String use_password) {
   do_serial_println("WiFi: Searching for AP " + use_ssid);
   while (WiFi.status() != WL_CONNECTED) {
     esp_task_wdt_reset();
-    do_serial_println(String("WiFi: Status " + String(int(WiFi.status())) + ". Try " + retryWifi));
     if (retryWifi > 30) {
-      esp_task_wdt_reset();
+      do_serial_println(String("WiFi: Status " + String(int(WiFi.status())) + ". Try " + retryWifi + ". Giving up."));
       return false;
     }
+    do_serial_println(String("WiFi: Status " + String(int(WiFi.status())) + ". Try " + retryWifi));
     retryWifi += 1;
     vTaskDelay(500/portTICK_PERIOD_MS);
   }
+  // WL_CONNECTED = Status 3
+  do_serial_println(String("WiFi: Status " + String(int(WiFi.status())) + ". Try " + retryWifi + ". Connected."));
   esp_task_wdt_reset();
   return true;;
 }
@@ -1050,28 +1107,26 @@ void restart_AP_or_STA(void) {
   String used_wifi_ModeSTA_SSID;
   String used_wifi_ModeSTA_PASS;
 
-  if (wifi_ModeSTA_SSID.length() || wifi_ModeSTA_SSID_fallback.length()) {
-
+  if (apcnt) {
+    static boolean successfully_associated = false;
     oled_wifi_SSID_curr = "[not connected]";
     oled_wifi_PASS_curr = "";
     oled_wifi_IP_curr = "0.0.0.0";
+    int pos;
 
     start_soft_ap = false;
-
-    boolean successfully_associated = restart_STA(wifi_ModeSTA_SSID, wifi_ModeSTA_PASS);
-    if (successfully_associated) {
-      used_wifi_ModeSTA_SSID = wifi_ModeSTA_SSID;
-      used_wifi_ModeSTA_PASS = wifi_ModeSTA_PASS;
-    } else {
-      // second try, with the SSID and password from wifi.cfg
-      successfully_associated = restart_STA(wifi_ModeSTA_SSID_fallback, wifi_ModeSTA_PASS_fallback);
+    for (pos = 0; pos < apcnt; pos++) {
+      do_serial_println("Wifi: Trying AP " + String(pos) + "/" + String(apcnt) + ": SSID " + APs[pos].ssid);
+      successfully_associated = restart_STA(String(APs[pos].ssid), String(APs[pos].pw));
       if (successfully_associated) {
-        used_wifi_ModeSTA_SSID = wifi_ModeSTA_SSID_fallback;
-        used_wifi_ModeSTA_PASS = wifi_ModeSTA_PASS_fallback;
+	used_wifi_ModeSTA_SSID = String(APs[pos].ssid);
+	used_wifi_ModeSTA_PASS = String(APs[pos].pw);
+	break;
       }
     }
+
     if (!successfully_associated && (!mode_sta_once_successfully_connected || wifi_do_fallback_to_mode_AP)) {
-       start_soft_ap = true;
+      start_soft_ap = true;
     }
 
   } else {
@@ -1657,10 +1712,12 @@ void send_to_aprsis()
   server.on("/beacon", handle_Beacon);
   server.on("/shutdown", handle_Shutdown);
   server.on("/cfg", handle_Cfg);
+  server.on("/wificfg", handle_WifiCfg);
   server.on("/received_list", handle_ReceivedList);
   server.on("/save_aprs_cfg", handle_SaveAPRSCfg);
   server.on("/save_device_cfg", handle_saveDeviceCfg);
   server.on("/save2fs", handle_saveCfg2FS);
+  server.on("/savewifi2fs", handle_saveWifi2FS);
   server.on("/restore", handle_Restore);
   server.on("/update", HTTP_POST, []() {
 #if defined(ENABLE_SYSLOG)
@@ -1710,12 +1767,13 @@ void send_to_aprsis()
   esp_task_wdt_init(120, true); //enable panic so ESP32 restarts
   esp_task_wdt_add(NULL); //add current thread to WDT watch
 
-  wifi_ModeSTA_PASS = preferences.getString(PREF_WIFI_PASSWORD, "");
-  wifi_ModeSTA_SSID = preferences.getString(PREF_WIFI_SSID, "");
-  wifi_ModeAP_PASS = preferences.getString(PREF_AP_PASSWORD, "");
   // 8 characters is requirements for WPA2
+  // May be already set by wifi.cfg
   if (wifi_ModeAP_PASS.length() < 8) {
-    wifi_ModeAP_PASS = wifi_ModeAP_PASS_default;
+    wifi_ModeAP_PASS = preferences.getString(PREF_AP_PASSWORD, "");
+    if (wifi_ModeAP_PASS.length() < 8) {
+      wifi_ModeAP_PASS = wifi_ModeAP_PASS_default;
+    }
   }
 
 
@@ -1800,7 +1858,10 @@ void send_to_aprsis()
         }
       }
     } else {
-      if ((wifi_ModeSTA_SSID.length() || wifi_ModeSTA_SSID_fallback.length()) && millis() - webserver_started > 60*1000L && WiFi.softAPgetStationNum() < 1) {
+      // If we are in self-AP-mode and remote APs are configured (but not had been reachable),
+      // try to give up self AP mode and try to reconnect an remote AP again. But only do this,
+      // if no user is currently associated with our self-AP.
+      if (apcnt && millis() - webserver_started > 60*1000L && WiFi.softAPgetStationNum() < 1) {
         if (aprsis_client.connected()) aprsis_client.stop();
         restart_AP_or_STA();
         webserver_started = millis();
@@ -1902,3 +1963,5 @@ void send_to_aprsis()
     vTaskDelay(5/portTICK_PERIOD_MS);
   }
 }
+
+#endif // ENABLE_WIFI

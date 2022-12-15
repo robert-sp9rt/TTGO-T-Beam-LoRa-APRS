@@ -649,6 +649,9 @@
                 Click <a href="/cfg">here</a> to view (backup) your current settings.
             </div>
             <div class="grid-container full">
+                Click <a href="/wificfg">here</a> to view your configured wifi settings.
+            </div>
+            <div class="grid-container full">
                 <h5 class="u-full-width">Firmware update</h5>
             </div>
             <div class="grid-container full">
@@ -669,6 +672,17 @@
                 <form action="/save2fs" method="post">
                     <div>
                         <input class="button-primary" type="submit" value="save2fs">
+                    </div>
+                </form>
+            </div>
+            <div class="grid-container full">
+                <h5 class="u-full-width">Save configuration</h5>
+            </div>
+            <div class="grid-container full">
+                Save Wifi configuration to tracker's filesystem (/wifi.cfg)
+                <form action="/savewifi2fs" method="post">
+                    <div>
+                        <input class="button-primary" type="submit" value="savewifi2fs">
                     </div>
                 </form>
             </div>
@@ -754,18 +768,20 @@
                </ul>
                data/wifi.cfg<br>
                <ul>
-                 <li>wifi.cfg has to be created manually, following the json structure in the example. The names of the variables (aka keys) must not be altered</li>
-                 <li>wifi.cfg in the directory data contains an SSID and password of the AP for the second try described above</li>
-                 <li>the total length of this file must not exceed 256 Byte. The password must not be shorter that 8 byte. The json structure must not be changed</li>
-                 <li>if something is wrong or the file is missing, the complete file will be ignored and step 2 (above) will be skipped</li>
-                 <li>To upload wifi.cfg to your board you have to do this via Upload File System image in PlatformIO!</li>
+                 <li>wifi.cfg can to be created manually, following the json structure in the example. The names of the variables (aka keys) must not be altered</li>
+                 <li>The preferred way is to upgrade the firmware to the newest version, make sure, that the wifi credentials are set correctly and then press the SAVEWIFI2FS Button</li>
+                 <li>The content, what will be saved, can be viewed above.</li>
+                 <li>wifi.cfg in the directory data contains SSID and password of up to 10 AP and a password for the local accesspoint</li>
+                 <li>The password must not be shorter that 8 byte. The json structure must not be changed</li>
+                 <li>if something is wrong or the file is missing, the complete file will be ignored. If credentials are available in flash memory, they will be used.</li>
+                 <li>An alternative to upload wifi.cfg to your board is via Upload File System image in PlatformIO!</li>
                  <li>To find the 'Upload File System image' click the PlatformIO symbol (the little alien) on the left side, choose your configuration, click on 'Platform' and search for 'Upload File System image'. If you use platformio-cli, upload the filesystem as described below.</li>
                </ul>
                which WiFi is selected?<br/>
                <ul>
-                 <li>first, the SSID which is configured via the WebSite will be searched, this SSID should match SSID1 in the file</li>
-                 <li>second, if that SSID is not found, the WiFi configured as SSID2 in data/wifi.cfg will be searched</li>
-                 <li>third, if that SSID is also not found, a local accesspoint with the SSID "call AP" will be created. After connected to, this Webserver will be reachable with the IP Address 192.168.4.1. The password for the selfAP can be preconfigured with the key "ap_password" in this file</li>
+                 <li>An AP entry containing the keyword "prio":1 defines the entry which is taken as first to connect before following the configured order</li>
+                 <li>if there is nothing prioritized, then the configured order is followed. If credentials are available in flash memory, they will be used first.</li>
+                 <li>if no connection to a configured AP could be established, a local accesspoint with the SSID "call AP" will be created. After connected to, this Webserver will be reachable with the IP Address 192.168.4.1. The password for the selfAP can be preconfigured with the key "ap_password" in this file</li>
                </ul>
                data/preferences.cfg<br>
                <ul>
