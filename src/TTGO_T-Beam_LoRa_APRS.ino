@@ -202,6 +202,7 @@ boolean always_send_cseSpd_AND_altitude = false;
 #endif
 #ifdef TNC_SELF_TELEMETRY_MIC
   int tel_mic = 1; // telemetry as "T#MIC"
+  // hmm, but aprs spec's example is T#MIC199
 #else
   int tel_mic = 0; // telemetry as "T#001"
 #endif
@@ -1219,6 +1220,9 @@ void set_callsign() {
     Tcall = preferences.getString(PREF_APRS_CALLSIGN, "");
     if (Tcall.isEmpty()){
       preferences.putString(PREF_APRS_CALLSIGN, String(CALLSIGN));
+      #if defined(ENABLE_SYSLOG)
+        syslog_log(LOG_DEBUG, String("FlashWrite preferences: set_Callsign()"));
+      #endif
       Tcall = preferences.getString(PREF_APRS_CALLSIGN);
     }
   #endif
@@ -1293,6 +1297,9 @@ void sendTelemetryFrame() {
     }
     #ifdef ENABLE_PREFERENCES
       preferences.putUInt(PREF_TNC_SELF_TELEMETRY_SEQ, tel_sequence);
+      #if defined(ENABLE_SYSLOG)
+        syslog_log(LOG_DEBUG, String("FlashWrite preferences: sendTelemetryFrame()"));
+      #endif
     #endif
 #endif // T_BEAM_V1_0
     }
@@ -1374,6 +1381,9 @@ int writeFile(fs::FS &fs, const String &callername, const char *filename, const 
   }
   if (file.print(jsonData)) {
     do_serial_println(callername + ": file " + filename + " written");
+    #if defined(ENABLE_SYSLOG)
+      syslog_log(LOG_DEBUG, String("FlashWrite filesystem: writeFile(") + String(filename) + String(")"));
+    #endif
   } else {
     do_serial_println(callername + ": write of " + filename + " failed!");
     ret = -3;
@@ -1506,7 +1516,7 @@ boolean readFile(fs::FS &fs, const char *filename) {
 
     if (JSONBuffer.containsKey("AP")) {
       for (JsonObject AccessPoint : JSONBuffer["AP"].as<JsonArray>()) {
-        if (strcmp(AccessPoint["SSID"], wifi_ModeSTA_SSID.c_str()) && strcmp(AccessPoint["password"], wifi_ModeSTA_PASS.c_str())) {
+        if (strcmp(AccessPoint["SSID"], wifi_ModeSTA_SSID.c_str()) || strcmp(AccessPoint["password"], wifi_ModeSTA_PASS.c_str())) {
           strncpy(APs[apcnt].ssid, AccessPoint["SSID"], sizeof(APs[apcnt].ssid)-1);
           strncpy(APs[apcnt].pw, AccessPoint["password"], sizeof(APs[apcnt].pw)-1);
           // delay(3000); // uncomment if serial prints are not showing
@@ -1675,6 +1685,9 @@ void load_preferences_cfg_file()
   preferences.putString(PREF_SYSLOG_SERVER, s);
   s = jsonElementFromPreferenceCFGString(PREF_NTP_SERVER,0);
   preferences.putString(PREF_NTP_SERVER, s);
+  #if defined(ENABLE_SYSLOG)
+    syslog_log(LOG_DEBUG, String("FlashWrite preferences: load_preferences_cfg()"));
+  #endif
 
 #endif // ENABLE_WIFI
   lora_freq = jsonElementFromPreferenceCFGDouble(PREF_LORA_FREQ_PRESET,PREF_LORA_FREQ_PRESET_INIT);
@@ -2401,6 +2414,9 @@ void setup()
             preferences.putString(PREF_WIFI_SSID, wifi_ModeSTA_SSID);
             preferences.putString(PREF_WIFI_PASSWORD, wifi_ModeSTA_PASS);
             preferences.putString(PREF_AP_PASSWORD, wifi_ModeAP_PASS);
+            #if defined(ENABLE_SYSLOG)
+              syslog_log(LOG_DEBUG, String("FlashWrite preferences: setup()"));
+            #endif
             Serial.println("WiFi: Updated remote SSID: " + wifi_ModeSTA_SSID);
             Serial.println("WiFi: Updated remote PW: ***");
           }
@@ -3575,6 +3591,9 @@ void handle_usb_serial_input(void) {
               }
               #ifdef ENABLE_PREFERENCES
                 preferences.putInt(PREF_DEV_USBSERIAL_DATA_TYPE, usb_serial_data_type);
+                #if defined(ENABLE_SYSLOG)
+                  syslog_log(LOG_DEBUG, String("FlashWrite preferences: handle_usb_serial_input() 1"));
+                #endif
               #endif
             }
             Serial.println("*** " + cmd + " is " + ((usb_serial_data_type & 1) ? "on" : "off"));
@@ -3591,20 +3610,29 @@ void handle_usb_serial_input(void) {
               }
               #ifdef ENABLE_PREFERENCES
                 preferences.putInt(PREF_DEV_USBSERIAL_DATA_TYPE, usb_serial_data_type);
+                #if defined(ENABLE_SYSLOG)
+                  syslog_log(LOG_DEBUG, String("FlashWrite preferences: handle_usb_serial_input() 2"));
+                #endif
              #endif
            }
            Serial.println("*** " + cmd + " is " + ((usb_serial_data_type & 2) ? "on" : "off"));
 #ifdef	ENABLE_WIFI
           } else if (cmd == "aprsis") {
             if (arg != "") {
-              preferences.putBool(PREF_APRSIS_EN, arg_bool);
               aprsis_enabled = arg_bool;
+              preferences.putBool(PREF_APRSIS_EN, arg_bool);
+              #if defined(ENABLE_SYSLOG)
+                syslog_log(LOG_DEBUG, String("FlashWrite preferences: handle_usb_serial_input() 3"));
+              #endif
             }
             Serial.println("*** " + cmd + " is " + (aprsis_enabled ? "on" : "off"));
           } else if (cmd == "wifi") {
             if (arg != "") {
               #ifdef ENABLE_PREFERENCES
                 preferences.putInt(PREF_WIFI_ENABLE, (arg_bool) ? 0 : 1);
+                #if defined(ENABLE_SYSLOG)
+                  syslog_log(LOG_DEBUG, String("FlashWrite preferences: handle_usb_serial_input() 4"));
+                #endif
               #endif
               if (arg_bool) {
                 if (!webserverStarted) {
@@ -4331,7 +4359,7 @@ out:
 
             s = kiss_add_snr_rssi_to_path_at_position_without_digippeated_flag ? append_element_to_path(received_frame, rssi_for_path) : add_element_to_path(received_frame, rssi_for_path);
           String s_tmp = s ? String(s) : String(loraReceivedFrameString);
-	  s_tmp.trim();
+          s_tmp.trim();
           Serial.println(s_tmp);
         }
 

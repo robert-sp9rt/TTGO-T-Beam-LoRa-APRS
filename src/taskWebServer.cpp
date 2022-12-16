@@ -521,7 +521,7 @@ void fill_wifi_config_as_jsonData() {
       }
       s += "\n    }";
       if (pos < apcnt-1)
-	s += ",";
+        s += ",";
       s += "\n";
     }
   } else {
@@ -625,6 +625,10 @@ void store_lat_long(float f_lat, float f_long) {
   if (i_deg >= 90) { i_deg = 89; f_min = 59.9999; };
   sprintf(buf, "%3.3d-%07.4f%c", i_deg, f_min, f_long < 0 ? 'W' :  'E');
   preferences.putString(PREF_APRS_LONGITUDE_PRESET, String(buf));
+  #if defined(ENABLE_SYSLOG)
+    syslog_log(LOG_DEBUG, String("FlashWrite preferences: store_lat_long()"));
+  #endif
+
 }
 
 
@@ -1119,19 +1123,32 @@ void restart_AP_or_STA(void) {
       do_serial_println("Wifi: Trying AP " + String(pos) + "/" + String(apcnt) + ": SSID " + APs[pos].ssid);
       successfully_associated = restart_STA(String(APs[pos].ssid), String(APs[pos].pw));
       if (successfully_associated) {
-	used_wifi_ModeSTA_SSID = String(APs[pos].ssid);
-	used_wifi_ModeSTA_PASS = String(APs[pos].pw);
-	if ((used_wifi_ModeSTA_PASS != preferences.getString(PREF_WIFI_PASSWORD, "")) || (used_wifi_ModeSTA_SSID != preferences.getString(PREF_WIFI_SSID, ""))) {
-	  preferences.putString(PREF_WIFI_SSID, used_wifi_ModeSTA_SSID);
-	  preferences.putString(PREF_WIFI_PASSWORD, used_wifi_ModeSTA_PASS);
-	}
-	if (pos) {
-	  strcpy(APs[pos].ssid, APs[0].ssid);
-	  strcpy(APs[pos].pw, APs[0].pw);
-	  strcpy(APs[0].ssid, used_wifi_ModeSTA_SSID.c_str());
-	  strcpy(APs[0].pw, used_wifi_ModeSTA_PASS.c_str());
-	}
-	break;
+        used_wifi_ModeSTA_SSID = String(APs[pos].ssid);
+        used_wifi_ModeSTA_PASS = String(APs[pos].pw);
+
+        static uint32_t last_write = 0L;
+        // store last successfull association into flash (preferences); ratelimit writing to flash
+        if (!last_write || millis() > last_write + 5*60*1000L) {
+          if (used_wifi_ModeSTA_PASS != preferences.getString(PREF_WIFI_PASSWORD, "")) {
+            preferences.putString(PREF_WIFI_PASSWORD, used_wifi_ModeSTA_PASS);
+            last_write = millis();
+          }
+          if (used_wifi_ModeSTA_SSID != preferences.getString(PREF_WIFI_SSID, "")) {
+            preferences.putString(PREF_WIFI_SSID, used_wifi_ModeSTA_SSID);
+            last_write = millis();
+          }
+          #if defined(ENABLE_SYSLOG)
+            syslog_log(LOG_DEBUG, String("FlashWrite preferences: restart_AP_or_STA()"));
+          #endif
+        }
+        if (pos) {
+          // New high priority for this AP
+          strcpy(APs[pos].ssid, APs[0].ssid);
+          strcpy(APs[pos].pw, APs[0].pw);
+          strcpy(APs[0].ssid, used_wifi_ModeSTA_SSID.c_str());
+          strcpy(APs[0].pw, used_wifi_ModeSTA_PASS.c_str());
+        }
+        break;
       }
     }
 
