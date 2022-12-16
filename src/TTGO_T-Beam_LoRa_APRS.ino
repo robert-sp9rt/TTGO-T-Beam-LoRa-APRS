@@ -1233,7 +1233,6 @@ void set_callsign() {
 char encode_int_in_char(int i) {
   if (i < 0 || i > 61)
     return '0';
-  char c = 0;
   if (i < 10) return '0' + i;
   if (i < 36) return 'A' + (i - 10);
   return 'a' + (i - 36);
