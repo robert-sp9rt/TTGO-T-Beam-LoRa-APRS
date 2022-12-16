@@ -220,11 +220,14 @@ boolean always_send_cseSpd_AND_altitude = false;
   int8_t wifi_txpwr_mode_AP = 8;
   int8_t wifi_txpwr_mode_STA = 80;
   extern void refill_preferences_as_jsonData();
+  extern void fill_wifi_config_as_jsonData();
 #else
   void refill_preferences_as_jsonData() { ; };
+  void fill_wifi_config_as_jsonData() { ; };
 #endif
 #ifdef ENABLE_PREFERENCES
 String preferences_as_jsonData;
+String wifi_config_as_jsonData;
 #endif
 #ifdef ENABLE_OLED
   boolean enabled_oled = true;
@@ -1553,16 +1556,16 @@ boolean readFile(fs::FS &fs, const char *filename) {
   if (!strcmp(filename, "/preferences.cfg")) {
     if (JSONBuffer.containsKey(PREF_APRS_CALLSIGN)) {
       // Serial.printf("Checked preferences.cfg: is ok. Found %s: %s. Filesize: %d\r\n", PREF_APRS_CALLSIGN, JSONBuffer[PREF_APRS_CALLSIGN], file.size());
-      Serial.printf("reafFile: Checked preferences.cfg: is ok. Found %s. Filesize: %d\r\n", PREF_APRS_CALLSIGN, file.size());
-      Serial.println("reafFile: Preferences: reading from /preferences.cfg");
+      Serial.printf("readFile: Checked preferences.cfg: is ok. Found %s. Filesize: %d\r\n", PREF_APRS_CALLSIGN, file.size());
+      Serial.println("readFile: Preferences: reading from /preferences.cfg");
       load_preferences_cfg_file();
     } else {
-      Serial.println("reafFile: Preferences: /preferences.cfg not available, using default values from flash");
+      Serial.println("readFile: Preferences: /preferences.cfg not available, using default values from flash");
       err = true;
     }
     goto end;
   }
-  Serial.printf("reafFile: Found file '%s', parsed it successfully, but I don't know what to do with the json data ;)!\r\n", filename);
+  Serial.printf("readFile: Found file '%s', parsed it successfully, but I don't know what to do with the json data ;)!\r\n", filename);
   err = true;
 
 end:
@@ -3433,6 +3436,30 @@ void handle_usb_serial_input(void) {
               #endif
               inputBuf = "";
               return;
+            } else if (cmd == "show_wifi") {
+              Serial.println("*** show_wifi:");
+              fill_wifi_config_as_jsonData();
+              // local copy
+              String s = String(wifi_config_as_jsonData);
+              s.replace("\n", "\r\n");
+              Serial.print(s);
+              Serial.printf("***\r\n");
+              inputBuf = "";
+              return;
+            } else if (cmd == "save_wifi_cfg") {
+              fill_wifi_config_as_jsonData();
+              Serial.println("*** save_preferences_cfg:");
+              if (!wifi_config_as_jsonData.isEmpty()) {
+                int ret = save_to_file("TNC", "/wifi.cfg", wifi_config_as_jsonData);
+                if (ret >= 0)
+                  Serial.println("*** save_wifi_cfg: ok");
+                else
+                  Serial.printf("*** save_wifi_cfg: error %d\r\n", ret);
+              } else {
+                  Serial.println("*** save_wifi_cfg: BUG (empty)");
+              }
+              inputBuf = "";
+              return;
             } else if (cmd == "dir") {
               if (SPIFFS.begin(FORMAT_SPIFFS_IF_FAILED)) {
                 listDir(SPIFFS, "/", 0);
@@ -3480,6 +3507,8 @@ void handle_usb_serial_input(void) {
             Serial.println("  preferences          (needs to bei implemented)");
             Serial.println("  show_preferences     (shows preferences from flash)");
             Serial.println("  save_preferences_cfg (saves running config to /preferences.cfg in filesystem)");
+            Serial.println("  show_wifi            (shows wifi from flash)");
+            Serial.println("  save_wifi_cfg        (saves running wifi config to /wifi.cfg in filesystem)");
             Serial.println("  dir                  (lists SPIFFS directory)");
 #endif
             Serial.println("  trace <on|off>");

@@ -129,7 +129,7 @@ String aprs_callsign;
 
 // keep config stored in this global variable
 extern String preferences_as_jsonData;
-String wifi_config_as_jsonData;
+extern String wifi_config_as_jsonData;
 
 WebServer server(80);
 #ifdef KISS_PROTOCOL
@@ -387,8 +387,8 @@ void refill_preferences_as_jsonData()
 {
   String s_tmp;
   String s = "{";
-  s = "\n  " + String("\"") + PREF_WIFI_PASSWORD + "\": \"" + jsonEscape((preferences.getString(PREF_WIFI_PASSWORD, "").isEmpty() ? String("") : "*")) + R"(",)";
-  s = "\n  " +  String("\"") + PREF_AP_PASSWORD + "\": \"" + jsonEscape((preferences.getString(PREF_AP_PASSWORD, "").isEmpty() ? String("") : "*")) + R"(",)";
+  s = s + "\n  " + String("\"") + PREF_WIFI_PASSWORD + "\": \"" + jsonEscape((preferences.getString(PREF_WIFI_PASSWORD, "").isEmpty() ? String("") : "*")) + R"(",)";
+  s = s + "\n  " +  String("\"") + PREF_AP_PASSWORD + "\": \"" + jsonEscape((preferences.getString(PREF_AP_PASSWORD, "").isEmpty() ? String("") : "*")) + R"(",)";
   s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_WIFI_ENABLE);
   s = s + "\n  " +  jsonLineFromPreferenceString(PREF_WIFI_SSID);
   s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_WIFI_STA_ALLOW_FAILBACK_TO_MODE_AP_AFTER_ONCE_CONNECTED);
@@ -512,29 +512,29 @@ void fill_wifi_config_as_jsonData() {
   if (apcnt) {
     for (pos = 0 ; pos < apcnt; pos++) {
       s += "    {\n      ";
-      s = s + "\"SSID\": \"" + jsonEscape(String(APs[pos].ssid)) + "\"" + "\n";
-      s += "      ";
-      s = s + "\"password\": \"" + jsonEscape(String(APs[pos].pw)) + "\"" + "\n";
+      s = s + "\"SSID\": \"" + jsonEscape(String(APs[pos].ssid)) + "\"";
+      s += ",\n      ";
+      s = s + "\"password\": \"" + jsonEscape(String(APs[pos].pw)) + "\"";
       if (!pos) {
-        s += "      ";
-	s += "\"prio\": 1\n";
+        s += ",\n      ";
+        s = s + "\"prio\": 1";
       }
-      s += "    }";
+      s += "\n    }";
       if (pos < apcnt-1)
 	s += ",";
       s += "\n";
     }
   } else {
     s += "    {\n      ";
-    s = s + "\"SSID\": \"" + jsonEscape(preferences.getString(PREF_WIFI_PASSWORD, "")) + "\",\n";
-    s += "      ";
-    s = s + "\"password\": \"" + jsonEscape(preferences.getString(PREF_WIFI_PASSWORD, "")) + "\"\n";
-    s += "    }\n";
+    s = s + "\"SSID\": \"" + jsonEscape(preferences.getString(PREF_WIFI_PASSWORD, "")) + "\"";
+    s += ",\n      ";
+    s = s + "\"password\": \"" + jsonEscape(preferences.getString(PREF_WIFI_PASSWORD, "")) + "\"";
+    s += "\n    }\n";
   }
   s += "  ],\n\n";
-  s = s + "  \"SelfAP_PW\": \"" + jsonEscape(preferences.getString(PREF_AP_PASSWORD)) + "\"\n";
+  s = s + "  \"SelfAP_PW\": \"" + jsonEscape(preferences.getString(PREF_AP_PASSWORD)) + "\"";
 
-  s += "}\n";
+  s += "\n}\n";
 
   wifi_config_as_jsonData = String(s);
 }
@@ -1121,6 +1121,16 @@ void restart_AP_or_STA(void) {
       if (successfully_associated) {
 	used_wifi_ModeSTA_SSID = String(APs[pos].ssid);
 	used_wifi_ModeSTA_PASS = String(APs[pos].pw);
+	if ((used_wifi_ModeSTA_PASS != preferences.getString(PREF_WIFI_PASSWORD, "")) || (used_wifi_ModeSTA_SSID != preferences.getString(PREF_WIFI_SSID, ""))) {
+	  preferences.putString(PREF_WIFI_SSID, used_wifi_ModeSTA_SSID);
+	  preferences.putString(PREF_WIFI_PASSWORD, used_wifi_ModeSTA_PASS);
+	}
+	if (pos) {
+	  strcpy(APs[pos].ssid, APs[0].ssid);
+	  strcpy(APs[pos].pw, APs[0].pw);
+	  strcpy(APs[0].ssid, used_wifi_ModeSTA_SSID.c_str());
+	  strcpy(APs[0].pw, used_wifi_ModeSTA_PASS.c_str());
+	}
 	break;
       }
     }
