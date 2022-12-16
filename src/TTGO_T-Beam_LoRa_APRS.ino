@@ -1231,12 +1231,12 @@ void set_callsign() {
 #if defined(ENABLE_TNC_SELF_TELEMETRY) && defined(KISS_PROTOCOL)
 
 char encode_int_in_char(int i) {
-        if (i < 0 || i > 61)
-          return '0';
-        char c = 0;
-        if (i < 10) return '0' + i;
-        if (i < 36) return 'A' + (i - 10);
-        return 'a' + (i - 36);
+  if (i < 0 || i > 61)
+    return '0';
+  char c = 0;
+  if (i < 10) return '0' + i;
+  if (i < 36) return 'A' + (i - 10);
+  return 'a' + (i - 36);
 }
 
 void sendTelemetryFrame() {
@@ -1273,7 +1273,7 @@ void sendTelemetryFrame() {
       struct tm timeinfo{};
       if (getLocalTime(&timeinfo)) {
         char buf[4];
-        int t = (timeinfo.tm_mon % 2) * 31 + ((timeinfo.tm_mday - 1) % 30);
+        int t = (timeinfo.tm_mon % 2) * 31 + ((timeinfo.tm_mday - 1) % 31);
         buf[0] = encode_int_in_char(t);
         // 24*60*60/(26*2+10)**2 = 22.476s
         t = ((timeinfo.tm_hour *24*60) + timeinfo.tm_min * 60 + timeinfo.tm_sec) / 23;
