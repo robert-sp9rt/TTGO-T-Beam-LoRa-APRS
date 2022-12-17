@@ -1263,7 +1263,7 @@ void sendTelemetryFrame() {
     #endif
     if (tel_mic == 1) {
       tel_sequence_str = "MIC";
-    } if (tel_mic == -1) {
+    } else if (tel_mic == -1) {
       // a much better approach, without storing sequence number back to flash.
       // On most trackers, the system time is set correct, either due to GPS time, or by NTP.
       // Telemetry sequence can be any number or letter. It has a size of 3 characters.
@@ -1346,7 +1346,6 @@ void sendTelemetryFrame() {
         #endif
         if (time_telemetry_NamesEquatBITS_sent)
           break;
-        break;
       case 2:
         sendToTNC(telemetryBase + telemetryEquations);
         #if defined(ENABLE_WIFI)
