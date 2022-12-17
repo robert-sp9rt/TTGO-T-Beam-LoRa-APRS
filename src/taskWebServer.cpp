@@ -479,7 +479,7 @@ void refill_preferences_as_jsonData()
   s = s + "\n  " +  jsonLineFromString("OledLine4", s_tmp.c_str());
   s = s + "\n  " +  jsonLineFromString("OledLine5", OledLine5.c_str(), true);
 
-  s += "\n}";
+  s += "\n}\n";
   // Store copy of jsonData in our global variable
   preferences_as_jsonData = String(s);
 

@@ -195,7 +195,7 @@
                     </div>
                     <div>
                         <label for="aprs_relay_path">Relay Path</label>
-                        <input class="u-full-width" type="text" minlength="0" name="aprs_relay_path" id="aprs_relay_path" title="APRS path, use the shortest as possible, ECHO, WIDE1-1 or WIDE2-1. If you really need a fill-in-digi, choose WIDE1-1,WIDE2-1. RFONLY or NOGATE must not be set in front of WIDEn-m. WIDE2-1,WIDE1-1 is not valid. The path with value '1' enables dest-path-digi-notation (like DL9SAU>APRS-1:..) instead of Path ..,WIDE1-1:... If you are a transmitting igate, please leave empty (or set it to Q. See below). About the SNR/RSSI-Path feature: You may request to add SNR/RSSI by adding 'Q' to your path (i.e. 'WIDE1-1,Q'; for transmitting igates (and balloons, aircrafts, ..), only 'Q' is recommended). Then only the first digi (or igate) adds SNR/RSSI to the path. If you add 'QQ' instead of 'Q' to your path (i.e. 'WIDE1-1,QQ'). Then every digi and igate adds SNR/RSSI to the path (useful for analyzing RF net quality). Use with care; resulting longer path consumes a bit more airtime.">
+                        <input class="u-full-width" type="text" minlength="0" name="aprs_relay_path" id="aprs_relay_path" title="APRS path, use the shortest as possible, WIDE1-1 or WIDE2-1. If you really need a fill-in-digi, choose WIDE1-1,WIDE2-1. RFONLY or NOGATE must not be set in front of WIDEn-m. WIDE2-1,WIDE1-1 is not valid. The path with value '1' enables dest-path-digi-notation (like DL9SAU>APRS-1:..) instead of Path ..,WIDE1-1:... If you are a transmitting igate, please leave empty (or set it to Q. See below). About the SNR/RSSI-Path feature: You may request to add SNR/RSSI by adding 'Q' to your path (i.e. 'WIDE1-1,Q'; for transmitting igates (and balloons, aircrafts, ..), only 'Q' is recommended). Then only the first digi (or igate) adds SNR/RSSI to the path. If you add 'QQ' instead of 'Q' to your path (i.e. 'WIDE1-1,QQ'). Then every digi and igate adds SNR/RSSI to the path (useful for analyzing RF net quality). Use with care; resulting longer path consumes a bit more airtime.">
                     </div>
                     <div>
                         <label for="aprs_s_table">Symbol Table</label>
@@ -247,7 +247,7 @@
                     </div>
                     <div>
                         <label for="tnc_tel_mic">Self Telemetry Sequence</label>
-                        <select id="tnc_tel_mic" name="tnc_tel_mic" title="self telemetry sequence type (numeric supported by aprs.fi and aprsdirect.de)">
+                        <select id="tnc_tel_mic" name="tnc_tel_mic" title="self telemetry sequence type (numeric supported by aprs.fi and aprsdirect.de). "Type numeric": Cave: sequence number is stored to flash; flash has a limited number of writes before it becomes defect-.">
                             <option value="-1">Time based, encoding 0-9A-Za-z</option>
                             <option value="0">Numeric</option>
                             <option value="1">MIC</option>
@@ -255,7 +255,7 @@
                     </div>
                     <div>
                         <label for="tnc_tel_path">Self Telemetry Relay Path</label>
-                        <input class="u-full-width" type="text" minlength="0" name="tnc_tel_path" id="tnc_tel_path" title="APRS path for self telemetry, use the shortest as possible (émpty path ith recommended. Or ECHO or WIDE2-1 or WIDE1-1). ">
+                        <input class="u-full-width" type="text" minlength="0" name="tnc_tel_path" id="tnc_tel_path" title="APRS path for self telemetry, use the shortest as possible (émpty path is recommended; for aprs-is connection, no path is necessary). Or use WIDE2-1. ">
                     </div>
                 </div>
                 <div class="grid-container full">

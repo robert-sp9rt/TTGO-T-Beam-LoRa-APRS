@@ -251,7 +251,7 @@ String OledLine4 = "";    // speed, course, altitude
 String OledLine5 = "";    // sat info, batt info
 
 #if defined(ENABLE_TNC_SELF_TELEMETRY) && defined(KISS_PROTOCOL)
-  time_t nextTelemetryFrame = 120*1000L;  // first possible start of telemetry 2min after boot.
+  time_t nextTelemetryFrame = 60*1000L;  // first possible start of telemetry 60s after boot.
 #endif
 
 
@@ -1228,7 +1228,24 @@ void set_callsign() {
   #endif
 }
 
-#if defined(ENABLE_TNC_SELF_TELEMETRY) && defined(KISS_PROTOCOL)
+// telemetry frames
+#if defined(ENABLE_TNC_SELF_TELEMETRY)
+
+void send_telemetry_to_TNC_usb_serial_and_aprsis(const String &telemetryPacket)
+{
+  #if defined(KISS_PROTOCOL)
+    sendToTNC(telemetryPacket);
+  #endif
+  if (usb_serial_data_type & 2)
+    Serial.println(telemetryPacket);
+  #if defined(ENABLE_WIFI)
+    send_to_aprsis(telemetryPacket);
+    // another hack: send_to_aprsis has no queue. Webserver-code needs enough time to send. Are 1500ms enough?
+    esp_task_wdt_reset();
+    delay(1500);
+    esp_task_wdt_reset();
+  #endif
+}
 
 char encode_int_in_char(int i) {
   if (i < 0 || i > 61)
@@ -1239,172 +1256,180 @@ char encode_int_in_char(int i) {
 }
 
 void sendTelemetryFrame() {
-  if (enable_tel == true){
-#ifdef T_BEAM_V1_0
+  if (!enable_tel)
+    return;
+
+  String tel_sequence_str;
+  String tel_path_str;
+
+  // Format telemetry path
+  if(tel_path == ""){
+    tel_path_str = tel_path;
+  }else{
+    tel_path_str = "," + tel_path;
+  }
+  String telemetryBase = Tcall + ">" + MY_APRS_DEST_IDENTIFYER + tel_path_str + ":";
+
+
+  // equations, unit, names, bits packets: .. . They never change.
+  // For more details, see aprs spec!
+  // Ratelimit them. Once a day is enough. This is not really important for
+  // messages sent to aprsis (except they come as // 3rd party traffic back
+  // to RF); or: if someone has the idea to send this over our slow LoRa..
+
+  uint32_t next_time_to_send_telemetry_NamesEquatBITS = 0L;
+  if (millis() > next_time_to_send_telemetry_NamesEquatBITS) {
+    // hack: Send one of the messages along with one one telemetryData frame.
+    // If all are sent, remember the time we last sent all of them.
+    static uint8_t n = 0;
+    const boolean use_BITS = false; // Set this to true if you need to send also the "digital BITS packet"
+    const uint8_t m = (use_BITS ? 4 : 3);
+    String s;
+
+    switch (n) {
+    case 0:
+      // up to 5 analog and 8 digital channels. If not needed, could break at any item.
+      // if you use 4 analog and 2 digital channel, set names to "A,B,C,D,,X,Y"
+      s = String("PARM.");
+      s = s + "B Volt";
+      #ifdef T_BEAM_V1_0
+        s = s + ",B In" + ",B Out" + ",AC V" + ",AC C";
+      #else
+        //if (m == 4) s = s + ",,,," + "yourDigitalParamNames1,2,3,4,5,6,7,8";
+      #endif
+      break;
+    case 1:
+      // up to 5 analog and 8 digital channels. If not needed, could break at any item.
+      // if you use 4 analog and 2 digital channel, set names to "A,B,C,D,,X,Y"
+      s = String("UNIT.");
+      s = s + "mV";
+      #ifdef T_BEAM_V1_0
+        s = s + ",mA" + ",mA" + ",mV" + ",mA";
+      #else
+        //if (m == 4) s = s + ",,,," + "yourDigitalUnitsNames1,2,3,4,5,6,7,8";
+      #endif
+      break;
+    case 2:
+      // Equations are defined only for the 5 analog channels. May be less then 5
+      s = String("EQNS.");
+      s = s + "0,5.1,3000";
+      #ifdef T_BEAM_V1_0
+        s = s + ",0,10,0" + ",0,10,0" + ",0,28,3000" + ",0,10,0";
+      #endif
+      break;
+    case 3:
+      //Example for the up to 8 digital BITS channel (currently not used)
+      //Make sure that when using this, it starts after the 5 analog measurement fields;
+      //If you have less than 5 analog measurementr fields, add an empty one (",").
+      s = String("BITS.");
+      s = s + "00000000" + "SQ9MDD LoRa Tracker";
+      break;
+    }
+    if (n == m-1)
+      next_time_to_send_telemetry_NamesEquatBITS = millis() + 24*60*60*1000L;
+    n = (n+1) % m;
+
+    // Pad telemetry message address to 9 characters. Plus string termination \0
+    char Tcall_message_char[9+1];
+    sprintf_P(Tcall_message_char, "%-9s", Tcall.c_str());
+    String Tcall_message = String(Tcall_message_char);
+
+    send_telemetry_to_TNC_usb_serial_and_aprsis(telemetryBase + ":" + Tcall_message + ":" + s);
+  }
+
+  // sequence number for measurement packet
+  #ifndef ENABLE_PREFERENCES
+    // no preferences enabled -> use variant -1.
+    if (tel_mic == 0) tel_mic = -1;
+  #endif
+
+  // Determine if MIC, digit sequence number or alphanumeric sequence number
+  if (tel_mic == 1) {
+    tel_sequence_str = "MIC";
+  } else if (tel_mic == -1) {
+    // a much better approach, without storing sequence number back to flash.
+    // On most trackers, the system time is set correct, either due to GPS time, or by NTP.
+    // Telemetry sequence can be any number or letter. It has a size of 3 characters.
+    // For convenience, we store in pos 0 the month. If we use letters A-Z, a-z and and numbers 0-9, we could adress 62 days (exactly 2 months), before we start from new.
+    // Pos 1 and 2: encodes the time. -> We get a resolution of min 23s, which is more than we need in typical usecases: 24*60*60.0/((26*2+10)**2) = 22.476s
+    struct tm timeinfo{};
+    if (getLocalTime(&timeinfo)) {
+      char buf[4];
+      int t = (timeinfo.tm_mon % 2) * 31 + ((timeinfo.tm_mday - 1) % 31);
+      buf[0] = encode_int_in_char(t);
+      // 24*60*60/(26*2+10)**2 = 22.476s
+      t = ((timeinfo.tm_hour *60*60) + timeinfo.tm_min * 60 + timeinfo.tm_sec) / 23;
+      buf[1] = encode_int_in_char(t / 62);
+      buf[2] = encode_int_in_char(t % 62);
+      buf[3] = 0;
+      // special case: reserved word "MIC". Hmm.. ...risk a doublette; fake time to next interval += 23s -> "MID" ;)
+      if (!strcmp(buf, "MIC"))
+        buf[2] = 'D';
+      tel_sequence_str = String(buf);
+    } else {
+      // fall back to MIC format
+      tel_sequence_str = String("MIC");
+    }
+  } else {
+    // Get the current saved telemetry sequence
+    #ifdef ENABLE_PREFERENCES
+      tel_sequence = preferences.getUInt(PREF_TNC_SELF_TELEMETRY_SEQ, 0);
+    #endif
+    // Pad to 3 digits. Plus string termination \0
+    char tel_sequence_char[3+1];
+    sprintf_P(tel_sequence_char, "%03u", tel_sequence);
+    tel_sequence_str = String(tel_sequence_char);
+
+    // Update the telemetry sequence number
+    if (tel_sequence >= 999) {
+      tel_sequence = 0;
+    } else {
+      tel_sequence = tel_sequence + 1;
+    }
+    #ifdef ENABLE_PREFERENCES
+      preferences.putUInt(PREF_TNC_SELF_TELEMETRY_SEQ, tel_sequence);
+      #if defined(ENABLE_SYSLOG)
+        syslog_log(LOG_DEBUG, String("FlashWrite preferences: sendTelemetryFrame()"));
+      #endif
+    #endif
+  }
+
+  // measurement
+  #ifdef T_BEAM_V1_0
     uint8_t b_volt = (axp.getBattVoltage() - 3000) / 5.1;
     uint8_t b_in_c = (axp.getBattChargeCurrent()) / 10;
     uint8_t b_out_c = (axp.getBattDischargeCurrent()) / 10;
     uint8_t ac_volt = (axp.getVbusVoltage() - 3000) / 28;
     uint8_t ac_c = (axp.getVbusCurrent()) / 10;
-    // Pad telemetry message address to 9 characters. Plus string termination \0
-    char Tcall_message_char[9+1];
-    sprintf_P(Tcall_message_char, "%-9s", Tcall.c_str());
-    String Tcall_message = String(Tcall_message_char);
-    // Flash the light when telemetry is being sent
-    #ifdef ENABLE_LED_SIGNALING
-      digitalWrite(TXLED, LOW);
-    #endif
+  #elif T_BEAM_V0_7
+    uint8_t b_volt = ((BattVolts * 1000) - 3000) / 5.1;
+  #else
+    uint8_t b_volt = ((BattVolts * 1000) - 3000) / 5.1;
+  #endif
 
-    // Determine sequence number (or 'MIC')
-    String tel_sequence_str;
-    #ifndef ENABLE_PREFERENCES
-      // no preferences enabled -> use variant -1.
-      if (tel_mic == 0) tel_mic = -1;
-    #endif
-    if (tel_mic == 1) {
-      tel_sequence_str = "MIC";
-    } else if (tel_mic == -1) {
-      // a much better approach, without storing sequence number back to flash.
-      // On most trackers, the system time is set correct, either due to GPS time, or by NTP.
-      // Telemetry sequence can be any number or letter. It has a size of 3 characters.
-      // For convenience, we store in pos 0 the month. If we use letters A-Z, a-z and and numbers 0-9, we could adress 62 days (exactly 2 months), before we start from new.
-      // Pos 1 and 2: encodes the time. -> We get a resolution of min 23s, which is more than we need in typical usecases: 24*60*60.0/((26*2+10)**2) = 22.476s
-      struct tm timeinfo{};
-      if (getLocalTime(&timeinfo)) {
-        char buf[4];
-        int t = (timeinfo.tm_mon % 2) * 31 + ((timeinfo.tm_mday - 1) % 31);
-        buf[0] = encode_int_in_char(t);
-        // 24*60*60/(26*2+10)**2 = 22.476s
-        t = ((timeinfo.tm_hour *60*60) + timeinfo.tm_min * 60 + timeinfo.tm_sec) / 23;
-        buf[1] = encode_int_in_char(t / 62);
-        buf[2] = encode_int_in_char(t % 62);
-        buf[3] = 0;
-        // special case: reserved word "MIC". Hmm.. ...risk a doublette; fake time to next interval += 23s -> "MID" ;)
-        if (!strcmp(buf, "MIC"))
-          buf[2] = 'D';
-        tel_sequence_str = String(buf);
-      } else {
-        // fall back to MIC format
-        tel_sequence_str = String("MIC");
-      }
-    } else {
-      // Get the current saved telemetry sequence
-      #ifdef ENABLE_PREFERENCES
-        tel_sequence = preferences.getUInt(PREF_TNC_SELF_TELEMETRY_SEQ, 0);
-      #endif
-      // Pad to 3 digits. Plus string termination \0
-      char tel_sequence_char[3+1];
-      sprintf_P(tel_sequence_char, "%03u", tel_sequence);
-      tel_sequence_str = String(tel_sequence_char);
-    }
-    // Format telemetry path
-    String tel_path_str;
-    if(tel_path == ""){
-      tel_path_str = tel_path;
-    }else{
-      tel_path_str = "," + tel_path;
-    }
+  String telemetryData = String("T#") + tel_sequence_str + "," + String(b_volt);
+  #ifdef T_BEAM_V1_0
+    telemetryData = telemetryData + "," + String(b_in_c) + "," + String(b_out_c) + "," + String(ac_volt) + "," + String(ac_c);
+  #endif
+  //do_serial_println("Telemetry: " + telemetryBase + telemetryData);
 
-    String telemetryParamsNames = String(":") + Tcall_message + ":PARM.B Volt,B In,B Out,AC V,AC C";
-    String telemetryUnitNames = String(":") + Tcall_message + ":UNIT.mV,mA,mA,mV,mA";
-    String telemetryEquations = String(":") + Tcall_message + ":EQNS.0,5.1,3000,0,10,0,0,10,0,0,28,3000,0,10,0";
-    //Example for 8 digital BITS channel (currently not used)
-    //String telemetryBits = String(":") + Tcall_message + ":BITS.0000000SQ9MDD LoRa Tracker";
-    //String telemetryData = String("T#") + tel_sequence_str + "," + String(b_volt) + "," + String(b_in_c) + "," + String(b_out_c) + "," + String(ac_volt) + "," + String(ac_c) + ",00000000";
-    String telemetryData = String("T#") + tel_sequence_str + "," + String(b_volt) + "," + String(b_in_c) + "," + String(b_out_c) + "," + String(ac_volt) + "," + String(ac_c);
-    String telemetryBase = "";
-    telemetryBase += Tcall + ">" + MY_APRS_DEST_IDENTIFYER + tel_path_str + ":";
-    do_serial_println("Telemetry: " + telemetryBase);
+  // Flash the light when telemetry is being sent
+  #ifdef ENABLE_LED_SIGNALING
+    digitalWrite(TXLED, LOW);
+  #endif
 
-    // rate limit. Our equations, units, .. never changes. Once a day is enough
-    // This is not really important for sendToTNC. ..but, if someone has the idea to send this over LoRa
-    uint32_t time_telemetry_NamesEquatBITS_sent = 0L;
-    if (!time_telemetry_NamesEquatBITS_sent || millis() > time_telemetry_NamesEquatBITS_sent + 24*60*60*1000L) {
-      // hack: sent one of the messages along with one one telemetryData frame. If all are sent, remember the time we last sent all of them.
-      // And on boot, send all of them.
-      static uint8_t n = 0;
+  send_telemetry_to_TNC_usb_serial_and_aprsis(telemetryBase + telemetryData);
 
-      switch (n) {
-      case 0:
-        sendToTNC(telemetryBase + telemetryParamsNames);
-        #if defined(ENABLE_WIFI)
-          send_to_aprsis(telemetryBase + telemetryParamsNames);
-          // another hack: send_to_aprsis has no queue. Webserver-code needs enough time to send. Are 1500ms enough?
-          esp_task_wdt_reset();
-          delay(1500);
-          esp_task_wdt_reset();
-        #endif
-        if (time_telemetry_NamesEquatBITS_sent)
-          break;
-      case 1:
-        sendToTNC(telemetryBase + telemetryUnitNames);
-        #if defined(ENABLE_WIFI)
-          send_to_aprsis(telemetryBase + telemetryUnitNames);
-          esp_task_wdt_reset();
-          delay(1500);
-          esp_task_wdt_reset();
-        #endif
-        if (time_telemetry_NamesEquatBITS_sent)
-          break;
-      case 2:
-        sendToTNC(telemetryBase + telemetryEquations);
-        #if defined(ENABLE_WIFI)
-          send_to_aprsis(telemetryBase + telemetryEquations);
-          esp_task_wdt_reset();
-          delay(1500);
-          esp_task_wdt_reset();
-        #endif
-        //if (time_telemetry_NamesEquatBITS_sent)
-          //break;
-        time_telemetry_NamesEquatBITS_sent = millis();
-      //case 3:
-        //sendToTNC(telemetryBase + telemetryBits);
-        //#if defined(ENABLE_WIFI)
-          //send_to_aprsis(telemetryBase + telemetryBits);
-          //esp_task_wdt_reset();
-          //delay(1500);
-          //esp_task_wdt_reset();
-        //#endif
-        //time_telemetry_NamesEquatBITS_sent = millis();
-      }
-      //n = (n+1) % 4;
-      n = (n+1) % 3;
-    }
-    sendToTNC(telemetryBase + telemetryData);
-    #if defined(ENABLE_WIFI)
-      send_to_aprsis(telemetryBase + telemetryData);
-      // another hack: send_to_aprsis has no queue. Webserver-code needs enough time to send. Are 1500ms enough?
-      esp_task_wdt_reset();
-      delay(1500);
-      esp_task_wdt_reset();
-    #endif
+  // Show when telemetry is being sent
+  writedisplaytext("((TEL TX))","","","","","");
 
-    // Show when telemetry is being sent
-    writedisplaytext("((TEL TX))","","","","","");
-
-    // Flash the light when telemetry is being sent
-    #ifdef ENABLE_LED_SIGNALING
-      digitalWrite(TXLED, HIGH);
-    #endif
-
-    if (tel_mic == 0) {
-      // Update the telemetry sequence number
-      if (tel_sequence >= 999) {
-        tel_sequence = 0;
-      } else {
-        tel_sequence = tel_sequence + 1;
-      }
-      #ifdef ENABLE_PREFERENCES
-        preferences.putUInt(PREF_TNC_SELF_TELEMETRY_SEQ, tel_sequence);
-        #if defined(ENABLE_SYSLOG)
-          syslog_log(LOG_DEBUG, String("FlashWrite preferences: sendTelemetryFrame()"));
-        #endif
-      #endif
-    }
-#endif // T_BEAM_V1_0
-  }
+  // Flash the light when telemetry is being sent
+  #ifdef ENABLE_LED_SIGNALING
+    digitalWrite(TXLED, HIGH);
+  #endif
 }
-#endif
+
+#endif // ENABLE_TNC_SELF_TELEMETRY
 
 
 #ifdef	ENABLE_WIFI
@@ -3533,6 +3558,7 @@ void handle_usb_serial_input(void) {
               } else {
                   Serial.println("*** save_preferences_cfg: BUG (empty)");
               }
+              Serial.print("cmd:");
               inputBuf = "";
               return;
             } else if (cmd == "show_preferences") {
@@ -3543,6 +3569,7 @@ void handle_usb_serial_input(void) {
               s.replace("\n", "\r\n");
               Serial.print(s);
               Serial.printf("***\r\n");
+              Serial.print("cmd:");
               inputBuf = "";
               return;
             } else if (cmd == "preferences") {
@@ -3550,6 +3577,7 @@ void handle_usb_serial_input(void) {
               #if defined(ENABLE_SYSLOG) && defined(ENABLE_WIFI)
                 syslog_log(LOG_WARNING, String("usb-serial: preferences: user entered preferences command. Yet not implemented."));
               #endif
+              Serial.print("cmd:");
               inputBuf = "";
               return;
             } else if (cmd == "show_wifi") {
@@ -3560,6 +3588,7 @@ void handle_usb_serial_input(void) {
               s.replace("\n", "\r\n");
               Serial.print(s);
               Serial.printf("***\r\n");
+              Serial.print("cmd:");
               inputBuf = "";
               return;
             } else if (cmd == "save_wifi_cfg") {
@@ -3574,6 +3603,7 @@ void handle_usb_serial_input(void) {
               } else {
                   Serial.println("*** save_wifi_cfg: BUG (empty)");
               }
+              Serial.print("cmd:");
               inputBuf = "";
               return;
             } else if (cmd == "dir") {
@@ -3584,12 +3614,14 @@ void handle_usb_serial_input(void) {
                 Serial.println("*** dir: SPIFFS Mount Failed");
               }
               Serial.printf("***\r\n");
+              Serial.print("cmd:");
               inputBuf = "";
               return;
             }
           #endif
           if (arg != "") {
             Serial.println("*** " + cmd + ": error: not implemented, or argument not 'on' or 'off'");
+            Serial.print("cmd:");
             inputBuf = "";
             return;
           }
