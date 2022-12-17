@@ -251,7 +251,7 @@ String OledLine4 = "";    // speed, course, altitude
 String OledLine5 = "";    // sat info, batt info
 
 #if defined(ENABLE_TNC_SELF_TELEMETRY) && defined(KISS_PROTOCOL)
-  time_t nextTelemetryFrame = millis() + 120*1000L;  // first possible start of telemetry 2min after boot.
+  time_t nextTelemetryFrame = 120*1000L;  // first possible start of telemetry 2min after boot.
 #endif
 
 
@@ -1275,13 +1275,13 @@ void sendTelemetryFrame() {
         int t = (timeinfo.tm_mon % 2) * 31 + ((timeinfo.tm_mday - 1) % 31);
         buf[0] = encode_int_in_char(t);
         // 24*60*60/(26*2+10)**2 = 22.476s
-        t = ((timeinfo.tm_hour *24*60) + timeinfo.tm_min * 60 + timeinfo.tm_sec) / 23;
+        t = ((timeinfo.tm_hour *60*60) + timeinfo.tm_min * 60 + timeinfo.tm_sec) / 23;
         buf[1] = encode_int_in_char(t / 62);
         buf[2] = encode_int_in_char(t % 62);
         buf[3] = 0;
-        // special case: reserved word "MIC". Hmm.. ...risk a doublette; fake time to += 23s -> "MIG" ;)
+        // special case: reserved word "MIC". Hmm.. ...risk a doublette; fake time to next interval += 23s -> "MID" ;)
         if (!strcmp(buf, "MIC"))
-          buf[2] = 'G';
+          buf[2] = 'D';
         tel_sequence_str = String(buf);
       } else {
         // fall back to MIC format
@@ -1323,6 +1323,7 @@ void sendTelemetryFrame() {
       // hack: sent one of the messages along with one one telemetryData frame. If all are sent, remember the time we last sent all of them.
       // And on boot, send all of them.
       static uint8_t n = 0;
+
       switch (n) {
       case 0:
         sendToTNC(telemetryBase + telemetryParamsNames);
@@ -1330,7 +1331,7 @@ void sendTelemetryFrame() {
           send_to_aprsis(telemetryBase + telemetryParamsNames);
           // another hack: send_to_aprsis has no queue. Webserver-code needs enough time to send. Are 500ms enough?
           esp_task_wdt_reset();
-          delay(500);
+          delay(1500);
           esp_task_wdt_reset();
         #endif
         if (time_telemetry_NamesEquatBITS_sent)
@@ -1341,7 +1342,7 @@ void sendTelemetryFrame() {
           send_to_aprsis(telemetryBase + telemetryUnitNames);
           // another hack: send_to_aprsis has no queue. Webserver-code needs enough time to send. Are 500ms enough?
           esp_task_wdt_reset();
-          delay(500);
+          delay(1500);
           esp_task_wdt_reset();
         #endif
         if (time_telemetry_NamesEquatBITS_sent)
@@ -1353,11 +1354,11 @@ void sendTelemetryFrame() {
           send_to_aprsis(telemetryBase + telemetryEquations);
           // another hack: send_to_aprsis has no queue. Webserver-code needs enough time to send. Are 500ms enough?
           esp_task_wdt_reset();
-          delay(500);
+          delay(1500);
           esp_task_wdt_reset();
         #endif
-        if (time_telemetry_NamesEquatBITS_sent)
-          break;
+        //if (time_telemetry_NamesEquatBITS_sent)
+          //break;
         time_telemetry_NamesEquatBITS_sent = millis();
       //case 3:
         //sendToTNC(telemetryBase + telemetryBits);
@@ -1365,15 +1366,13 @@ void sendTelemetryFrame() {
           //send_to_aprsis(telemetryBase + telemetryBits);
           //// another hack: send_to_aprsis has no queue. Webserver-code needs enough time to send. Are 500ms enough?
           //esp_task_wdt_reset();
-          //delay(500);
+          //delay(1500);
           //esp_task_wdt_reset();
         //#endif
-        //if (time_telemetry_NamesEquatBITS_sent)
-          //break;
         //time_telemetry_NamesEquatBITS_sent = millis();
       }
-      //n = n % 4;
-      n = n % 3;
+      //n = (n+1) % 4;
+      n = (n+1) % 3;
     }
     sendToTNC(telemetryBase + telemetryData);
     #if defined(ENABLE_WIFI)
