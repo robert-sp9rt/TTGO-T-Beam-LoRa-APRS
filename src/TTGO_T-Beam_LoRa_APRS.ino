@@ -1329,7 +1329,7 @@ void sendTelemetryFrame() {
         sendToTNC(telemetryBase + telemetryParamsNames);
         #if defined(ENABLE_WIFI)
           send_to_aprsis(telemetryBase + telemetryParamsNames);
-          // another hack: send_to_aprsis has no queue. Webserver-code needs enough time to send. Are 500ms enough?
+          // another hack: send_to_aprsis has no queue. Webserver-code needs enough time to send. Are 1500ms enough?
           esp_task_wdt_reset();
           delay(1500);
           esp_task_wdt_reset();
@@ -1340,7 +1340,6 @@ void sendTelemetryFrame() {
         sendToTNC(telemetryBase + telemetryUnitNames);
         #if defined(ENABLE_WIFI)
           send_to_aprsis(telemetryBase + telemetryUnitNames);
-          // another hack: send_to_aprsis has no queue. Webserver-code needs enough time to send. Are 500ms enough?
           esp_task_wdt_reset();
           delay(1500);
           esp_task_wdt_reset();
@@ -1352,7 +1351,6 @@ void sendTelemetryFrame() {
         sendToTNC(telemetryBase + telemetryEquations);
         #if defined(ENABLE_WIFI)
           send_to_aprsis(telemetryBase + telemetryEquations);
-          // another hack: send_to_aprsis has no queue. Webserver-code needs enough time to send. Are 500ms enough?
           esp_task_wdt_reset();
           delay(1500);
           esp_task_wdt_reset();
@@ -1364,7 +1362,6 @@ void sendTelemetryFrame() {
         //sendToTNC(telemetryBase + telemetryBits);
         //#if defined(ENABLE_WIFI)
           //send_to_aprsis(telemetryBase + telemetryBits);
-          //// another hack: send_to_aprsis has no queue. Webserver-code needs enough time to send. Are 500ms enough?
           //esp_task_wdt_reset();
           //delay(1500);
           //esp_task_wdt_reset();
@@ -1377,9 +1374,9 @@ void sendTelemetryFrame() {
     sendToTNC(telemetryBase + telemetryData);
     #if defined(ENABLE_WIFI)
       send_to_aprsis(telemetryBase + telemetryData);
-      // another hack: send_to_aprsis has no queue. Webserver-code needs enough time to send. Are 500ms enough?
+      // another hack: send_to_aprsis has no queue. Webserver-code needs enough time to send. Are 1500ms enough?
       esp_task_wdt_reset();
-      delay(500);
+      delay(1500);
       esp_task_wdt_reset();
     #endif
 
