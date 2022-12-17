@@ -1319,7 +1319,7 @@ void sendTelemetryFrame() {
     // rate limit. Our equations, units, .. never changes. Once a day is enough
     // This is not really important for sendToTNC. ..but, if someone has the idea to send this over LoRa
     uint32_t time_telemetry_NamesEquatBITS_sent = 0L;
-    if (millis() > time_telemetry_NamesEquatBITS_sent + 24*60*60*1000L) {
+    if (!time_telemetry_NamesEquatBITS_sent || millis() > time_telemetry_NamesEquatBITS_sent + 24*60*60*1000L) {
       // hack: sent one of the messages along with one one telemetryData frame. If all are sent, remember the time we last sent all of them.
       // And on boot, send all of them.
       static uint8_t n = 0;
