@@ -1277,7 +1277,7 @@ void sendTelemetryFrame() {
   // messages sent to aprsis (except they come as // 3rd party traffic back
   // to RF); or: if someone has the idea to send this over our slow LoRa..
 
-  uint32_t next_time_to_send_telemetry_NamesEquatBITS = 0L;
+  static uint32_t next_time_to_send_telemetry_NamesEquatBITS = 0L;
   if (millis() > next_time_to_send_telemetry_NamesEquatBITS) {
     // hack: Send one of the messages along with one one telemetryData frame.
     // If all are sent, remember the time we last sent all of them.
