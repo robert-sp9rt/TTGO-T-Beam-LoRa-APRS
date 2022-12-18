@@ -1943,7 +1943,7 @@ void send_to_aprsis()
                 //   APRS-IS: on_Err: 'Error: connect failed' [0.0.255.0], tries 1
                 // connection retry intervall is every 10s. -> In 5min, tries == 30.
                 // -> Q&D fix: Restart WIFI.
-                if ((aprsis_connect_tries-1) % 30) {
+                if (!(aprsis_connect_tries % 30)) {
                   //log_msg = log_msg + ". Restarted WIFI!";
                   //restart_AP_or_STA();
                   // ^does not help
