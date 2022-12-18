@@ -247,15 +247,16 @@
                     </div>
                     <div>
                         <label for="tnc_tel_mic">Self Telemetry Sequence</label>
-                        <select id="tnc_tel_mic" name="tnc_tel_mic" title="self telemetry sequence type (numeric supported by aprs.fi and aprsdirect.de). "Type numeric": Cave: sequence number is stored to flash; flash has a limited number of writes before it becomes defect-.">
-                            <option value="-1">Time based, encoding 0-9A-Za-z</option>
+                        <select id="tnc_tel_mic" name="tnc_tel_mic" title="self telemetry sequence type (only 'numeric' sequences and 'time based numeric sequences' are supported by aprs.fi and aprsdirect.de). Sequence overflow: Type 'time based, alphanumeric' uses digits and letters 0-9,A-Z,a-z and has a resolution of 23s in two months; 'numeric timebased' has only digits and has resolotuin of 10min in one week. Type 'Numeric' (except for numeric time based): Caution: sequence number is stored to flash; flash has a limited number of writes before it becomes defect.">
+                            <option value="-2">Time based, numeric encoding</option>
+                            <option value="-1">Time based, alphanumeric encoding</option>
                             <option value="0">Numeric</option>
                             <option value="1">MIC</option>
                         </select>
                     </div>
                     <div>
                         <label for="tnc_tel_path">Self Telemetry Relay Path</label>
-                        <input class="u-full-width" type="text" minlength="0" name="tnc_tel_path" id="tnc_tel_path" title="APRS path for self telemetry, use the shortest as possible (émpty path is recommended; for aprs-is connection, no path is necessary). Or use WIDE2-1. ">
+                        <input class="u-full-width" type="text" minlength="0" name="tnc_tel_path" id="tnc_tel_path" title="APRS path for self telemetry, use the shortest as possible (émpty path is recommended; for aprs-is connection, no path is necessary). Or use WIDE2-1.">
                     </div>
                 </div>
                 <div class="grid-container full">
@@ -770,23 +771,23 @@
                data/wifi.cfg<br>
                <ul>
                  <li>wifi.cfg can to be created manually, following the json structure in the example. The names of the variables (aka keys) must not be altered</li>
-                 <li>The preferred way is to upgrade the firmware to the newest version, make sure, that the wifi credentials are set correctly and then press the SAVEWIFI2FS Button</li>
+                 <li>The preferred way is to upgrade the firmware to the newest version, make sure, that the wifi credentials are set correctly and then kilck the SAVEWIFI2FS Button.</li>
                  <li>The content, what will be saved, can be viewed above.</li>
                  <li>wifi.cfg in the directory data contains SSID and password of up to 10 AP and a password for the local accesspoint</li>
                  <li>The password must not be shorter that 8 byte. The json structure must not be changed</li>
-                 <li>if something is wrong or the file is missing, the complete file will be ignored. If credentials are available in flash memory, they will be used.</li>
+                 <li>if something is wrong or the file is missing, the complete file will be ignored. If credentials are available in flash, they will be used.</li>
                  <li>An alternative to upload wifi.cfg to your board is via Upload File System image in PlatformIO!</li>
                  <li>To find the 'Upload File System image' click the PlatformIO symbol (the little alien) on the left side, choose your configuration, click on 'Platform' and search for 'Upload File System image'. If you use platformio-cli, upload the filesystem as described below.</li>
                </ul>
                which WiFi is selected?<br/>
                <ul>
                  <li>An AP entry containing the keyword "prio":1 defines the entry which is taken as first to connect before following the configured order</li>
-                 <li>if there is nothing prioritized, then the configured order is followed. If credentials are available in flash memory, they will be used first.</li>
+                 <li>if there is nothing prioritized, then the configured order is followed. If credentials are available in flash, they will be used first.</li>
                  <li>if no connection to a configured AP could be established, a local accesspoint with the SSID "call AP" will be created. After connected to, this Webserver will be reachable with the IP Address 192.168.4.1. The password for the selfAP can be preconfigured with the key "ap_password" in this file</li>
                </ul>
                data/preferences.cfg<br>
                <ul>
-                 <li>preferences.cfg can be created by the system, if you press "SAVE2FS" in the Update section of the site.
+                 <li>preferences.cfg can be created by the system, if you kilck to "SAVE2FS" in the Update section of the site.
                  <li>if you want to changes items of the preferences, you have to start with the data shown in the configuration view of this WebSite. Be sure to deleted everything before the "{". Again the keys must not be altered. The file then has to be placed into the data directory on your system using the name preferences.cfg.
                </ul>
                which config is selected?<br/>

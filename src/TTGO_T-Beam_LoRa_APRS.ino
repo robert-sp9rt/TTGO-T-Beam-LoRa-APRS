@@ -203,8 +203,9 @@ boolean always_send_cseSpd_AND_altitude = false;
 #ifdef TNC_SELF_TELEMETRY_MIC
   int tel_mic = 1; // telemetry as "T#MIC"
 #else
-  //int tel_mic = 0; // telemetry as "T#001"
-  int tel_mic = -1; // telemetry as "T#AbC"
+  //int tel_mic = 0; // telemetry as "T#001"  // numeric 0-9. Needs to remember sequence
+  //int tel_mic = -1; // telemetry as "T#AbC" // time based alphanumeric 0-9,A-Z,a-z. cool, but aprs.fi complains. Resolution 23s in two months.
+  int tel_mic = -2; // telemetry as "T#001"  // time based numeric 0-9. Resolution 10min in one week.
 #endif
 #if defined(ENABLE_BLUETOOTH) && defined(KISS_PROTOCOL)
   boolean enable_bluetooth = true;
@@ -1240,9 +1241,9 @@ void send_telemetry_to_TNC_usb_serial_and_aprsis(const String &telemetryPacket)
     Serial.println(telemetryPacket);
   #if defined(ENABLE_WIFI)
     send_to_aprsis(telemetryPacket);
-    // another hack: send_to_aprsis has no queue. Webserver-code needs enough time to send. Are 1500ms enough?
+    // another hack: send_to_aprsis has no queue. Webserver-code needs enough time to send. Are 500ms enough?
     esp_task_wdt_reset();
-    delay(1500);
+    delay(500);
     esp_task_wdt_reset();
   #endif
 }
@@ -1288,6 +1289,15 @@ void sendTelemetryFrame() {
 
     switch (n) {
     case 0:
+      // Equations are defined only for the 5 analog channels. May be less then 5.
+      // Most important for correct interpretation -> position 0.
+      s = String("EQNS.");
+      s = s + "0,5.1,3000";
+      #ifdef T_BEAM_V1_0
+        s = s + ",0,10,0" + ",0,10,0" + ",0,28,3000" + ",0,10,0";
+      #endif
+      break;
+    case 1:
       // up to 5 analog and 8 digital channels. If not needed, could break at any item.
       // if you use 4 analog and 2 digital channel, set names to "A,B,C,D,,X,Y"
       s = String("PARM.");
@@ -1298,7 +1308,7 @@ void sendTelemetryFrame() {
         //if (m == 4) s = s + ",,,," + "yourDigitalParamNames1,2,3,4,5,6,7,8";
       #endif
       break;
-    case 1:
+    case 2:
       // up to 5 analog and 8 digital channels. If not needed, could break at any item.
       // if you use 4 analog and 2 digital channel, set names to "A,B,C,D,,X,Y"
       s = String("UNIT.");
@@ -1307,14 +1317,6 @@ void sendTelemetryFrame() {
         s = s + ",mA" + ",mA" + ",mV" + ",mA";
       #else
         //if (m == 4) s = s + ",,,," + "yourDigitalUnitsNames1,2,3,4,5,6,7,8";
-      #endif
-      break;
-    case 2:
-      // Equations are defined only for the 5 analog channels. May be less then 5
-      s = String("EQNS.");
-      s = s + "0,5.1,3000";
-      #ifdef T_BEAM_V1_0
-        s = s + ",0,10,0" + ",0,10,0" + ",0,28,3000" + ",0,10,0";
       #endif
       break;
     case 3:
@@ -1340,13 +1342,15 @@ void sendTelemetryFrame() {
   // sequence number for measurement packet
   #ifndef ENABLE_PREFERENCES
     // no preferences enabled -> use variant -1.
-    if (tel_mic == 0) tel_mic = -1;
+    if (tel_mic == 0) tel_mic = -2;
   #endif
 
   // Determine if MIC, digit sequence number or alphanumeric sequence number
   if (tel_mic == 1) {
     tel_sequence_str = "MIC";
   } else if (tel_mic == -1) {
+    // Unfortunately, aprs.fi comments this with "[Invalid telemetry packet]".
+    //   -> See also the less efficient approach tel_mic == -2
     // a much better approach, without storing sequence number back to flash.
     // On most trackers, the system time is set correct, either due to GPS time, or by NTP.
     // Telemetry sequence can be any number or letter. It has a size of 3 characters.
@@ -1365,6 +1369,30 @@ void sendTelemetryFrame() {
       // special case: reserved word "MIC". Hmm.. ...risk a doublette; fake time to next interval += 23s -> "MID" ;)
       if (!strcmp(buf, "MIC"))
         buf[2] = 'D';
+      tel_sequence_str = String(buf);
+    } else {
+      // fall back to MIC format
+      tel_sequence_str = String("MIC");
+    }
+ } else if (tel_mic == -2) {
+    // This variant has a resolution of 10min and overflows in a week; in contrast to
+    // tel_mic -1 variant (digit+charachter based), which has a resolution of 23 seconds
+    // and overflows in two months.
+    // assumption: we send telemetry at min every 10min (enforced by web interface)
+    // We could encode week day in pos 0 (-> 0-6). Pos 1+2 are time dependend
+    // values. 6*24*6+22*6+3 = 999 packets, last sent at saturday 22:30. We need room
+    // for 8 packets. Let's send them as 000 up to 006, and the last (from sat, 23:50) to 999, and see what happens ;)
+    // Because amateur radio projects like balloons often use the weekend, it's better
+    // to have the overflow in mid of the week instead of saturday evening. We start our
+    // week at thursday instead of sunday -> (tm_wday += 4).
+    struct tm timeinfo{};
+    if (getLocalTime(&timeinfo)) {
+      char buf[4];
+      // resolution 6 packets in an hour.
+      int t = (24*60+((timeinfo.tm_wday + 4) % 7) + timeinfo.tm_hour *60 + timeinfo.tm_min) / 10.0;
+      if (t >= 1007)
+        t = 999;
+      sprintf_P(buf, "%03u", t % 1000);
       tel_sequence_str = String(buf);
     } else {
       // fall back to MIC format
@@ -3547,8 +3575,8 @@ void handle_usb_serial_input(void) {
           //  some commands need an non-binary agument
           #ifdef ENABLE_PREFERENCES
             if (cmd == "save_preferences_cfg") {
-              refill_preferences_as_jsonData();
               Serial.println("*** save_preferences_cfg:");
+              refill_preferences_as_jsonData();
               if (!preferences_as_jsonData.isEmpty()) {
                 int ret = save_to_file("TNC", "/preferences.cfg", preferences_as_jsonData);
                 if (ret >= 0)
@@ -3592,8 +3620,8 @@ void handle_usb_serial_input(void) {
               inputBuf = "";
               return;
             } else if (cmd == "save_wifi_cfg") {
-              fill_wifi_config_as_jsonData();
               Serial.println("*** save_preferences_cfg:");
+              fill_wifi_config_as_jsonData();
               if (!wifi_config_as_jsonData.isEmpty()) {
                 int ret = save_to_file("TNC", "/wifi.cfg", wifi_config_as_jsonData);
                 if (ret >= 0)
@@ -3653,9 +3681,9 @@ void handle_usb_serial_input(void) {
             Serial.println("  logging <on|off>");
 #ifdef ENABLE_PREFERENCES
             Serial.println("  preferences          (needs to bei implemented)");
-            Serial.println("  show_preferences     (shows preferences from flash)");
+            Serial.println("  show_preferences     (shows preferences as json from flash)");
             Serial.println("  save_preferences_cfg (saves running config to /preferences.cfg in filesystem)");
-            Serial.println("  show_wifi            (shows wifi from flash)");
+            Serial.println("  show_wifi            (shows wifi settings as json from ram)");
             Serial.println("  save_wifi_cfg        (saves running wifi config to /wifi.cfg in filesystem)");
             Serial.println("  dir                  (lists SPIFFS directory)");
 #endif

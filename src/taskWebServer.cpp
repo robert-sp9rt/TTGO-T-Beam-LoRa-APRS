@@ -1937,6 +1937,34 @@ void send_to_aprsis()
               // connect to aprsis
               if (!connect_to_aprsis()) {
                 log_msg = String("APRS-IS: on_Err: '") + aprsis_status + String("' [") + aprsis_client.remoteIP().toString() + String("], tries ") +  String(aprsis_connect_tries);
+                // sometimes after boot, connection does not work:
+                //   APRS-IS: connecting to 'aprs.hc.r1.ampr.org', tries 1
+                //   [ 10068][E][WiFiClient.cpp:268] connect(): socket error on fd 50, errno: 104, "Connection reset by peer"
+                //   APRS-IS: on_Err: 'Error: connect failed' [0.0.255.0], tries 1
+                // connection retry intervall is every 10s. -> In 5min, tries == 30.
+                // -> Q&D fix: Restart WIFI.
+                if (aprsis_connect_tries % 30) {
+                  //log_msg = log_msg + ". Restarted WIFI!";
+                  //restart_AP_or_STA();
+                  // ^does not help
+                  // first thing we now try: trigger watchdog for taskWebserver thread.
+                  // we had configured watchdog timeout to 120s.
+                  String m = log_msg + ". connect bug? - Restarting webserver the soft way, by watchdog timer expiry";
+                  #if defined(ENABLE_SYSLOG)
+                    syslog_log(LOG_CRIT, m);
+                  #endif
+                  do_serial_println(m);
+                  delay(3*60*1000);
+                  // wdt reseted? Then we'll not have survied to be not here. -> next try: reboot
+                  m = "Did not help. Now the hard way: reboot";
+                  #if defined(ENABLE_SYSLOG)
+                    syslog_log(LOG_CRIT, m);
+                  #endif
+                  do_serial_println(m);
+                  delay(2000);
+                  ESP.restart();
+                }
+
                 #if defined(ENABLE_SYSLOG)
                   syslog_log(LOG_INFO, log_msg);
                 #endif
