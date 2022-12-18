@@ -1376,7 +1376,7 @@ void sendTelemetryFrame() {
     }
  } else if (tel_mic == -2) {
     // This variant has a resolution of 10min and overflows in a week; in contrast to
-    // tel_mic -1 variant (digit+charachter based), which has a resolution of 23 seconds
+    // tel_mic -1 variant (numeric+letter based), which has a resolution of 23 seconds
     // and overflows in two months.
     // assumption: we send telemetry at min every 10min (enforced by web interface)
     // We could encode week day in pos 0 (-> 0-6). Pos 1+2 are time dependend
@@ -1389,7 +1389,7 @@ void sendTelemetryFrame() {
     if (getLocalTime(&timeinfo)) {
       char buf[4];
       // resolution 6 packets in an hour.
-      int t = (24*60+((timeinfo.tm_wday + 4) % 7) + timeinfo.tm_hour *60 + timeinfo.tm_min) / 10.0;
+      int t = (24*60*((timeinfo.tm_wday + 4) % 7) + 60*timeinfo.tm_hour + timeinfo.tm_min) / 10.0;
       if (t >= 1007)
         t = 999;
       sprintf_P(buf, "%03u", t % 1000);
