@@ -1371,14 +1371,14 @@ void do_send_status_message_about_connect_to_aprsis(void) {
 
 
 // connect to apprsis
-boolean connect_to_aprsis(void) {
+int connect_to_aprsis(void) {
   String log_msg;
 
   if (aprsis_client.connected())
     aprsis_client.stop();
 
   aprsis_connect_tries++;
-  log_msg =  String("APRS-IS: connecting to '") + aprsis_host + "', tries " + String(aprsis_connect_tries);
+  log_msg = String("APRS-IS: connecting to '") + aprsis_host + "', tries " + String(aprsis_connect_tries);
   #if defined(ENABLE_SYSLOG)
     syslog_log(LOG_INFO, log_msg);
   #endif
@@ -1386,7 +1386,7 @@ boolean connect_to_aprsis(void) {
 
   aprsis_status = "Connecting";
   aprsis_client.connect(aprsis_host.c_str(), aprsis_port);
-  if (!aprsis_client.connected()) { aprsis_status = "Error: connect failed"; aprsis_client.stop(); return false; }
+  if (!aprsis_client.connected()) { aprsis_status = "Error: connect failed"; return -1; }
   aprsis_status = "Connected. Waiting for greeting.";
 
   uint32_t t_start = millis();
@@ -1396,10 +1396,10 @@ boolean connect_to_aprsis(void) {
     String s = aprsis_client.readStringUntil('\n');
     if (s.isEmpty() || !s.startsWith("#")) {
       aprsis_status = "Error: unexpected greeting";
-      return false;
+      return -2;
     }
   } else {
-    aprsis_status = "Error: No response"; return false;
+    aprsis_status = "Error: No response"; return -3;
   }
 
   aprsis_status = "Login";
@@ -1413,10 +1413,10 @@ boolean connect_to_aprsis(void) {
   if (aprsis_client.available()) {
     // check
     String s = aprsis_client.readStringUntil('\n');
-    if (s.isEmpty() || !s.startsWith("#")) { aprsis_status = "Error: unexpected reponse on login"; return false; }
-    if (s.indexOf(" logresp") == -1) { aprsis_status = "Error: Login denied: " + s; aprsis_status.trim(); return false; }
+    if (s.isEmpty() || !s.startsWith("#")) { aprsis_status = "Error: unexpected reponse on login"; return -4; }
+    if (s.indexOf(" logresp") == -1) { aprsis_status = "Error: Login denied: " + s; aprsis_status.trim(); return -5; }
     if (s.indexOf(" verified") == -1) { aprsis_status = "Notice: server responsed not verified: " + s; aprsis_status.trim(); }
-  } else { aprsis_status = "Error: No response"; return false; }
+  } else { aprsis_status = "Error: No response"; return -6; }
   aprsis_status = "Logged in";
 
   log_msg = String("APRS-IS: connected to '" + aprsis_host + String("' [") + aprsis_client.remoteIP().toString() + "]");
@@ -1434,7 +1434,7 @@ boolean connect_to_aprsis(void) {
   // avoid sending old data
   to_aprsis_data = "";
 
-  return true;
+  return 0;
 }
 
 
@@ -1759,32 +1759,42 @@ void send_to_aprsis()
     HTTPUpload& upload = server.upload();
     if (upload.status == UPLOAD_FILE_START) {
       rf95.sleep(); // disable rf95 before update
+      // switch LORA chip off during firmware upload
+      #ifdef T_BEAM_V1_0
+        axp.setPowerOutPut(AXP192_LDO2, AXP202_OFF);
+      #endif
       Serial.printf("Firmware: Update: %s\r\n", upload.filename.c_str());
       if (!Update.begin(UPDATE_SIZE_UNKNOWN)) { //start with max available size
-#if defined(ENABLE_SYSLOG)
-        syslog_log(LOG_ERR, String("Firmware: Update begin error: ") + Update.errorString());
-#endif
+        #if defined(ENABLE_SYSLOG)
+          syslog_log(LOG_ERR, String("Firmware: Update begin error: ") + Update.errorString());
+        #endif
         Update.printError(Serial);
       }
     } else if (upload.status == UPLOAD_FILE_WRITE) {
       /* flashing firmware to ESP*/
       if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
-#if defined(ENABLE_SYSLOG)
-        syslog_log(LOG_ERR, String("Firmware: Update error: ") + Update.errorString());
-#endif
+        #if defined(ENABLE_SYSLOG)
+          syslog_log(LOG_ERR, String("Firmware: Update error: ") + Update.errorString());
+        #endif
         Update.printError(Serial);
+        #ifdef T_BEAM_V1_0
+          axp.setPowerOutPut(AXP192_LDO2, AXP202_ON);
+        #endif
       }
     } else if (upload.status == UPLOAD_FILE_END) {
       if (Update.end(true)) { //true to set the size to the current progress
         Serial.printf("Firmware: Update Success: %u\r\nFirmware: Rebooting...\r\n", upload.totalSize);
-#if defined(ENABLE_SYSLOG)
-        syslog_log(LOG_WARNING, String("Firmware: Update Success: ") + String((int)upload.totalSize) + "byte. Rebooting...");
-#endif
+        #if defined(ENABLE_SYSLOG)
+          syslog_log(LOG_WARNING, String("Firmware: Update Success: ") + String((int)upload.totalSize) + "byte. Rebooting...");
+        #endif
       } else {
-#if defined(ENABLE_SYSLOG)
-        syslog_log(LOG_ERR, String("Firmware: Update error: ") + Update.errorString());
-#endif
+        #if defined(ENABLE_SYSLOG)
+          syslog_log(LOG_ERR, String("Firmware: Update error: ") + Update.errorString());
+        #endif
         Update.printError(Serial);
+        #ifdef T_BEAM_V1_0
+          axp.setPowerOutPut(AXP192_LDO2, AXP202_ON);
+        #endif
       }
     }
   });
@@ -1933,45 +1943,54 @@ void send_to_aprsis()
                 do_serial_println(log_msg);
               }
             } else {
+              int ret;
               t_aprsis_last_connect_try = millis();
               // connect to aprsis
-              if (!connect_to_aprsis()) {
+              // try to connect to aprsis and login
+              if ((ret = connect_to_aprsis()) < 0) {
                 log_msg = String("APRS-IS: on_Err: '") + aprsis_status + String("' [") + aprsis_client.remoteIP().toString() + String("], tries ") +  String(aprsis_connect_tries);
-                // sometimes after boot, connection does not work:
-                //   APRS-IS: connecting to 'aprs.hc.r1.ampr.org', tries 1
-                //   [ 10068][E][WiFiClient.cpp:268] connect(): socket error on fd 50, errno: 104, "Connection reset by peer"
-                //   APRS-IS: on_Err: 'Error: connect failed' [0.0.255.0], tries 1
-                // connection retry intervall is every 10s. -> In 5min, tries == 30.
-                // -> Q&D fix: Restart WIFI.
-                if (!(aprsis_connect_tries % 30)) {
-                  //log_msg = log_msg + ". Restarted WIFI!";
-                  //restart_AP_or_STA();
-                  // ^does not help
-                  // first thing we now try: trigger watchdog for taskWebserver thread.
-                  // we had configured watchdog timeout to 120s.
-                  String m = log_msg + ". connect bug? - Restarting webserver the soft way, by watchdog timer expiry";
-                  #if defined(ENABLE_SYSLOG)
-                    syslog_log(LOG_CRIT, m);
-                  #endif
-                  do_serial_println(m);
-                  delay(3*60*1000);
-                  // wdt reseted? Then we'll not have survied to be not here. -> next try: reboot
-                  m = "Did not help. Now the hard way: reboot";
-                  #if defined(ENABLE_SYSLOG)
-                    syslog_log(LOG_CRIT, m);
-                  #endif
-                  do_serial_println(m);
-                  delay(2000);
-                  ESP.restart();
-                }
+                aprsis_client.stop();
+                // Known problems which usually resolve by reboot:
+                if (ret == -5 /* login denied, until reboot. Reason unknown */ ||
+		       (ret == -1 /* sometimes after boot it can't connect. DNS- or IP-stack Problem? */ &&
+                         (/* lora_rx_enabled || */ lora_digipeating_mode > 1) /* we are a digi */ )) {
 
-                #if defined(ENABLE_SYSLOG)
-                  syslog_log(LOG_INFO, log_msg);
-                #endif
-                do_serial_println(log_msg);
-                if (!aprsis_status.startsWith("Error: "))
-                  aprsis_status = "Disconnected";
+                  // sometimes after boot, connection does not work:
+                  //   APRS-IS: connecting to 'aprs.hc.r1.ampr.org', tries 1
+                  //   [ 10068][E][WiFiClient.cpp:268] connect(): socket error on fd 50, errno: 104, "Connection reset by peer"
+                  //   APRS-IS: on_Err: 'Error: connect failed' [0.0.255.0], tries 1
+                  // connection retry intervall is every 10s. -> In 5min, tries == 30.
+                  // -> Q&D fix: Restart WIFI.
+                  if (!(aprsis_connect_tries % 30)) {
+                    //log_msg = log_msg + ". Restarted WIFI!";
+                    //restart_AP_or_STA();
+                    // ^does not help
+                    // first thing we now try: trigger watchdog for taskWebserver thread.
+                    // we had configured watchdog timeout to 120s.
+                    String m = log_msg + ". connect bug? - Restarting webserver the soft way, by watchdog timer expiry";
+                    #if defined(ENABLE_SYSLOG)
+                      syslog_log(LOG_CRIT, m);
+                    #endif
+                    do_serial_println(m);
+                    delay(3*60*1000);
+                    // wdt reseted? Then we'll not have survied to be not here. -> next try: reboot
+                    m = "Did not help. Now the hard way: reboot";
+                    #if defined(ENABLE_SYSLOG)
+                      syslog_log(LOG_CRIT, m);
+                    #endif
+                    do_serial_println(m);
+                    delay(2000);
+                    ESP.restart();
+                  }
+                }
               }
+
+              #if defined(ENABLE_SYSLOG)
+                syslog_log(LOG_INFO, log_msg);
+              #endif
+              do_serial_println(log_msg);
+              if (!aprsis_status.startsWith("Error: "))
+                aprsis_status = "Disconnected";
             }
           }
 
