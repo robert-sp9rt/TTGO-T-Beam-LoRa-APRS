@@ -139,6 +139,9 @@ extern void do_send_status_message_about_shutdown_to_aprsis();
 
 // Variables for APRS packaging
 String Tcall;                       //your Call Sign for normal position reports
+#if !defined(CALLSIGN)
+#define CALLSIGN "N0CALL"
+#endif
 String aprsSymbolTable = APRS_SYMBOL_TABLE;
 String aprsSymbol = APRS_SYMBOL;
 String relay_path;
@@ -1212,21 +1215,29 @@ String prepareCallsign(const String& callsign){
       tmpString += callsign.charAt(i);
     }
   }
+  tmpString.toUpperCase();
   return tmpString;
 }
 
 void set_callsign() {
-  Tcall = prepareCallsign(String(CALLSIGN));
   #ifdef ENABLE_PREFERENCES
-    Tcall = preferences.getString(PREF_APRS_CALLSIGN, "");
-    if (Tcall.isEmpty()){
-      preferences.putString(PREF_APRS_CALLSIGN, String(CALLSIGN));
-      #if defined(ENABLE_SYSLOG)
-        syslog_log(LOG_DEBUG, String("FlashWrite preferences: set_Callsign()"));
-      #endif
-      Tcall = preferences.getString(PREF_APRS_CALLSIGN);
-    }
+    String s = prepareCallsign(preferences.getString(PREF_APRS_CALLSIGN, ""));
+  #else
+    String s = "";
   #endif
+   if (s.isEmpty()) {
+     s = prepareCallsign(String(CALLSIGN));
+     if (s.isEmpty()) {
+       s = String("N0CALL");
+     }
+     #ifdef ENABLE_PREFERENCES
+       preferences.putString(PREF_APRS_CALLSIGN, s);
+       #if defined(ENABLE_SYSLOG)
+         syslog_log(LOG_DEBUG, String("FlashWrite preferences: set_Callsign()"));
+       #endif
+     #endif
+    }
+    Tcall = s;
 }
 
 // telemetry frames
@@ -1722,6 +1733,14 @@ boolean readFile(fs::FS &fs, const char *filename) {
       Serial.printf("readFile: Checked preferences.cfg: is ok. Found %s. Filesize: %d\r\n", PREF_APRS_CALLSIGN, file.size());
       Serial.println("readFile: Preferences: reading from /preferences.cfg");
       load_preferences_cfg_file();
+      // needed here, because callsign is not initialized by load_preferences_from_flash()
+      String s = jsonElementFromPreferenceCFGString(PREF_APRS_CALLSIGN, 0);
+      s = prepareCallsign(s);
+      if (s.isEmpty())
+        s = prepareCallsign(String(CALLSIGN));
+      if (s.isEmpty())
+        s = String("N0CALL");
+      preferences.putString(PREF_APRS_CALLSIGN, s);
     } else {
       Serial.println("readFile: Preferences: /preferences.cfg not available, using default values from flash");
       err = true;
@@ -2082,25 +2101,25 @@ void load_preferences_from_flash()
 
     aprsSymbolTable = preferences.getString(PREF_APRS_SYMBOL_TABLE, "");
     if (aprsSymbolTable.isEmpty()){
-      preferences.putString(PREF_APRS_SYMBOL_TABLE, APRS_SYMBOL_TABLE);
+      preferences.putString(PREF_APRS_SYMBOL_TABLE, aprsSymbolTable.length() != 1 ? APRS_SYMBOL_TABLE : aprsSymbolTable);
       aprsSymbolTable = preferences.getString(PREF_APRS_SYMBOL_TABLE);
     }
 
     aprsSymbol = preferences.getString(PREF_APRS_SYMBOL, "");
     if (aprsSymbol.isEmpty()){
       preferences.putString(PREF_APRS_SYMBOL, APRS_SYMBOL);
-      aprsSymbol = preferences.getString(PREF_APRS_SYMBOL, APRS_SYMBOL);
+      aprsSymbol = preferences.getString(PREF_APRS_SYMBOL, aprsSymbol.length() != 1 ? APRS_SYMBOL : aprsSymbol);
     }
 
     if (!preferences.getBool(PREF_APRS_COMMENT_INIT)){
       preferences.putBool(PREF_APRS_COMMENT_INIT, true);
-      preferences.putString(PREF_APRS_COMMENT, MY_COMMENT);
+      preferences.putString(PREF_APRS_COMMENT, aprsComment);
     }
     aprsComment = preferences.getString(PREF_APRS_COMMENT, "");
 
     if (!preferences.getBool(PREF_APRS_RELAY_PATH_INIT)){
       preferences.putBool(PREF_APRS_RELAY_PATH_INIT, true);
-      preferences.putString(PREF_APRS_RELAY_PATH, DIGI_PATH);
+      preferences.putString(PREF_APRS_RELAY_PATH, relay_path);
     }
     relay_path = preferences.getString(PREF_APRS_RELAY_PATH, "");
 
@@ -2180,14 +2199,14 @@ void load_preferences_from_flash()
 
     if (!preferences.getBool(PREF_APRS_LATITUDE_PRESET_INIT)){
       preferences.putBool(PREF_APRS_LATITUDE_PRESET_INIT, true);
-      preferences.putString(PREF_APRS_LATITUDE_PRESET, LATITUDE_PRESET);
+      preferences.putString(PREF_APRS_LATITUDE_PRESET, aprsLatPreset.isEmpty() ? LATITUDE_PRESET : aprsLatPreset);
     }
     aprsLatPreset = preferences.getString(PREF_APRS_LATITUDE_PRESET, "");
     //LatShownP = aprsLonPreset;
 
     if (!preferences.getBool(PREF_APRS_LONGITUDE_PRESET_INIT)){
       preferences.putBool(PREF_APRS_LONGITUDE_PRESET_INIT, true);
-      preferences.putString(PREF_APRS_LONGITUDE_PRESET, LONGITUDE_PRESET);
+      preferences.putString(PREF_APRS_LONGITUDE_PRESET, aprsLonPreset.isEmpty() ? LONGITUDE_PRESET : aprsLonPreset);
     }
     aprsLonPreset = preferences.getString(PREF_APRS_LONGITUDE_PRESET, "");
     //LongShownP = aprsLonPreset;
@@ -2582,7 +2601,7 @@ void setup()
       Serial.println("SPIFFS Mount Failed");
     }
 
-    // always call load_preferneces_from_flash. It updates the _INIT values, and will do some value checks
+    // always call load_preferences_from_flash. It updates the _INIT values, and will do some value checks
     load_preferences_from_flash();
 
     if (clear_preferences){
@@ -4010,7 +4029,8 @@ void loop()
         // heigher precision 1/1000 arc-minute, if not > 36 knots (valid gps measurered speed). Idea behind:
         // 18.52 m/s are 36kn. We need abt 1s time for understanding the whole displayed line -> resolution of > 2 decimal points is not needed
         // If we consider gps age of < 2s, we use 18kt as limit
-        boolean may_use_heigh_precision = (gps.speed.knots() < 18 && gps.speed.isValid() && gps.speed.age() < 2000);
+        //boolean may_use_heigh_precision = (gps.speed.knots() < 18 && gps.speed.isValid() && gps.speed.age() < 2000);
+        boolean may_use_heigh_precision = false; // ..until we have a better concept for displaying position in OLED.
         // No, unforunately, the display is too small for additional degrees-"-"-delimiter
         //aprsLatPreset_heigher_precision = create_lat_aprs((units & UNITS_SPEED_KN) ? "-" : "", gps.location.rawLat(), may_use_heigh_precision ? 3 : 2);
         //aprsLonPreset_heigher_precision = create_long_aprs((units & UNITS_SPEED_KN) ? "-" : "", gps.location.rawLng(), may_use_heigh_precision ? 3 : 2);
