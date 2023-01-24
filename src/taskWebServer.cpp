@@ -48,6 +48,7 @@ extern String oled_wifi_IP_curr;
 
 extern int8_t wifi_txpwr_mode_AP;
 extern int8_t wifi_txpwr_mode_STA;
+String dnsHostname;
 
 extern bool tncServer_enabled;
 extern bool gpsServer_enabled;
@@ -1073,6 +1074,7 @@ boolean restart_STA(String use_ssid, String use_password) {
   WiFi.disconnect();
   WiFi.softAPdisconnect();
   WiFi.mode(WIFI_STA);
+  WiFi.hostname(dnsHostname.c_str());
   WiFi.begin(use_ssid.c_str(), use_password.length() ? use_password.c_str() : nullptr);
   WiFi.setAutoReconnect(true);
   // Set power:  minimum 8 (2dBm) (max 80 (20dBm))
@@ -1831,7 +1833,8 @@ void send_to_aprsis()
    //syslog.defaultPriority(LOG_KERN);
    syslog.defaultPriority(LOG_LOCAL0);
  #endif
-
+  // set Call as default wifi hostname for Wifi
+  dnsHostname = String(webServerCfg->callsign.c_str());
   restart_AP_or_STA();
 
   if (MDNS.begin(webServerCfg->callsign.c_str())) {
