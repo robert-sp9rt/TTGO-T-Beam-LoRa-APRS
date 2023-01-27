@@ -888,6 +888,7 @@ void handle_SaveAPRSCfg() {
     String s = server.arg(PREF_APRS_CALLSIGN);
     s.toUpperCase();
     s.trim();
+
     p = s.c_str();
     for (q = p; *q; q++) {
       if (isalnum(*q) || *q == '-')
@@ -895,28 +896,30 @@ void handle_SaveAPRSCfg() {
       is_valid = false;
       break;
     }
+
     if (is_valid) {
       is_valid = false;
       q = strchr(p, '-');
       if (q) {
-        if (q > p && q-p < 6 && strlen(q) < 3) {
+        if (q > p && q-p <= 6 && strlen(q) > 1 && strlen(q) <= 3) {
           q++;
           if (q[1]) {
             if (q[0] == '1' && q[1] >= '0' && q[1] <= '5') {
               is_valid = true;
             }
           } else {
-            if (q[0] > '0' && q[1] <= '9') {
+            if (q[0] > '0' && q[0] <= '9') {
               is_valid = true;
             }
           }
         }
       } else {
-        if (*q && strlen(q) <= 6) {
+        if (*p && strlen(p) <= 6) {
           is_valid = true;
         }
       }
     }
+
     if (is_valid) {
       preferences.putString(PREF_APRS_CALLSIGN, s);
     }
