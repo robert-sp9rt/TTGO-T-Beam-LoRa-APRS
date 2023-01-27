@@ -177,6 +177,7 @@ boolean show_cmt = true;
 int tel_sequence;
 // Telemetry path
 String tel_path;
+uint8_t tel_allow_tx_on_rf = 0; // 0 is best ;)
 
 #ifdef SHOW_ALT
   boolean showAltitude = true;  /* obsolete. use altitude_ratio 0 .. 100 % */
@@ -1208,7 +1209,7 @@ void sendToWebList(const String& TNC2FormatedFrame, const int RSSI, const int SN
 }
 #endif
 
-String prepareCallsign(const String& callsign){
+String prepareCallsign(const String& callsign) {
   String tmpString = "";
   for (int i=0; i<callsign.length();++i){  // remove unneeded "spaces" from callsign field
     if (callsign.charAt(i) != ' ') {
@@ -1281,7 +1282,7 @@ void sendTelemetryFrame() {
     tel_path_str = "," + tel_path;
   }
   String telemetryBase = Tcall + ">" + MY_APRS_DEST_IDENTIFYER + tel_path_str + ":";
-
+  String telemetryBaseRF = Tcall + ">" + MY_APRS_DEST_IDENTIFYER + ":";  // No digi path on RF. Description see below
 
   // equations, unit, names, bits packets: .. . They never change.
   // For more details, see aprs spec!
@@ -1348,6 +1349,28 @@ void sendTelemetryFrame() {
     String Tcall_message = String(Tcall_message_char);
 
     send_telemetry_to_TNC_usb_serial_and_aprsis(telemetryBase + ":" + Tcall_message + ":" + s);
+
+    // We don't like to see telemetry on RF.
+    // But since we have been asked several times, here's a suggestion we could live with it:
+    // When digipeating on cross-qrg, fast "1200" mode (comparable to 2m AFSK APRS) is recommended anyway.
+    // It may be acceptable to send to rf in this case. But only as direct message, without digipeaters.
+    // On our slow main qrg, it's still not acceptable to flood the channel with telemetry.
+    // That's why it's commented out here in the source. If you really need this, i.e. for a balloon mission,
+    // you could enable it. It's here as a sample, only for providing the correct way to use that "feature".
+    // Telemetry on secondary qrg is sent if config variable is 2 or 3. On main qrg: 1 or 3.
+
+    if (tel_allow_tx_on_rf) {
+      String telemetryPacket = telemetryBaseRF + ":" + Tcall_message + ":" + s;
+      if (tel_allow_tx_on_rf & 2) {
+        if (lora_freq_cross_digi != lora_freq && lora_freq_cross_digi >= 1200) {
+          loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, 0, telemetryPacket);
+        }
+      }
+      // DO NOT ENABLE THIS UNTIL YOU READ AND UNDERSTOOD THE IMPACT DESCRIBED ABOVE
+      //if (tel_allow_tx_on_rf & 1) {
+      //  loraSend(txPower, lora_freq, (lora_speed < 300) ? 300 : lora_speed, 1, telemetryPacket);
+      //}
+    }
   }
 
   // sequence number for measurement packet
@@ -1458,6 +1481,28 @@ void sendTelemetryFrame() {
   #endif
 
   send_telemetry_to_TNC_usb_serial_and_aprsis(telemetryBase + telemetryData);
+
+  // We don't like to see telemetry on RF.
+  // But since we have been asked several times, here's a suggestion we could live with it:
+  // When digipeating on cross-qrg, fast "1200" mode (comparable to 2m AFSK APRS) is recommended anyway.
+  // It may be acceptable to send to rf in this case. But only as direct message, without digipeaters.
+  // On our slow main qrg, it's still not acceptable to flood the channel with telemetry.
+  // That's why it's commented out here in the source. If you really need this, i.e. for a balloon mission,
+  // you could enable it. It's here as a sample, only for providing the correct way to use that "feature".
+  // Telemetry on secondary qrg is sent if config variable is 2 or 3. On main qrg: 1 or 3.
+
+  if (tel_allow_tx_on_rf) {
+    String telemetryPacket = telemetryBaseRF + telemetryData;
+    if (tel_allow_tx_on_rf & 2) {
+      if (lora_freq_cross_digi != lora_freq && lora_freq_cross_digi >= 1200) {
+        loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, 0, telemetryPacket);
+      }
+    }
+    // DO NOT ENABLE THIS UNTIL YOU READ AND UNDERSTOOD THE IMPACT DESCRIBED ABOVE
+    //if (tel_allow_tx_on_rf & 1) {
+    //  loraSend(txPower, lora_freq, (lora_speed < 300) ? 300 : lora_speed, 1, telemetryPacket);
+    //}
+  }
 
   // Show when telemetry is being sent
   writedisplaytext("((TEL TX))","","","","","");
@@ -1896,6 +1941,7 @@ void load_preferences_cfg_file()
   tel_sequence = jsonElementFromPreferenceCFGInt(PREF_TNC_SELF_TELEMETRY_SEQ,PREF_TNC_SELF_TELEMETRY_SEQ_INIT);
   tel_mic = jsonElementFromPreferenceCFGInt(PREF_TNC_SELF_TELEMETRY_MIC,PREF_TNC_SELF_TELEMETRY_MIC_INIT);
   tel_path = jsonElementFromPreferenceCFGString(PREF_TNC_SELF_TELEMETRY_PATH,PREF_TNC_SELF_TELEMETRY_PATH_INIT);
+  tel_allow_tx_on_rf = jsonElementFromPreferenceCFGInt(PREF_TNC_SELF_TELEMETRY_ALLOW_RF,PREF_TNC_SELF_TELEMETRY_ALLOW_RF_INIT);
   aprsLatPreset = jsonElementFromPreferenceCFGString(PREF_APRS_LATITUDE_PRESET,PREF_APRS_LATITUDE_PRESET_INIT);
   aprsLonPreset = jsonElementFromPreferenceCFGString(PREF_APRS_LONGITUDE_PRESET,PREF_APRS_LONGITUDE_PRESET_INIT);
   jsonElementFromPreferenceCFGString(PREF_APRS_SENDER_BLACKLIST,PREF_APRS_SENDER_BLACKLIST_INIT);
@@ -2196,6 +2242,12 @@ void load_preferences_from_flash()
       preferences.putString(PREF_TNC_SELF_TELEMETRY_PATH, tel_path);
     }
     tel_path = preferences.getString(PREF_TNC_SELF_TELEMETRY_PATH, "");
+
+    if (!preferences.getBool(PREF_TNC_SELF_TELEMETRY_ALLOW_RF_INIT)){
+      preferences.putBool(PREF_TNC_SELF_TELEMETRY_ALLOW_RF_INIT, true);
+      preferences.putInt(PREF_TNC_SELF_TELEMETRY_ALLOW_RF, tel_allow_tx_on_rf);
+    }
+    tel_allow_tx_on_rf = preferences.getInt(PREF_TNC_SELF_TELEMETRY_ALLOW_RF);
 
     if (!preferences.getBool(PREF_APRS_LATITUDE_PRESET_INIT)){
       preferences.putBool(PREF_APRS_LATITUDE_PRESET_INIT, true);
@@ -4552,7 +4604,7 @@ out:
           else
             handle_lora_frame_for_lora_digipeating(received_frame, NULL);
           // new frame in digipeating queue? cross-digi freq enabled and freq set? Send without delay.
-          if (*lora_TXBUFF_for_digipeating && lora_cross_digipeating_mode > 0 && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq && time_lora_TXBUFF_for_digipeating_was_filled > time_lora_TXBUFF_for_digipeating_was_filled_prev) {
+	  if (*lora_TXBUFF_for_digipeating && lora_cross_digipeating_mode > 0 && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq && time_lora_TXBUFF_for_digipeating_was_filled > time_lora_TXBUFF_for_digipeating_was_filled_prev) {
             // word 'NOGATE' part of the header? Don't gate it
             q = strstr(lora_TXBUFF_for_digipeating, ",NOGATE");
             if (!q || q > strchr(lora_TXBUFF_for_digipeating, ':')) {

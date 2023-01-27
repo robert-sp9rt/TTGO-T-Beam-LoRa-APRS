@@ -242,6 +242,15 @@
                         <input name="tnc_tel" id="tnc_tel" type="checkbox" value="1" title="send self telemetry data">
                     </div>
                     <div>
+                        <label for="tnc_tel_rf">Allow TX on RF</label>
+                        <select id="tnc_tel_rf" name="tnc_tel_rf" title="LoRa is too slow for telemetry. Only on secondary qrg, TX is acceptable: if speed is >= 1200 (comparable to 1k2 AFSK APRS on 2m). We will not add a digipeater to the packet header. TX on main qrg is disabled; there are very few useful reasons, i.e. balloon missions. Read the comment in the source code; you need to hack and recompile.">
+                            <option value="0">no (good!)</option>
+                            <option value="2">on secondary qrg (acceptable)</option>
+                            <option value="1">on main qrg (bad)</option>
+                            <option value="3">on both frequencies (even worse)</option>
+                        </select>
+                    </div>
+                    <div>
                         <label for="tnc_tel_int">Self Telemetry Interval [s]</label>
                         <input name="tnc_tel_int" id="tnc_tel_int" type="number" min="600" title="time between sending telemetry if Enable Self Telemetry option is selected. 3600 is recommended. Min 600.">
                     </div>

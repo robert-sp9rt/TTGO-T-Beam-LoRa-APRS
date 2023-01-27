@@ -438,6 +438,7 @@ void refill_preferences_as_jsonData()
   s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_TNC_SELF_TELEMETRY_INTERVAL);
   s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_TNC_SELF_TELEMETRY_MIC);
   s = s + "\n  " +  jsonLineFromPreferenceString(PREF_TNC_SELF_TELEMETRY_PATH);
+  s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_TNC_SELF_TELEMETRY_ALLOW_RF);
   s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_DEV_OL_EN);
   s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_APRS_SHOW_CMT);
   s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_APRS_COMMENT_RATELIMIT_PRESET);
@@ -967,6 +968,9 @@ void handle_SaveAPRSCfg() {
     String s = server.arg(PREF_TNC_SELF_TELEMETRY_PATH);
     s.toUpperCase(); s.trim(); s.replace(" ", ","); s.replace(",,", ",");
     preferences.putString(PREF_TNC_SELF_TELEMETRY_PATH, s);
+  }
+  if (server.hasArg(PREF_TNC_SELF_TELEMETRY_ALLOW_RF)){
+    preferences.putInt(PREF_TNC_SELF_TELEMETRY_ALLOW_RF, server.arg(PREF_TNC_SELF_TELEMETRY_ALLOW_RF).toInt());
   }
 
   // Smart Beaconing settings
