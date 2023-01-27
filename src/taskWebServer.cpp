@@ -254,21 +254,15 @@ void handle_SaveWifiCfg() {
     return;
   }
 
-  // Mode STA:
-  if (!server.arg(PREF_WIFI_SSID).length()){
-    server.send(403, "text/plain", "Empty SSID");
-    return;
-  } else {
-    // Update SSID
-    preferences.putString(PREF_WIFI_SSID, server.arg(PREF_WIFI_SSID));
-    do_serial_println("WiFi: Updated remote SSID: " + server.arg(PREF_WIFI_SSID));
-  }
+  // Update SSID
+  preferences.putString(PREF_WIFI_SSID, server.arg(PREF_WIFI_SSID));
+  do_serial_println("WiFi: Updated remote SSID: " + server.arg(PREF_WIFI_SSID));
 
-  if (server.arg(PREF_WIFI_PASSWORD)!="*" && server.arg(PREF_WIFI_PASSWORD).length()>0 && server.arg(PREF_WIFI_PASSWORD).length()<8){
-    server.send(403, "text/plain", "WiFi Password must be minimum 8 character");
-    return;
-  } else {
-    if (server.arg(PREF_WIFI_PASSWORD)!="*") {
+  if (server.arg(PREF_WIFI_PASSWORD) != "" && server.arg(PREF_AP_PASSWORD != "*")) {
+    if (server.arg(PREF_WIFI_PASSWORD).length() < 8 || server.arg(PREF_AP_PASSWORD).length() > 63){
+      server.send(403, "text/plain", "WiFi Password must be minimum 8 characters, anx max 63.");
+      return;
+    } else {
       // Update WiFi password
       preferences.putString(PREF_WIFI_PASSWORD, server.arg(PREF_WIFI_PASSWORD));
       do_serial_println("WiFi: Updated remote PASS: " + server.arg(PREF_WIFI_PASSWORD));
@@ -284,11 +278,11 @@ void handle_SaveWifiCfg() {
   }
 
   // Mode AP:
-  if (server.arg(PREF_AP_PASSWORD)!="*" && server.arg(PREF_AP_PASSWORD).length()<8){
-    server.send(403, "text/plain", "AP Password must be minimum 8 character");
-    return;
-  } else {
-    if (server.arg(PREF_AP_PASSWORD)!="*") {
+  if (server.arg(PREF_AP_PASSWORD) != "" && server.arg(PREF_AP_PASSWORD) != "*") {
+    if (server.arg(PREF_AP_PASSWORD).length() < 8 || server.arg(PREF_AP_PASSWORD).length() > 63) {
+      server.send(403, "text/plain", "AP Password must be minimum 8 characters, and max 63.");
+      return;
+    } else {
       // Update AP password
       preferences.putString(PREF_AP_PASSWORD, server.arg(PREF_AP_PASSWORD));
       do_serial_println("WiFi: Updated local AP PASS: " + server.arg(PREF_AP_PASSWORD));
@@ -887,8 +881,44 @@ void handle_SaveAPRSCfg() {
   }
   // APRS station settings
   if (server.hasArg(PREF_APRS_CALLSIGN) && !server.arg(PREF_APRS_CALLSIGN).isEmpty()){
-    String s = server.arg(PREF_APRS_CALLSIGN); s.trim();
-    preferences.putString(PREF_APRS_CALLSIGN, s);
+    boolean is_valid = true;
+    const char *p;
+    const char *q;
+    String s = server.arg(PREF_APRS_CALLSIGN);
+    s.toUpperCase();
+    s.trim();
+    p = s.c_str();
+    for (q = p; *q; q++) {
+      if (isalnum(*q) || *q == '-')
+        continue;
+      is_valid = false;
+      break;
+    }
+    if (is_valid) {
+      is_valid = false;
+      q = strchr(p, '-');
+      if (q) {
+        if (q > p && q-p < 6 && strlen(q) < 3) {
+          q++;
+          if (q[1]) {
+            if (q[0] == '1' && q[1] >= '0' && q[1] <= '5') {
+              is_valid = true;
+            }
+          } else {
+            if (q[0] > '0' && q[1] <= '9') {
+              is_valid = true;
+            }
+          }
+        }
+      } else {
+        if (*q && strlen(q) <= 6) {
+          is_valid = true;
+        }
+      }
+    }
+    if (is_valid) {
+      preferences.putString(PREF_APRS_CALLSIGN, s);
+    }
   }
   if (server.hasArg(PREF_APRS_SYMBOL_TABLE) && !server.arg(PREF_APRS_SYMBOL_TABLE).isEmpty()){
     preferences.putString(PREF_APRS_SYMBOL_TABLE, server.arg(PREF_APRS_SYMBOL_TABLE));
