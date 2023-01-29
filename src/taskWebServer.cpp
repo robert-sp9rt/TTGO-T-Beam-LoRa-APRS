@@ -258,7 +258,7 @@ void handle_SaveWifiCfg() {
   preferences.putString(PREF_WIFI_SSID, server.arg(PREF_WIFI_SSID));
   do_serial_println("WiFi: Updated remote SSID: " + server.arg(PREF_WIFI_SSID));
 
-  if (server.arg(PREF_WIFI_PASSWORD) != "" && server.arg(PREF_AP_PASSWORD != "*")) {
+  if (server.arg(PREF_WIFI_PASSWORD) != "" && server.arg(PREF_AP_PASSWORD) != "*") {
     if (server.arg(PREF_WIFI_PASSWORD).length() < 8 || server.arg(PREF_AP_PASSWORD).length() > 63){
       server.send(403, "text/plain", "WiFi Password must be minimum 8 characters, anx max 63.");
       return;
