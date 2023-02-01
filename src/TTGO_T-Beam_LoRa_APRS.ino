@@ -2779,11 +2779,12 @@ void setup()
 #if defined(KISS_PROTOCOL) && defined(ENABLE_BLUETOOTH)
   // TTGO: webserver cunsumes abt 80mA. User may not start the webserver
   // if bt-client is connected. We'll also wait here for clients.
-  // If enable_webserver on LORA32_21 is set to 2, user
-  // likes the webserver always to be started -> do not start bluetooth.
+  // If enable_webserver on LORA32_21 is set to 2 (or aprsis connection is
+  // configured, user likes the webserver always to be started
+  // -> do not start bluetooth.
 #if defined(ENABLE_WIFI)
 #if defined(LORA32_21)
-  if (enable_bluetooth && enable_webserver < 2) {
+  if (enable_bluetooth && enable_webserver < 2 && aprsis_enabled) {
 #else
   if (enable_bluetooth) {
 #endif /* LORA32_21 */
@@ -2826,7 +2827,7 @@ void setup()
   if (enable_webserver) {
 #if defined(KISS_PROTOCOL) && defined(ENABLE_BLUETOOTH)
     // if enabble_webserver == 2 or (enable_webserver == 1 && (no serial-bt-client is connected OR aprs-is-connecion configuried)
-    if (enable_webserver > 1 || aprsis_enabled || (enable_bluetooth && !SerialBT.hasClient())) {
+    if (enable_webserver > 1 || aprsis_enabled || !enable_bluetooth || !SerialBT.hasClient()) {
 #else
     {
 #endif /* KISS_PROTOCOL && ENABLE_BLUETOOTH */
