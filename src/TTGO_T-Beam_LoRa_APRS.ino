@@ -1362,7 +1362,7 @@ void sendTelemetryFrame() {
     if (tel_allow_tx_on_rf) {
       String telemetryPacket = telemetryBaseRF + ":" + Tcall_message + ":" + s;
       if (tel_allow_tx_on_rf & 2) {
-        if (lora_freq_cross_digi != lora_freq && lora_freq_cross_digi >= 1200) {
+        if (lora_freq_cross_digi != lora_freq && lora_speed_cross_digi >= 1200) {
           loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, 0, telemetryPacket);
         }
       }
@@ -1494,7 +1494,7 @@ void sendTelemetryFrame() {
   if (tel_allow_tx_on_rf) {
     String telemetryPacket = telemetryBaseRF + telemetryData;
     if (tel_allow_tx_on_rf & 2) {
-      if (lora_freq_cross_digi != lora_freq && lora_freq_cross_digi >= 1200) {
+      if (lora_freq_cross_digi != lora_freq && lora_speed_cross_digi >= 1200) {
         loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, 0, telemetryPacket);
       }
     }
