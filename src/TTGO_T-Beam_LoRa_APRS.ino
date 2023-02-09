@@ -2784,7 +2784,7 @@ void setup()
   // -> do not start bluetooth.
 #if defined(ENABLE_WIFI)
 #if defined(LORA32_21)
-  if (enable_bluetooth && enable_webserver < 2 && aprsis_enabled) {
+  if (enable_bluetooth && enable_webserver < 2 && !aprsis_enabled) {
 #else
   if (enable_bluetooth) {
 #endif /* LORA32_21 */
