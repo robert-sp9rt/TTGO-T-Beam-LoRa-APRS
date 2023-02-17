@@ -3,7 +3,7 @@
 
 
 extern boolean enable_bluetooth;
-extern boolean usb_serial_data_type;
+extern uint8_t usb_serial_data_type;
 
 #ifdef ENABLE_BLUETOOTH
   BluetoothSerial SerialBT;
