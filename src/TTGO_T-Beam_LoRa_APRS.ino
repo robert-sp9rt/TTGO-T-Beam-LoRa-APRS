@@ -617,7 +617,8 @@ out_relay_path:
 #if defined(ENABLE_BLUETOOTH) && defined(KISS_PROTOCOL)
       (enable_bluetooth && SerialBT.hasClient()) ||
 #endif
-      ((time_last_own_text_message_via_kiss_received + 24*60*60*1000L) > millis())
+      (time_last_own_text_message_via_kiss_received &&
+        ((time_last_own_text_message_via_kiss_received + 24*60*60*1000L) > millis()) )
      )
     outString += "=";
   else
@@ -4407,7 +4408,7 @@ void handle_usb_serial_input(void) {
         }
 
         if (arg == "" &&
-            (cmd == "?" || cmd == "beacon" || cmd == "converse" || cmd == "display" || cmd == "reboot") ) {
+            (cmd == "?" || cmd == "beacon" || cmd == "converse" || cmd == "display" || cmd == "reboot" || cmd == "shutdown") ) {
           if (cmd == "beacon") {
             Serial.println("*** beacon: sending");
             manBeacon = true;
