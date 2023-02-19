@@ -27,6 +27,15 @@
 #include "preference_storage.h"
 #include "syslog_log.h"
 
+// Enable verbose debug output, level 2 on compile (-D DEVELOPMENT_DEBUG via plaformio.ini) or by finetuning it here.
+// debug_verbose 1 currently affects syslog level LOG_DEBUG. 0 disables verbose output.
+#ifdef DEVELOPMENT_DEBUG
+int debug_verbose = 1;
+#else
+//int debug_verbose = 0;
+int debug_verbose = 1;
+#endif
+
 // Access to SPIFFS for wifi.cfg
 #include "ArduinoJson.h"
 #include "SPIFFS.h"
@@ -148,8 +157,16 @@ String relay_path;
 String aprsComment = MY_COMMENT;
 String aprsLatPreset = LATITUDE_PRESET;
 String aprsLonPreset = LONGITUDE_PRESET;
-String aprsLatPreset_heigher_precision = aprsLatPreset;
-String aprsLonPreset_heigher_precision = aprsLonPreset;
+String aprsLatPresetFromPreferences = LATITUDE_PRESET;
+String aprsLonPresetFromPreferences = LONGITUDE_PRESET;
+String aprsLatPresetDAO = LATITUDE_PRESET;
+String aprsLonPresetDAO = LONGITUDE_PRESET;
+String aprsLatPresetNiceNotation;
+String aprsLonPresetNiceNotation;
+String aprsLatLonAsMaidenheadGridLocator;
+String aprsLatLonDAO = "";
+String aprsLatLonPresetCOMP = "";
+int position_ambiguity = 0; // 0: default, compressed. -1: uncompressed. -2: uncompressed, with DAO '!W..!'. -3: uncompressed, with DAO '!w..!'. 1: ambiguity 1/10'. 2: ambiguity 1'. 3: ambiguity 10'. 4: Ambuguity 1 deg (60').
 //String LatShownP = aprsLonPreset;
 //String LongShownP = aprsLonPreset;
 // "P" means original Preset, "u": Preset has been updated to the last valid position (DL3EL). "p" means, invalid gps, last known position used a temporary preset.
@@ -254,6 +271,9 @@ String OledLine2 = "";    // WebServer Info (CLI|AP|dis), next beacon (SB|FB), G
 String OledLine3 = "";    // Position
 String OledLine4 = "";    // speed, course, altitude
 String OledLine5 = "";    // sat info, batt info
+int oled_line3and4_format = 0; // 0: original format of line3 and line4; Lat/Lon in aprs format. Alternative format: 1: classic. 2: nautical. 3: classic lat/lon left 4: nautical lat/lon left
+int oled_show_locator = 0;    // 0: show always locator (and never lat/lon). 1: show never locator (and always Lat/lon). 2: 10:50 ratio. 6: with 20:100 ratio. 5: 20:20 ratio
+int oled_loc_amb = 0;     // display locator not more precise than 0: RR99XX. -1: RR99XX99. -2: RR99XX99XX
 
 #if defined(ENABLE_TNC_SELF_TELEMETRY) && defined(KISS_PROTOCOL)
   time_t nextTelemetryFrame = 60*1000L;  // first possible start of telemetry 60s after boot.
@@ -290,7 +310,7 @@ float InpVolts;
   float sb_angle = 30;                      // angle to send packet at smart beaconing
 #endif
 int sb_turn_slope = 26;			// kenwood example: 26 in mph. Yaesu suggests 26 in high speed car, 11 car in low/mid speed, 7 on walking;
-						// TS 7 if <= 20km/h, TS 11 if <= 50km/h, TS 26 else.
+					// TS 7 if <= 20km/h, TS 11 if <= 50km/h, TS 26 else.
 int sb_turn_time = 30;			// min. 30s between transmissions (kenwood example)
 
 float average_speed[5] = {0,0,0,0,0}, average_speed_final=0;
@@ -438,6 +458,7 @@ boolean sendpacket_was_called_twice = false;
 #define SP_POS_GPS   2
 #define SP_ENFORCE_COURSE 4
 uint32_t t_last_smart_beacon_sent = 0L;
+uint8_t latlon_precision = 0; // 0: 0.01' (uncompressed default), >= 1852m. 1: 0.001' >= 1.852m. 2: 0.0001' >= 18.52cm. Depends on position_ambiguity and is dynamically computed while parsing settings. do not change here. This is the precision of the coordinates (instead of just truncation the location strings)
 
 String MY_APRS_DEST_IDENTIFYER = "APLOX1";
 
@@ -493,9 +514,84 @@ char *ax25_base91enc(char *s, uint8_t n, uint32_t v){
 }
 
 
-void prepareAPRSFrame(uint8_t sp_flags){
-  outString = String(Tcall);
+void store_compressed_position(double Tlat, double Tlon) {
+    uint32_t aprs_lat = 900000000 - Tlat * 10000000;
+    uint32_t aprs_lon = 900000000 + Tlon * 10000000 / 2;
+    char helper_base91[] = {"0000\0"};
+    String s;
+    int i;
+    if (position_ambiguity > 0) {
+      // strip off n decimals
+      int i = position_ambiguity -1;
+      aprs_lat = (uint32_t ) (aprs_lat / (1000 * pow(10, i)) * 1000 * pow(10, i));
+    }
+    aprs_lat = aprs_lat / 26 - aprs_lat / 2710 + aprs_lat / 15384615;
+    if (position_ambiguity > 0) {
+      // strip off n decimals
+      int i = position_ambiguity > 4 ? 4 : position_ambiguity;
+      aprs_lat = (uint32_t ) (aprs_lon / (1000 * pow(10, i)) * 1000 * pow(10, i));
+    }
+    aprs_lon = aprs_lon / 26 - aprs_lon / 2710 + aprs_lon / 15384615;
 
+    ax25_base91enc(helper_base91, 4, aprs_lat);
+    for (i = 0; i < 4; i++) {
+      s += helper_base91[i];
+    }
+    ax25_base91enc(helper_base91, 4, aprs_lon);
+    for (i = 0; i < 4; i++) {
+      s += helper_base91[i];
+    }
+    aprsLatLonPresetCOMP = String(s);
+}
+
+
+void prepareAPRSFrame(uint8_t sp_flags) {
+  static uint8_t cnt = 0;
+  boolean may_add_dao_extension = (position_ambiguity <= -2 && latlon_precision > 0 && aprsLatLonDAO != "");
+  boolean time_to_add_alt = false;
+  // altitude_ratio: 0%, 10%, 25%, 50%, 75%, 90%, 100%
+  // course change on turn has a heigher priority
+  boolean altitude_isValid = (gps_state && gps.altitude.isValid() && gps.altitude.age() < 10000);
+  boolean cseSpd_isValid = (gps_state && gps.speed.isValid() && gps.speed.age() < 10000 && gps.course.isValid() && gps.course.age() < 10000);
+  int Tspeed = (cseSpd_isValid ? gps.speed.knots() : 0);
+  int Tcourse = (cseSpd_isValid ? gps.course.deg() : -1);
+  long Talt = (altitude_isValid ? gps.altitude.feet() : 0);
+  long Talt_for_compression = Talt;
+
+  cnt++;
+
+  if (Tspeed < 0)
+    Tspeed = 0;
+  // for cse/spd. 0 deg is 360 deg. 0 marks invalid
+  if (Tcourse < 0 || Tcourse > 360)
+    Tcourse = 0;
+  else if (Tcourse == 0)
+    Tcourse = 360;
+  if (Talt > 999999) Talt=999999;
+  else if (Talt < -99999) Talt=-99999;
+
+  if (altitude_isValid && altitude_ratio > 0) {
+    if (altitude_ratio <= 50)
+      time_to_add_alt = (cnt % (100 / altitude_ratio) == 0);
+    else if (altitude_ratio < 100)
+      time_to_add_alt = (cnt % (100 / (100-altitude_ratio)) != 0);
+    else
+      time_to_add_alt = true;
+  }
+
+  if (may_add_dao_extension) {
+    const char *p = aprsComment.c_str();
+    const char *q;
+    while ((q = strchr(p, '!'))) {
+      if (q-p == 4) {
+         may_add_dao_extension = false; // already found a DAO field
+         break;
+      }
+      p = q+1;
+    }
+  }
+
+  outString = String(Tcall);
   outString += ">";
   outString += MY_APRS_DEST_IDENTIFYER;
   if (!relay_path.isEmpty()) {
@@ -527,53 +623,39 @@ out_relay_path:
   else
     outString += "!";
 
-  if (!(sp_flags & SP_POS_FIXED) && gps_state && gps_isValid) {
-    uint32_t aprs_lat, aprs_lon;
-    String helper;
+  // position_ambiguity is not defined for compressed positions.
+  // But we test it, in order to see what happens.
+  // Else we could send in non-compressed mode, but will loose altitude or course/speed info.
+  // This is ok, because if you like to hide your position for privacy reasons,
+  // course/speed and altituded are also values you like to protect.
+  //if (!(sp_flags & SP_POS_FIXED) && gps_state && gps_isValid &
+       //(position_ambiguity < -4 || position_ambiguity >= 0) &&
+       //aprsLatLonPresetCOMP.length()) {
+  //if (position_ambiguity >= 0) {
+  if (position_ambiguity == 0 && aprsLatLonPresetCOMP.length()) {
     char helper_base91[] = {"0000\0"};
-    double Tlat=52.0000, Tlon=20.0000;
-    double Tspeed=0, Tcourse=0;
-    int i;
-    long Talt;
-    static uint8_t cnt = 0;
-    boolean time_to_add_alt = false;
 
-    Tlat=gps.location.lat();
-    Tlon=gps.location.lng();
-    Tcourse=gps.course.deg();
-    Tspeed=gps.speed.knots();
-    aprs_lat = 900000000 - Tlat * 10000000;
-    aprs_lat = aprs_lat / 26 - aprs_lat / 2710 + aprs_lat / 15384615;
-    aprs_lon = 900000000 + Tlon * 10000000 / 2;
-    aprs_lon = aprs_lon / 26 - aprs_lon / 2710 + aprs_lon / 15384615;
+    // refresh with current position
+    if (gps_state && gps_isValid)
+      store_compressed_position(gps.location.lat(), gps.location.lng());
 
-    // altitude_ratio: 0%, 10%, 25%, 50%, 75%, 90%, 100%
-    // course change on turn has a heigher priority
-    boolean altitude_isValid = (gps.altitude.isValid() && gps.altitude.age() < 10000);
-    boolean cseSpd_isValid = (gps.speed.isValid() && gps.speed.age() < 10000 && gps.course.isValid() && gps.course.age() < 10000);
-
-    if (altitude_isValid && altitude_ratio > 0) {
-      if (altitude_ratio <= 50)
-        time_to_add_alt = (cnt % (100 / altitude_ratio) == 0);
-      else if (altitude_ratio < 100)
-        time_to_add_alt = (cnt % (100 / (100-altitude_ratio)) != 0);
-      else
-        time_to_add_alt = true;
-    }
+    outString += aprsSymbolTable;
+    outString += aprsLatLonPresetCOMP;
+    outString += aprsSymbol;
 
     // Due to spec, /A...... in message text could be used with compressed and uncompressed positions.
     // But if you encode altitude in compressed position: course/speed (i.e. 090/012) may not be added to message text
-    // -> if we need (or wish to have always) course/speed, compression is always for peed, and altitude is part of the message text
+    // -> if we need (or wish to have always) course/speed, compression is always for speed, and altitude is part of the message text
 
     boolean may_send_alt_compressed = true;
     if (always_send_cseSpd_AND_altitude || !altitude_ratio) {
                                            // ^altitude ratio == 0 means 'never altitude'
-         // ^always_send_cseSpd_AND_altitude means, we have to go to the compressed-speed-section, regardle of the alt-ratio
+         // ^always_send_cseSpd_AND_altitude means, we have to go to the compressed-speed-section, regardless of the alt-ratio
          // because altitude could be added to compressed speed, but not: speed to compressed altitude.
          // We go there even for thes special case of altitude_ratio == 100.
       may_send_alt_compressed = false;
     } else if (!time_to_add_alt && altitude_ratio < 100) {
-                                 // ^altitude ratio == 100 means 'always altitude', except if always_send_cseSpd_AND_altitude is configured (checked 3 lines aboce)
+                                 // ^altitude ratio == 100 means 'always altitude', except if always_send_cseSpd_AND_altitude is configured (checked 3 lines above)
                 // ^no time to add altitude -> set may_send_alt_compressed to false
       may_send_alt_compressed = false;
     } else {
@@ -586,26 +668,13 @@ out_relay_path:
       } // else: altitude ratio == 100 means 'always altitude'
     }
 
-    outString += aprsSymbolTable;
-    ax25_base91enc(helper_base91, 4, aprs_lat);
-    for (i = 0; i < 4; i++) {
-      outString += helper_base91[i];
-    }
-    ax25_base91enc(helper_base91, 4, aprs_lon);
-    for (i = 0; i < 4; i++) {
-      outString += helper_base91[i];
-    }
-    outString += aprsSymbol;
-
-
     if (may_send_alt_compressed) {
 
       if (altitude_isValid) {
-        Talt = gps.altitude.feet();
-        if (Talt < 0) Talt = 0;
-        else if (Talt > 15270967) Talt = 15270967; /* 1.002** (90*91+90-1) */
-        ax25_base91enc(helper_base91, 2, (uint32_t) (log1p(Talt) / 0.001998));
-        /* ^ math.log1p(1.002-1) */
+        if (Talt_for_compression < 0) Talt_for_compression = 0;
+        else if (Talt_for_compression > 15270967) Talt_for_compression = 15270967; /* 1.002** (90*91+90-1) */
+        ax25_base91enc(helper_base91, 2, (uint32_t ) (log1p(Talt_for_compression) / 0.001998));
+                                                                /* ^ math.log1p(1.002-1) */
         outString += helper_base91[0];
         outString += helper_base91[1];
       } else {
@@ -616,11 +685,10 @@ out_relay_path:
     } else {
 
       if (cseSpd_isValid) {
-        ax25_base91enc(helper_base91, 1, (uint32_t) Tcourse / 4);
+        ax25_base91enc(helper_base91, 1, (uint32_t ) (Tcourse == 360 ? 0 : Tcourse) / 4);
         outString += helper_base91[0];
-        if (Tspeed > 1018) Tspeed = 1018; /* 1.08**90 */
-        ax25_base91enc(helper_base91, 1, (uint32_t) (log1p(Tspeed) / 0.07696));
-        /* ^ math.log1p(1.08-1) */
+        ax25_base91enc(helper_base91, 1, (uint32_t ) (log1p((Tspeed > 1018 ? 1018 : Tspeed)) / 0.07696));
+                                                                     /* 1.08**90 */        /* ^ math.log1p(1.08-1) */
         outString += helper_base91[0];
       } else {
         outString += "  ";
@@ -628,26 +696,81 @@ out_relay_path:
       outString += "H";
 
       if (time_to_add_alt) {
-        Talt = gps.altitude.feet();
         char buf[7];
         outString += "/A=";
-        if (Talt > 999999) Talt=999999;
-        else if (Talt < -99999) Talt=-99999;
         sprintf(buf, "%06ld", Talt);
         outString += buf;
       }
     }
 
-    cnt++;
+    may_add_dao_extension = false;
 
-  } else {  //fixed position not compresed
-    outString += aprsLatPreset;
-    outString += aprsSymbolTable;
-    outString += aprsLonPreset;
-    outString += aprsSymbol;
+  } else {  // not compressed, i.e. fixed position
+
+    if ((aprsLatPreset == "0000.00N" || aprsLatPreset == "0000.00S") && (aprsLonPreset == "00000.00W" || aprsLonPreset == "00000.00E")) {
+      // aprs spec: default null position.
+      // The null position should be include the \. symbol (unknown/indeterminate position).
+      outString += "0000.00N\00000.00W.";
+      may_add_dao_extension = false;
+    } else if (position_ambiguity > 0) {
+      char buf[10]; // room for 00000.00W + \0 == 10
+      int n;
+      int pos;
+      // Only change mm.hh in dd[d]mm.hh, due to spec. Not degrees.
+      n = position_ambiguity > 4 ? 4 : position_ambiguity;
+      sprintf(buf, aprsLatPreset.c_str());
+      for (pos = 6; pos > 1; pos--) {
+        if (pos == 4) {
+          // don't overwrite '.'
+          continue;
+        }
+        buf[pos] = ' ';
+        if (!(--n))
+          break;
+      }
+      outString += String(buf);
+      outString += aprsSymbolTable;
+      sprintf(buf, aprsLonPreset.c_str());
+      n = position_ambiguity > 4 ? 4 : position_ambiguity;
+      for (pos = 7; pos > 2; pos--) {
+        if (pos == 5) {
+          // don't overwrite '.'
+          continue;
+        }
+        buf[pos] = ' ';
+        if (!(--n))
+          break;
+      }
+      outString += String(buf);
+      outString += aprsSymbol;
+      may_add_dao_extension = false;
+    } else {
+      outString += (may_add_dao_extension ? aprsLatPresetDAO : aprsLatPreset);
+      outString += aprsSymbolTable;
+      outString += (may_add_dao_extension ? aprsLonPresetDAO : aprsLonPreset);
+      outString += aprsSymbol;
+
+      // course/speed and altitude only if position ambiguity <= 0
+      if (cseSpd_isValid &&
+           ( always_send_cseSpd_AND_altitude ||
+             (!time_to_add_alt && altitude_ratio < 100) ||
+             (sp_flags & SP_ENFORCE_COURSE) ) )  {
+        char buf[8];
+        sprintf(buf, "%.3d/%.3d", Tcourse, (Tspeed > 999 ? 999 : Tspeed));
+        outString += String(buf);
+      }
+
+      if (altitude_isValid && (always_send_cseSpd_AND_altitude || time_to_add_alt) ) {
+        char buf[7];
+        outString += "/A=";
+        sprintf(buf, "%06ld", Talt);
+        outString += String(buf);
+      }
+    }
+
   }
 
-  if(show_cmt){
+  if (show_cmt) {
     static uint8_t comments_added = 0;
     static uint32_t time_comment_added = 0L;
 
@@ -673,6 +796,11 @@ out_relay_path:
     outString += " Batt=";
     outString += String((BattVolts > 1.0 ? BattVolts : InpVolts), 2);
     outString += ("V");
+  }
+
+  // finally, we may add DAO extension
+  if (may_add_dao_extension) {
+    outString = outString + " " + aprsLatLonDAO;
   }
 
   #ifdef KISS_PROTOCOL
@@ -920,26 +1048,63 @@ void writedisplaytext(String HeaderTxt, String Line1, String Line2, String Line3
     }
   }
 #endif
-  display.clearDisplay();
-  display.setTextColor(WHITE);
-  display.setTextSize(2);
-  display.setCursor(0,0);
-  display.println(HeaderTxt);
-  display.setTextSize(1);
-  display.setCursor(0,16);
-  display.println(Line1);
-  display.setCursor(0,26);
-  display.println(Line2);
-  display.setCursor(0,36);
-  display.println(Line3);
-  display.setCursor(0,46);
-  display.println(Line4);
-  display.setCursor(0,56);
-  display.println(Line5);
-  display.display();
+  // some assurances
+  if (Line1.length() > 21) Line1.remove(21, Line1.length()-21);
+  // line 2 can grow in some cases. Then the other lines are empty. TODO: algorithmic approach
+  if (Line2.length() > 21 && Line3.length() == 0 && Line4.length() == 0 && Line5.length() == 0) {
+      if (Line2.length() > 21*4)
+        Line2.remove(21*4, Line2.length()-21*4);
+  } else {
+    if (Line2.length() > 21) Line2.remove(21, Line2.length()-21);
+    if (Line3.length() > 21) Line3.remove(21, Line3.length()-21);
+    if (Line4.length() > 21) Line4.remove(21, Line4.length()-21);
+    if (Line5.length() > 21) Line5.remove(21, Line5.length()-21);
+  }
+
+  if (debug_verbose > 1) {
+    if (HeaderTxt.length() > 21) {
+      Serial.printf("HeaderTxt: %s (%d)\r\n", HeaderTxt.c_str(), HeaderTxt.length());
+    }
+    if (Line1.length() > 21) {
+      Serial.printf("Line1: %s (%d)\r\n", Line1.c_str(), Line1.length());
+    }
+    if (Line2.length() > 21) {
+      Serial.printf("Line2: %s (%d)\r\n", Line2.c_str(), Line2.length());
+    }
+    if (Line3.length() > 21) {
+      Serial.printf("Line3: %s (%d)\r\n", Line3.c_str(), Line3.length());
+    }
+    if (Line4.length() > 21) {
+      Serial.printf("Line4: %s (%d)\r\n", Line4.c_str(), Line4.length());
+    }
+    if (Line5.length() > 21) {
+      Serial.printf("Line5: %s (%d)\r\n", Line5.c_str(), Line5.length());
+    }
+  }
+
+  if (display_is_on) {
+    display.clearDisplay();
+    display.setTextColor(WHITE);
+    display.setTextSize(2);
+    display.setCursor(0,0);
+    display.println(HeaderTxt);
+    display.setTextSize(1);
+    display.setCursor(0,16);
+    display.println(Line1);
+    display.setCursor(0,26);
+    display.println(Line2);
+    display.setCursor(0,36);
+    display.println(Line3);
+    display.setCursor(0,46);
+    display.println(Line4);
+    display.setCursor(0,56);
+    display.println(Line5);
+    display.display();
+  }
+
   // if oled is continuosly on, refresh every second (DL3EL)
   if (oled_timeout == 0) {
-    // refrsh display once a second
+    // refresh display once a second
     time_to_refresh = millis() + 1000;
   } else {
     time_to_refresh = millis() + showRXTime;
@@ -972,6 +1137,40 @@ void timer_once_a_second() {
     // refresh display once a second
     fillDisplayLine1(); //update time & uptime
 
+    // some assurances
+    if (OledLine1.length() > 21) OledLine1.remove(21, OledLine1.length()-21);
+    // line 2 can grow in some cases. Then the other lines are empty. TODO: algorithmic approach
+    if (OledLine2.length() > 21 && OledLine3.length() == 0 && OledLine4.length() == 0 && OledLine5.length() == 0) {
+      if (OledLine2.length() > 21*4)
+        OledLine2.remove(21*4, OledLine2.length()-21*4);
+    } else {
+      if (OledLine2.length() > 21) OledLine2.remove(21, OledLine2.length()-21);
+      if (OledLine3.length() > 21) OledLine3.remove(21, OledLine3.length()-21);
+      if (OledLine4.length() > 21) OledLine4.remove(21, OledLine4.length()-21);
+      if (OledLine5.length() > 21) OledLine5.remove(21, OledLine5.length()-21);
+    }
+
+    if (debug_verbose > 1) {
+      if (OledHdr.length() > 21) {
+        Serial.printf("OledHdr [timer_once_a_second]: %s (%d)\r\n", OledHdr.c_str(), OledHdr.length());
+      }
+      if (OledLine1.length() > 21) {
+        Serial.printf("OledLine1 [timer_once_a_second]: %s (%d)\r\n", OledLine1.c_str(), OledLine1.length());
+      }
+      if (OledLine2.length() > 21) {
+        Serial.printf("OledLine2 [timer_once_a_second]: %s (%d)\r\n", OledLine2.c_str(), OledLine2.length());
+      }
+      if (OledLine3.length() > 21) {
+        Serial.printf("OledLine3 [timer_once_a_second]: %s (%d)\r\n", OledLine3.c_str(), OledLine3.length());
+      }
+      if (OledLine4.length() > 21) {
+        Serial.printf("OledLine4 [timer_once_a_second]: %s (%d)\r\n", OledLine4.c_str(), OledLine4.length());
+      }
+      if (OledLine5.length() > 21) {
+        Serial.printf("OledLine5 [timer_once_a_second]: %s (%d)\r\n", OledLine5.c_str(), OledLine5.length());
+      }
+    }
+
     display.clearDisplay();
     display.setTextColor(WHITE);
     display.setTextSize(2);
@@ -993,15 +1192,33 @@ void timer_once_a_second() {
 }
 
 
-String getSpeedCourseAlti() {
-  String sca = "";
-  String speed_val = "--";
-  String speed_unit = "km/h";
-  String course_val = "--";
-  String course_unit = "\xF7";
-  String alt_val = "--";
-  String alt_unit = (units_dist == UNITS_DIST_FT ? "ft" : "m");
+char *str_course(int resolution) {
+  static char buf[7]; // room for 359.9G + \0
+  if (gps_state && gps_isValid) {
+    // sprintf rounds
+    double cse = gps.course.deg();
+    if (resolution)
+      if (oled_line3and4_format == 2 || oled_line3and4_format == 4) {
+        sprintf(buf, "%03.1f\xF7", cse > 359.949 ? 0 : cse);
+      } else {
+        sprintf(buf, "%3.1f\xF7", cse > 359.949 ? 0 : cse);
+      }
+    else {
+      if (oled_line3and4_format == 2 || oled_line3and4_format == 4) {
+        sprintf(buf, "%03.0f\xF7", cse > 359.49 ? 0 : cse);
+      } else {
+        sprintf(buf, "%3.0f\xF7", cse > 359.49 ? 0 : cse);
+      }
+    }
+  } else {
+    sprintf(buf, "--\xF7");
+  }
+  return buf;
+}
 
+char *str_speed() {
+  static char buf[8]; // room for 999km/h + \0 == 8
+  const char *speed_unit = "km/h";
   switch (units_speed) {
   case UNITS_SPEED_MS:
     speed_unit = "m/s";
@@ -1013,16 +1230,27 @@ String getSpeedCourseAlti() {
     speed_unit = "kn";
     break;
   }
-
   if (gps_state && gps_isValid) {
-    int alt_int = max(-99999, min(999999, (int ) (units_dist == UNITS_DIST_FT ? gps.altitude.feet() : gps.altitude.meters())));
-    speed_val = String(gps_speed);
-    course_val = String(gps.course.deg());
-    alt_unit = String(alt_int);
+    sprintf(buf, "%d%s", gps_speed > 999 ? 999 : gps_speed, speed_unit);
+  } else {
+    sprintf(buf, "--%s", speed_unit);
   }
+  return buf;
+}
 
-  sca = speed_val + speed_unit + " " + course_val + course_unit + " " + alt_val + alt_unit;
-  return sca;
+char *str_altitude() {
+  static char buf[7]; // room for 99999' + \0 = 7
+  const char *alt_unit = (units_dist == UNITS_DIST_FT ? "'" : "m");
+  if (gps_state && gps_isValid) {
+    sprintf(buf, "%d%s", max(-9999, min(99999, (int ) (units_dist == UNITS_DIST_FT ? gps.altitude.feet() : gps.altitude.meters()))), alt_unit);
+  } else {
+    sprintf(buf, "--%s", alt_unit);
+  }
+  return buf;
+}
+
+String getSpeedCourseAlti() {
+  return ( String(str_speed()) + " " + String(str_course(1)) + " " + String(str_altitude()) );
 }
 
 
@@ -1030,7 +1258,7 @@ String getSatAndBatInfo() {
   String line5;
 
   if (gps_state)
-    line5 = "S:" + String(gps.satellites.value()) + "/" + String(int(gps.hdop.hdop()));
+    line5 = "S:" + String(gps.satellites.value()) + "/" + String((int ) gps.hdop.hdop());
   else
     line5 = "S:-/-";
 #ifdef T_BEAM_V1_0
@@ -1059,7 +1287,8 @@ String getSatAndBatInfo() {
     line5 = line5 + "/" + charge + "mA";
 #endif
 #if defined(ENABLE_BLUETOOTH) && defined(KISS_PROTOCOL)
-    if (enable_bluetooth && SerialBT.hasClient()) {
+    if (line5.length() < 21-3 && enable_bluetooth && SerialBT.hasClient()) {
+      // ^ "S:0/99 B:3.52V/-190mA BT" would be too long for one oled line
       line5 += " BT";
     }
 #endif
@@ -1103,6 +1332,8 @@ void fillDisplayLine2() {
           wifi_info = (enable_webserver)? wifi_info + "-AP" : wifi_info + ":off";
         } else if (wifi_connection_status == WIFI_SEARCHING_FOR_AP) {
           wifi_info = (enable_webserver)? wifi_info + "-cli" : wifi_info + ":off";
+        } else if (wifi_connection_status == WIFI_DISABLED) {
+          wifi_info = (enable_webserver)? wifi_info + "-dis" : wifi_info + ":off";
         } else {
           wifi_info = (enable_webserver)? wifi_info + "-CLI" : wifi_info + ":off";
         }
@@ -1129,41 +1360,182 @@ void fillDisplayLine2() {
       }
     } else {
       OledLine2 = wifi_info;
-      }
     }
+  }
 }
 
-void fillDisplayLines3to5() {
+
+void fillDisplayLines3to5(int force) {
   static uint32_t ratelimit_until = 0L;
 
-
-  if (millis() < ratelimit_until)
-    return;
+  if (debug_verbose > 1)
+    Serial.printf("fillDisplayLines3to5 start, force:%d\r\n", force);
+  if (!force && millis() < ratelimit_until)
+      return;
   ratelimit_until = millis() + (oled_timeout == 0 ? 1000 : showRXTime);
 
-  OledLine3 = aprsLatPreset_heigher_precision + " " + aprsLonPreset_heigher_precision + " " + aprsPresetShown;
-  OledLine4 = getSpeedCourseAlti();
+  boolean show_locator = false;
+  if (oled_show_locator == 1) {
+       show_locator = true;
+  } else if (oled_show_locator > 1) {
+    uint8_t t = millis() / 1000 % 120;
+    if ( (oled_show_locator == 2 && (t % 60) >= 50) ||
+         (oled_show_locator == 3 && t >= 100) ||
+         (oled_show_locator == 4 && (t % 40) >= 20) ) {
+       show_locator = true;
+    }
+  }
+
+  if (oled_line3and4_format == 0) {
+    if (show_locator) {
+      OledLine3 = aprsLatLonAsMaidenheadGridLocator + " " + aprsPresetShown /* + " " + foobar */;
+      //                                                                                ^ free for future use, i.e. temp, pressure, humidity
+    } else {
+      OledLine3 = aprsLatPreset + " " + aprsLonPreset + " " + aprsPresetShown;
+    }
+    OledLine4 = getSpeedCourseAlti();
+
+    if (debug_verbose > 1) {
+      Serial.printf("OledLine3_1 [fillDisplayLines3to5] from %d: [%s] (%d)\r\n", force, OledLine3.c_str(), OledLine3.length());
+      Serial.printf("OledLine4_1 [fillDisplayLines3to5] from %d: [%s] (%d)\r\n", force, OledLine4.c_str(), OledLine4.length());
+    }
+
+  } else {
+    char buf[22]; // OLED-Display can show 21 characters in a line
+
+    // Thoughts about higher precision in nautical syntax (format 2). Also valid for
+    // classic syntax(format 1), which has the same length.
+    // try to adjust speed value to a nice offset, depending on it's unit
+    // Example:
+    // 356° 9999m 23-45.345N
+    // 999km/h p 124-45.345E		// looks good
+    // 356° 9999m 23-45.345N
+    //   0km/h p 124-45.345E		// quite ok. Degree and 'k' are at the same position.
+    // 356° 9999m 23-45.345N
+    //     0kt p 124-45.345E		// looks bad
+    // ^^^^ too much blanks for min value
+    // 356° 9999m 23-45.345N
+    //   539kt p 124-45.345E		// looks bad
+    //   ^^ too much blanks for max value
+    // String offset comparison:
+    // 999km/h
+    //   0km/h
+    // 277m/s
+    //   0m/s
+    // 620mph   // has same max len(max value) and same len of unit than m/s
+    //   0mph
+    // 539kt
+    //   0kt
+    // You see the additional blanks at right side
+    // ->
+    // 356° 9999m 23-45.345N
+    // 539kt   p 124-45.345E		// looks nice
+    //      ^^ two more blanks
+    // 356° 9999m 23-45.345N
+    //   0kt   p 124-45.345E		// quite ok. Defree and 'k' are at the same position.
+    // 356° 9999m 23-45.345N
+    // 277m/s  p 124-45.345E		// quite ok. Defree and 'k' are at the same position.
+    //       ^  one  more blank
+    // 356° 9999m 23-45.345N
+    //   1m/s  p 124-45.345E		// quite ok. Defree and 'k' are at the same position.
+    // hack: append blanks, so it aligns more to left.
+    // str_speed() assured length 7 (length 999km/h)
+
+    char *spd = str_speed();
+    if (units_speed == UNITS_SPEED_KN) {
+      strcat(spd, "  ");
+    } else if (units_speed == UNITS_SPEED_MPH || units_speed == UNITS_SPEED_KN) {
+      strcat(spd, " ");
+    }
+    // end of hack
+
+    if (show_locator) {
+      // show maidenhead grid locator
+      if (oled_line3and4_format < 3) {
+        sprintf(buf, "%4.4s%6.6s %-10.10s", str_course(0), str_altitude(), aprsLatLonAsMaidenheadGridLocator.c_str());
+        OledLine3 = String(buf);
+        sprintf(buf, "%7.7s %.1s %-11.11s", spd, aprsPresetShown.c_str(), "");
+        //                                                                 ^ free for future use, i.e. temp, pressure, humidity
+        OledLine4 = String(buf);
+      } else {
+        sprintf(buf, "%11.11s %.1s %7.7s", aprsLatLonAsMaidenheadGridLocator.c_str(), aprsPresetShown.c_str(), spd);
+        OledLine3 = String(buf);
+        sprintf(buf, "%11.11s %4.4s%5.5s", "", str_course(0), str_altitude());
+        //                                 ^ free for future use, i.e. temp, pressure, humidity
+        OledLine4 = String(buf);
+      }
+    } else {
+      char b[12]; // room for 012-34.567E + \0 = 12
+      if ((oled_line3and4_format % 2)) {
+        // In this case, we could not use the aprsLatPresetNiceLocation as base for our adaption,
+        // because it may be in heigher precision. Thus 012-34.937E would be cut to 012.34.93E;
+        // rounding has taken place at aprsLatPreset. We use this.
+        const char *p = aprsLatPreset.c_str();
+        sprintf(b, "%.2s\xF7%s", p, p+2);
+        int pos_lastchar = strlen(b)-1;
+        // replace ...N by ...'N
+        b[pos_lastchar+1] = b[pos_lastchar]; b[pos_lastchar] = '\''; b[pos_lastchar+2] = 0;
+      } else {
+        sprintf(b, "%.10s", aprsLatPresetNiceNotation.c_str());
+      }
+      if (oled_line3and4_format < 3) {
+        sprintf(buf, "%4.4s%6.6s %-10.10s", str_course(0), str_altitude(), b);
+      } else {
+        // coordinates left aligned
+        sprintf(buf, "%11.11s %.1s %7.7s", b, aprsPresetShown.c_str(), spd);
+      }
+      OledLine3 = String(buf);
+      if (debug_verbose > 1)
+        Serial.printf("OledLine3_2 [fillDisplayLines3to5] from %d: %s (%d)\r\n", force, OledLine3.c_str(), OledLine3.length());
+      if ((oled_line3and4_format % 2)) {
+        const char *p = aprsLonPreset.c_str();
+        sprintf(b, "%.3s\xF7%s", p, p+3);
+        int pos_lastchar = strlen(b)-1;
+        // replace ...N by ...'N
+        b[pos_lastchar+1] = b[pos_lastchar]; b[pos_lastchar] = '\''; b[pos_lastchar+2] = 0;
+      } else {
+        sprintf(b, "%.11s", aprsLonPresetNiceNotation.c_str());
+      }
+      if (oled_line3and4_format < 3) {
+        sprintf(buf, "%7.7s %.1s %-11.11s", spd, aprsPresetShown.c_str(), b);
+      } else {
+        // only beautiful up to 999m or 304ft. > 999: no blank between ° and alt. > 99999: alt unit is cut.
+        sprintf(buf, "%11.11s %4.4s%5.5s", b, str_course(0), str_altitude());
+      }
+      OledLine4 = String(buf);
+      if (debug_verbose > 1)
+        Serial.printf("OledLine4_2 [fillDisplayLines3to5] from %d: %s (%d)\r\n", force, OledLine4.c_str(), OledLine4.length());
+    }
+  }
+
   OledLine5 = getSatAndBatInfo();
 }
 
 
 void displayInvalidGPS() {
   uint32_t gpsage;
-  String gpsage_p = "";
+  String gpsage_p = " GPS dis";
   fillDisplayLine1();
-  if (!gps_state){
-    OledLine2 = wifi_info + " GPS dis";
-  } else {
+  if (gps_state) {
     //show GPS age (only if last retrieval was invalid)
     gpsage = gps.location.age()/1000;
-    gpsage_p = String(gpsage) + "s" ;
-    gpsage_p = (gpsage > 60)? String(gpsage/60) + "m" : gpsage_p;
-    gpsage_p = (gpsage > 3600)? String(gpsage/3600) + "h" : gpsage_p;
-    gpsage_p = (gpsage > 86400)? String(gpsage/86400) + "d" : gpsage_p;
-    gpsage_p = (gpsage > 4000000)? " no GPS fix" : " GPS age:" + gpsage_p;
-    OledLine2 = wifi_info + gpsage_p;
+    if (gpsage > 49700) {
+      gpsage_p = " no GPS fix ";
+    } else {
+      if (gpsage < 60) {
+        gpsage_p = String(gpsage) + "s";
+      } else if (gpsage < 3600) {
+        gpsage_p = String(gpsage/60) + "m";
+      } else if (gpsage < 86400) {
+        gpsage_p = String(gpsage/3600) + "h";
+      } else {
+        gpsage_p = String(gpsage/86400) + "d";
+      }
+      gpsage_p = " GPS age:" + gpsage_p;
+    }
   }
-  fillDisplayLines3to5();
+  OledLine2 = wifi_info + gpsage_p;
+  fillDisplayLines3to5(0);
   writedisplaytext(Tcall, OledLine1, OledLine2, OledLine3, OledLine4, OledLine5);
 }
 
@@ -1226,19 +1598,20 @@ void set_callsign() {
   #else
     String s = "";
   #endif
-   if (s.isEmpty()) {
-     s = prepareCallsign(String(CALLSIGN));
-     if (s.isEmpty()) {
-       s = String("N0CALL");
-     }
-     #ifdef ENABLE_PREFERENCES
-       preferences.putString(PREF_APRS_CALLSIGN, s);
-       #if defined(ENABLE_SYSLOG)
-         syslog_log(LOG_DEBUG, String("FlashWrite preferences: set_Callsign()"));
-       #endif
-     #endif
+  if (s.isEmpty()) {
+    s = prepareCallsign(String(CALLSIGN));
+    if (s.isEmpty()) {
+      s = String("N0CALL");
     }
-    Tcall = s;
+    #ifdef ENABLE_PREFERENCES
+      preferences.putString(PREF_APRS_CALLSIGN, s);
+      #if defined(ENABLE_SYSLOG)
+        if (debug_verbose)
+          syslog_log(LOG_DEBUG, String("FlashWrite preferences: set_Callsign()"));
+      #endif
+    #endif
+  }
+  Tcall = s;
 }
 
 // telemetry frames
@@ -1303,6 +1676,7 @@ void sendTelemetryFrame() {
     case 0:
       // Equations are defined only for the 5 analog channels. May be less then 5.
       // Most important for correct interpretation -> position 0.
+      // Item length may vary
       s = String("EQNS.");
       s = s + "0,5.1,3000";
       #ifdef T_BEAM_V1_0
@@ -1312,17 +1686,19 @@ void sendTelemetryFrame() {
     case 1:
       // up to 5 analog and 8 digital channels. If not needed, could break at any item.
       // if you use 4 analog and 2 digital channel, set names to "A,B,C,D,,X,Y"
+      // Item lengths are strict. Look at spec!
       s = String("PARM.");
       s = s + "B Volt";
       #ifdef T_BEAM_V1_0
         s = s + ",B In" + ",B Out" + ",AC V" + ",AC C";
       #else
-        //if (m == 4) s = s + ",,,," + "yourDigitalParamNames1,2,3,4,5,6,7,8";
+        //if (m == 4) s = s + ",,,,," + /* yourDigitalParamNames: * / ,2,3,4,5,6,7,8";
       #endif
       break;
     case 2:
       // up to 5 analog and 8 digital channels. If not needed, could break at any item.
       // if you use 4 analog and 2 digital channel, set names to "A,B,C,D,,X,Y"
+      // Item lengths are strict. Look at spec!
       s = String("UNIT.");
       s = s + "mV";
       #ifdef T_BEAM_V1_0
@@ -1332,9 +1708,8 @@ void sendTelemetryFrame() {
       #endif
       break;
     case 3:
-      //Example for the up to 8 digital BITS channel (currently not used)
-      //Make sure that when using this, it starts after the 5 analog measurement fields;
-      //If you have less than 5 analog measurementr fields, add an empty one (",").
+      //Example for the up 8 digital BITS channel (currently not used)
+      //It contins exact 8 bytes of 0 or 1, followed by up to 23 bytes procect title.
       s = String("BITS.");
       s = s + "00000000" + "SQ9MDD LoRa Tracker";
       break;
@@ -1451,28 +1826,45 @@ void sendTelemetryFrame() {
     #ifdef ENABLE_PREFERENCES
       preferences.putUInt(PREF_TNC_SELF_TELEMETRY_SEQ, tel_sequence);
       #if defined(ENABLE_SYSLOG)
-        syslog_log(LOG_DEBUG, String("FlashWrite preferences: sendTelemetryFrame()"));
+        if (debug_verbose)
+          syslog_log(LOG_DEBUG, String("FlashWrite preferences: sendTelemetryFrame()"));
       #endif
     #endif
   }
 
   // measurement
+  // min(): because we obviously measured 4.3.11. Result is 257 and sent value 2.
+  // Working with uint8_t is a good decision, because due to spec, the value must not
+  // be greater than 255, because it's the numeric representation of an 8 bit value.
   #ifdef T_BEAM_V1_0
-    uint8_t b_volt = (axp.getBattVoltage() - 3000) / 5.1;
-    uint8_t b_in_c = (axp.getBattChargeCurrent()) / 10;
-    uint8_t b_out_c = (axp.getBattDischargeCurrent()) / 10;
-    uint8_t ac_volt = (axp.getVbusVoltage() - 3000) / 28;
-    uint8_t ac_c = (axp.getVbusCurrent()) / 10;
-  #elif T_BEAM_V0_7
-    uint8_t b_volt = ((BattVolts * 1000) - 3000) / 5.1;
+    uint8_t b_volt = min((int ) ((axp.getBattVoltage() - 3000) / 5.1), 255);
+    uint8_t b_in_c = min((int ) ((axp.getBattChargeCurrent()) / 10), 255);
+    uint8_t b_out_c = min((int ) ((axp.getBattDischargeCurrent()) / 10), 255);
+    uint8_t ac_volt = min((int ) ((axp.getVbusVoltage() - 3000) / 28), 255);
+    uint8_t ac_c = min((int ) ((axp.getVbusCurrent()) / 10), 255);
   #else
-    uint8_t b_volt = ((BattVolts * 1000) - 3000) / 5.1;
+    batt_read();
+    uint8_t b_volt = min((int ) (((BattVolts * 1000) - 3000) / 5.1), 255);
   #endif
 
-  String telemetryData = String("T#") + tel_sequence_str + "," + String(b_volt);
+
+  String telemetryData = String("T#") + tel_sequence_str;
+  // aprs spec says a an analog field has a length of 3. -> 0 is 000.
+  // This is nearly impossible to do with String functions. We need a helper buffer
+  // aprs spec that Telemetry Report format is exactly 5 analog values and 8 digital values.
+  // We break with this standard here, because we don't like waste bandwith
+  char buf[5]; // ",000" + \0 == 5
+  sprintf(buf, ",%03u", b_volt); telemetryData += String(buf);
   #ifdef T_BEAM_V1_0
-    telemetryData = telemetryData + "," + String(b_in_c) + "," + String(b_out_c) + "," + String(ac_volt) + "," + String(ac_c);
+    sprintf(buf, ",%03u", b_in_c); telemetryData += String(buf);
+    sprintf(buf, ",%03u", b_out_c); telemetryData += String(buf);
+    sprintf(buf, ",%03d", ac_volt); telemetryData += String(buf);
+    sprintf(buf, ",%03u", ac_c); telemetryData += String(buf);
+  #else
+    //telemetryData += ",000,000,000,000"; // <- would be needed if we'd standard conform!
   #endif
+  //telemetryData += ",00000000"; // <- would be needed if we'd standard conform!
+  //telemetryData += "Optional Comment" // If you need comment, it's important that your repot has exactly 5 analog and 8 digital data values, else you'd to harm to parsers. No leading ',' needed.
   //do_serial_println("Telemetry: " + telemetryBase + telemetryData);
 
   // Flash the light when telemetry is being sent
@@ -1505,7 +1897,7 @@ void sendTelemetryFrame() {
   }
 
   // Show when telemetry is being sent
-  writedisplaytext("((TEL TX))","","","","","");
+  writedisplaytext("((TEL TX))","",telemetryData,"","","");
 
   // Flash the light when telemetry is being sent
   #ifdef ENABLE_LED_SIGNALING
@@ -1591,7 +1983,8 @@ int writeFile(fs::FS &fs, const String &callername, const char *filename, const 
   if (file.print(jsonData)) {
     do_serial_println(callername + ": file " + filename + " written");
     #if defined(ENABLE_SYSLOG)
-      syslog_log(LOG_DEBUG, String("FlashWrite filesystem: writeFile(") + String(filename) + String(")"));
+      if (debug_verbose)
+        syslog_log(LOG_DEBUG, String("FlashWrite filesystem: writeFile(") + String(filename) + String(")"));
     #endif
   } else {
     do_serial_println(callername + ": write of " + filename + " failed!");
@@ -1805,44 +2198,281 @@ end:
 }
 
 
-void init_and_validate_aprs_position_and_icon() {
+int compute_maidenhead_grid_fields_squares_subsquares(char *locator, int locator_size, float deg, int pos_start) {
+  char *p = locator;
+  int div = 24;
+
+  if (locator_size < 4 || !(locator_size % 2) || pos_start > 2)
+    return -1;
+
+  p = p + pos_start;
+
+  *p = 'A' + (int ) deg / 10;
+  p = p+2;
+  *p = '0' + ((int ) deg % 10);
+  p = p+2;
+
+  deg = (deg - (int ) deg);
+
+  for (;;) {
+    deg = (deg - (int ) deg) *div;
+    *p = (div == 10 ? '0' : (p-locator < 6) ? 'A' : 'a') + (int ) deg;
+    div = (div == 10 ? 24 : 10);
+    p = p+2;
+    if (p-locator > locator_size-2) {
+      break;
+    }
+  }
+  *p = 0;
+
+  return 0;
+}
+
+String compute_maidenhead_grid_locator(const String &sLat, const String &sLon, int ambiguity) {
+  const char *p_lat = sLat.c_str();
+  const char *p_lon = sLon.c_str();
+
+  static char locator[13]; // Room for JO62QN11aa22 + \0 == 13
+  char buf[4];
+  float deg;
+
+  // Resolution 180/18./10/ 24*60 /10/24/10 * 1852 = 1.93m
+  sprintf(buf, "%.2s", p_lat);
+  deg = atoi(buf) + atof(p_lat +3) /60.0;
+  if (p_lat[strlen(p_lat)-1] == 'N')
+    deg = 90.0 + deg + 0.0000001;
+  else
+    deg = 90.0 - deg;
+  if (deg > 179.99999) deg = 179.99999; else if (deg < 0.0) deg = 0.0;
+  if (compute_maidenhead_grid_fields_squares_subsquares(locator, sizeof(locator), deg, 1) < 0)
+    return String("AA00");
+
+  // Resolution up to 180/2/18./10/ 24*60 /10/24/10 * 1852 = 3.85m; 1.93m at 60 deg N/S.
+  sprintf(buf, "%.3s", p_lon);
+  deg = atoi(buf) + atof(p_lon +4) /60.0;
+  if (p_lon[strlen(p_lon)-1] == 'E')
+    deg = 180.0 + deg + 0.0000001;
+  else
+    deg = 180.0 - deg;
+  deg = deg / 2.0;
+  if (deg > 179.99999) deg = 179.99999; else if (deg < 0.0) deg = 0.0;
+  if (compute_maidenhead_grid_fields_squares_subsquares(locator, sizeof(locator), deg, 0) < 0)
+    return String("AA00");
+
+  if (ambiguity >= 4 || oled_loc_amb > 1)
+    locator[2] = 0; // JO -> 600' == 1111.2km in latitude
+  if (ambiguity == 3 || oled_loc_amb == 1)
+    locator[4] = 0; // JO62 -> 60' == 111.12km in latitude
+  else if (ambiguity == 2 || oled_loc_amb == 0)
+    locator[6] = 0; // JO62qn -> 2.5' == 4.63km in latitude
+  else if (ambiguity == 1 || oled_loc_amb == -1)
+    locator[8] = 0; // JO62qn11 -> 0.25' -> 463m in latitude
+  else if (ambiguity == 0 || oled_loc_amb == -2)
+    locator[10] = 0; // JO62qn11aa -> 0.0104166' -> 19.3m. At lat (and 60deg N/S) almost exactly the normal aprs resolution
+  else
+    locator[12] = 0; // JO62qn11aa22 -> 0.00104166' > 1.93m. High Precision achivable with DAO !W..! extension.
+  // JO62qn11aa22bb would not only hard readable. It would be a precision of 0.0000434' -> 8.034cm
+  return String(locator);
+}
+
+
+int storeLatLonPreset(String _sLat, String _sLon, int precision) {
+  String sLat = String(_sLat); // make a local String copy. Contense of _sLat can change if we change the variable name with wich storLatLonPreset() was called.
+  String sLon = String(_sLon);
+  String tmp_aprsLatPreset;
+  String tmp_aprsLonPreset;
+  String tmp_aprsLatPresetDAO;
+  String tmp_aprsLonPresetDAO;
+  String tmp_aprsLatLonDAO;
+  String tmp_aprsLatPresetNiceNotation;
+  String tmp_aprsLonPresetNiceNotation;
+  String tmp_aprsLatLonAsMaidenheadGridLocator;
+  const char *p;
+  char buf[13];
+  char helper_base91[] = {"0\0"};
+  char nswe;
+  float f;
+  double fLon = 0;
+  double fLat = 0;
+
+  p = sLat.c_str();
+  // some assurance
+  if ( (sLat.length()+1) == sLon.length() &&
+        (sLat.endsWith("N") || sLat.endsWith("S") ||
+        (sLon.endsWith("E") || sLon.endsWith("W"))) ) {
+    const char *q = sLon.c_str();
+    // sLon has 3 numbers for degrees instead of two.
+    if (!isdigit(*q))
+      return -1;
+    q++;
+    for (int i = 0; q[i]; i++) {
+      if (i == 2) {
+        if (p[2] != '-' || q[2] != '-') {
+          return storeLatLonPreset("0000.00N", "00000.00W", 0);
+        }
+      } else if (i == 5) {
+        if ((p[5] != '.' || q[5] != '.')) {
+          return storeLatLonPreset("0000.00N", "00000.00W", 0);
+        }
+      } else if (p[i+1] && q[i+1] && (!isdigit(p[i]) || !isdigit(q[i]))) {
+        return storeLatLonPreset("0000.00N", "00000.00W", 0);
+      }
+    }
+  } else {
+    return storeLatLonPreset("0000.00N", "00000.00W", 0);
+  }
 
   // We have stored the manual position string in a heigher precision (in case resolution more precise than 18.52m is required; i.e. for base-91 location encoding, or DAO extenstion).
   // Furthermore, 53-32.1234N is more readable in the Web-interface than 5232.1234N
-  aprsLatPreset.toUpperCase(); aprsLatPreset.replace(",", "."); aprsLatPreset.trim();
-  if (aprsLatPreset.length() == 11 && aprsLatPreset.indexOf('-') == 2 && aprsLatPreset.indexOf(' ') == -1 && (aprsLatPreset.endsWith("N") || aprsLatPreset.endsWith("S"))) {
-    aprsLatPreset_heigher_precision = aprsLatPreset;
-    char buf[9];
-    const char *p = aprsLatPreset.c_str();
-    sprintf(buf, "%.2s%.5s%c", p, p+3, p[10]);
-    aprsLatPreset = String(buf);
-    // No, display is too small for gg-mm.ddddN ggg-mm.ddddE P
-    //if (!(units & UNITS_SPEED_KN))
-      aprsLatPreset_heigher_precision = aprsLatPreset;
+  p = sLat.c_str();
+  nswe = p[strlen(p)-1];
+  sprintf(buf, "%.7s", p+3);
+  // strip trailing N/S. This way we could have a dynamic length for input precision at sLat
+  buf[strlen(buf)-1] = 0;
+  f = atof(buf);
+  // round up. sprintf for float does the rounding
+  sprintf(buf, "%.2s%05.2f%c", p, (f > 59.99 ? 59.99 : f), nswe);
+  tmp_aprsLatPreset = String(buf);
+
+  if (sLat.length() > 9 && (precision == 1 || precision == 2)) {
+    if (precision == 1) {
+      if (f > 59.999) f=59.999;
+    } else {
+      if (f > 59.9999) f=59.9999;
+    }
+    if (precision == 1) {
+      sprintf(buf, "%.2s%06.3f", p, f);
+      tmp_aprsLatLonDAO = String("!W") + String(buf[7]);
+    } else {
+      sprintf(buf, "%.2s%07.4f", p, f);
+      ax25_base91enc(helper_base91, 1, atoi(buf+7)*0.91);
+      tmp_aprsLatLonDAO = String("!w") + helper_base91[0];
+    }
+    buf[7] = nswe; buf[8] = 0;;
+    tmp_aprsLatPresetDAO = String(buf);
+    // "NiceNotation" may be used for presenting at oled. Four decimals would be too hard to read. We use 3 decimals for both, precision 1 and precision 2.
+    sprintf(buf, "%.2s-%06.3f%c", p, f, nswe);
+    tmp_aprsLatPresetNiceNotation = String(buf);
+  } else {
+    tmp_aprsLatPresetDAO = tmp_aprsLatPreset;
+    tmp_aprsLatLonDAO = "";
+    sprintf(buf, "%.2s-%05.2f%c", p, (f > 59.99 ? 59.99 : f), nswe);
+    tmp_aprsLatPresetNiceNotation = String(buf);
+  }
+  if (aprsLatLonPresetCOMP.isEmpty()) {
+    sprintf(buf, "%.2s", p);
+    fLat = atof(buf) + f/60.0;
+    if (nswe == 'S')
+     fLat *= -1;
   }
 
   // 001-20.5000E is more readable in the Web-interface than 00120.5000E, and could not be mis-interpreted as 120.5 degrees east  (== 120 deg 30' 0" E)
-  aprsLonPreset.toUpperCase(); aprsLonPreset.replace(",", "."); aprsLonPreset.trim();
-  if (aprsLonPreset.length() == 12 && aprsLonPreset.indexOf('-') == 3 && aprsLonPreset.indexOf(' ') == -1 && (aprsLonPreset.endsWith("E") || aprsLonPreset.endsWith("W"))) {
-    aprsLonPreset_heigher_precision = aprsLonPreset;
-    char buf[10];
-    const char *p = aprsLonPreset.c_str();
-    sprintf(buf, "%.3s%.5s%c", p, p+4, p[11]);
-    aprsLonPreset = String(buf);
-    // No, display is too small for gg-mm.ddddN ggg-mm.ddddE P
-    //if (!(units & UNITS_SPEED_KN))
-      aprsLonPreset_heigher_precision = aprsLonPreset;
+  p = sLon.c_str();
+  nswe = p[strlen(p)-1];
+  sprintf(buf, "%.7s", p+4);
+  // strip trailing W/E. This way we could have a dynamic length for input precision at sLon
+  buf[strlen(buf)-1] = 0;
+  f = atof(buf);
+  // round up. sprintf for float does the rounding
+  sprintf(buf, "%.3s%05.2f%c", p, (f > 59.99 ? 59.99 : f), nswe);
+  tmp_aprsLonPreset = String(buf);
+
+  if (sLon.length() > 10 && (precision == 1 || precision == 2)) {
+    if (precision == 1) {
+      if (f > 59.999) f=59.999;
+    } else {
+      if (f > 59.9999) f=59.9999;
+    }
+    if (precision == 1) {
+      sprintf(buf, "%.3s%06.3f", p, f);
+      tmp_aprsLatLonDAO = tmp_aprsLatLonDAO + String(buf[8]) + "!";
+    } else {
+      sprintf(buf, "%.3s%07.4f", p, f);
+      ax25_base91enc(helper_base91, 1, atoi(buf+7)*0.91);
+      tmp_aprsLatLonDAO = tmp_aprsLatLonDAO + helper_base91[0] + "!";
+    }
+    buf[8] = nswe; buf[9] = 0;;
+    tmp_aprsLonPresetDAO = String(buf);
+    // "NiceNotation" may be used for presenting at oled. Four decimals would be too hard to read. We use 3 decimals (see precision 1 above).
+    // Furthermore, we don't have enough space on oled anyway for one additional character.
+    sprintf(buf, "%.3s-%06.3f%c", p, f, nswe);
+    tmp_aprsLonPresetNiceNotation = String(buf);
+    tmp_aprsLatLonAsMaidenheadGridLocator = compute_maidenhead_grid_locator(tmp_aprsLatPresetNiceNotation, tmp_aprsLonPresetNiceNotation, 0);
+  } else {
+    tmp_aprsLonPresetDAO = tmp_aprsLonPreset;
+    tmp_aprsLatLonDAO = "";
+    sprintf(buf, "%.3s-%05.2f%c", p, (f > 59.99 ? 59.99 : f), nswe);
+    tmp_aprsLonPresetNiceNotation = String(buf);
+    tmp_aprsLatLonAsMaidenheadGridLocator = compute_maidenhead_grid_locator(tmp_aprsLatPresetNiceNotation, tmp_aprsLonPresetNiceNotation, 1);
+  }
+  if (aprsLatLonPresetCOMP.isEmpty()) {
+    sprintf(buf, "%.3s", p);
+    fLon = atof(buf) + f/60.0;
+    if (nswe == 'W')
+     fLon *= -1;
   }
 
+  tmp_aprsLatPresetNiceNotation.replace(".", ",");
+  tmp_aprsLonPresetNiceNotation.replace(".", ",");
+
+  // We worked with temporary variables. We needed to take special care with these public variables:
+  // I.e. we might have been called by the webserver Thread (on save config). And our main thread might in the meantime use these
+  // variables for displaying, TX, etc. -> Apply the changes right after each other.
+  // String(tmp_...) enforces a new String object.
+  aprsLatPreset = String(tmp_aprsLatPreset);
+  aprsLonPreset = String(tmp_aprsLonPreset);
+  aprsLatPresetDAO = String(tmp_aprsLatPresetDAO);
+  aprsLonPresetDAO = String(tmp_aprsLonPresetDAO);
+  aprsLatLonDAO = String(tmp_aprsLatLonDAO);
+  aprsLatPresetNiceNotation = String(tmp_aprsLatPresetNiceNotation);
+  aprsLonPresetNiceNotation = String(tmp_aprsLonPresetNiceNotation);
+  aprsLatLonAsMaidenheadGridLocator = String(tmp_aprsLatLonAsMaidenheadGridLocator);
+  // Only when called from a function called from setup_phase2_soft_reconfiguration (after boot oder config save) with preset position (indicator: aprsLatLonPresetCOMP is empty).
+  // Else: store_compressed_position() is explicitely called right after this function
+  if (aprsLatLonPresetCOMP.isEmpty())
+    store_compressed_position(fLat, fLon);
+
+  return 0;
+}
+
+void init_and_validate_aprs_position_and_icon() {
+
+  // latlon_precision depends on position_ambiguity
+  if (position_ambiguity == -2) {
+    latlon_precision = 1;
+  } else if (position_ambiguity == 0 || position_ambiguity == -3) {
+    // compressed, and uncompressed DAO '!w..! have almost the same precision
+    latlon_precision = 2;
+  } else {
+    // ambiguity -1 and >= 1
+    latlon_precision = 0;
+  }
+
+  aprsLatPresetFromPreferences.toUpperCase(); aprsLatPresetFromPreferences.replace(",", "."); aprsLatPresetFromPreferences.trim();
+  aprsLonPresetFromPreferences.toUpperCase(); aprsLonPresetFromPreferences.replace(",", "."); aprsLonPresetFromPreferences.trim();
+  if ( aprsLatPresetFromPreferences.length() == 11 &&
+       aprsLatPresetFromPreferences.indexOf('-') == 2 && aprsLatPresetFromPreferences.indexOf(' ') == -1 &&
+       (aprsLatPresetFromPreferences.endsWith("N") || aprsLatPresetFromPreferences.endsWith("S")) &&
+       aprsLonPresetFromPreferences.length() == 12 &&
+       aprsLonPresetFromPreferences.indexOf('-') == 3 && aprsLonPresetFromPreferences.indexOf(' ') == -1 &&
+       (aprsLonPresetFromPreferences.endsWith("E") || aprsLonPresetFromPreferences.endsWith("W")) ) {
+    // if gps is off, use configured location in high precision. If gps is on, be more precise later if gps has fix;
+    // if gps never get a fix, we don't really know if we are really at that position, so don't be so exact here.
+    aprsLatLonPresetCOMP = "";
+    storeLatLonPreset(aprsLatPresetFromPreferences, aprsLonPresetFromPreferences, (!fixed_beacon_enabled && gps_state) ? 0 : latlon_precision);
+  }
+
+  // if storeLatLonPreset() was successful, our aprsLatPreset and aprsLonPreset variables are now in standard aprs notation,
+  // 8 bytes in lat, 9 bytes in lon. Format 1234.56N 01234.56E. If not, mark it as null coordinate, as defined in aprs spec.
+
   // assure valid transmissions, even on wrong configurations
-  if (aprsLatPreset.length() != 8 || !(aprsLatPreset.endsWith("N") || aprsLatPreset.endsWith("S")) || aprsLatPreset.c_str()[4] != '.') {
-    aprsLatPreset = String("0000.00N");
-    aprsLatPreset_heigher_precision = aprsLatPreset;
+  if (aprsLatPreset.length() != 8 || !(aprsLatPreset.endsWith("N") || aprsLatPreset.endsWith("S")) || aprsLatPreset.c_str()[4] != '.' ||
+      aprsLonPreset.length() != 9 || !(aprsLonPreset.endsWith("E") || aprsLonPreset.endsWith("W")) || aprsLonPreset.c_str()[5] != '.' ||
+      aprsLatPresetDAO.length() != 8 || !(aprsLatPresetDAO.endsWith("N") || aprsLatPresetDAO.endsWith("S")) || aprsLatPresetDAO.c_str()[4] != '.' ||
+      aprsLonPresetDAO.length() != 9 || !(aprsLonPresetDAO.endsWith("E") || aprsLonPresetDAO.endsWith("W")) || aprsLonPresetDAO.c_str()[5] != '.') {
+    storeLatLonPreset("0000.00N", "00000.00W", 0);
   }
-  if (aprsLonPreset.length() != 9 || !(aprsLonPreset.endsWith("E") || aprsLonPreset.endsWith("W")) || aprsLonPreset.c_str()[5] != '.') {
-    aprsLonPreset = String("00000.00E");
-    aprsLonPreset_heigher_precision = aprsLonPreset;
-  }
+
   if (aprsSymbolTable.length() != 1)
     aprsSymbolTable = String("/");
   if (aprsSymbol.length() != 1)
@@ -1903,7 +2533,8 @@ void load_preferences_cfg_file()
   s = jsonElementFromPreferenceCFGString(PREF_NTP_SERVER,0);
   preferences.putString(PREF_NTP_SERVER, s);
   #if defined(ENABLE_SYSLOG)
-    syslog_log(LOG_DEBUG, String("FlashWrite preferences: load_preferences_cfg()"));
+    if (debug_verbose)
+      syslog_log(LOG_DEBUG, String("FlashWrite preferences: load_preferences_cfg()"));
   #endif
 
 #endif // ENABLE_WIFI
@@ -1942,8 +2573,9 @@ void load_preferences_cfg_file()
   tel_mic = jsonElementFromPreferenceCFGInt(PREF_TNC_SELF_TELEMETRY_MIC,PREF_TNC_SELF_TELEMETRY_MIC_INIT);
   tel_path = jsonElementFromPreferenceCFGString(PREF_TNC_SELF_TELEMETRY_PATH,PREF_TNC_SELF_TELEMETRY_PATH_INIT);
   tel_allow_tx_on_rf = jsonElementFromPreferenceCFGInt(PREF_TNC_SELF_TELEMETRY_ALLOW_RF,PREF_TNC_SELF_TELEMETRY_ALLOW_RF_INIT);
-  aprsLatPreset = jsonElementFromPreferenceCFGString(PREF_APRS_LATITUDE_PRESET,PREF_APRS_LATITUDE_PRESET_INIT);
-  aprsLonPreset = jsonElementFromPreferenceCFGString(PREF_APRS_LONGITUDE_PRESET,PREF_APRS_LONGITUDE_PRESET_INIT);
+  aprsLatPresetFromPreferences = jsonElementFromPreferenceCFGString(PREF_APRS_LATITUDE_PRESET,PREF_APRS_LATITUDE_PRESET_INIT);
+  aprsLonPresetFromPreferences = jsonElementFromPreferenceCFGString(PREF_APRS_LONGITUDE_PRESET,PREF_APRS_LONGITUDE_PRESET_INIT);
+  position_ambiguity = jsonElementFromPreferenceCFGInt(PREF_APRS_POSITION_AMBIGUITY,PREF_APRS_POSITION_AMBIGUITY_INIT);
   jsonElementFromPreferenceCFGString(PREF_APRS_SENDER_BLACKLIST,PREF_APRS_SENDER_BLACKLIST_INIT);
   fixed_beacon_enabled = jsonElementFromPreferenceCFGBool(PREF_APRS_FIXED_BEACON_PRESET,PREF_APRS_FIXED_BEACON_PRESET);
   fix_beacon_interval = jsonElementFromPreferenceCFGInt(PREF_APRS_FIXED_BEACON_INTERVAL_PRESET,PREF_APRS_FIXED_BEACON_INTERVAL_PRESET_INIT) * 1000;
@@ -1980,6 +2612,9 @@ void load_preferences_cfg_file()
    enabled_oled  = jsonElementFromPreferenceCFGBool(PREF_DEV_OL_EN,PREF_DEV_OL_EN_INIT);
    adjust_cpuFreq_to = jsonElementFromPreferenceCFGInt(PREF_DEV_CPU_FREQ,PREF_DEV_CPU_FREQ_INIT);
    units = jsonElementFromPreferenceCFGInt(PREF_DEV_UNITS,PREF_DEV_UNITS_INIT);
+   oled_line3and4_format = jsonElementFromPreferenceCFGInt(PREF_DEV_OLED_L3_L4_FORMAT,PREF_DEV_OLED_L3_L4_FORMAT_INIT);
+   oled_show_locator = jsonElementFromPreferenceCFGInt(PREF_DEV_OLED_LOCATOR,PREF_DEV_OLED_LOCATOR_INIT);
+   oled_loc_amb = jsonElementFromPreferenceCFGInt(PREF_DEV_OLED_LOCATOR_AMBIGUITY,PREF_DEV_OLED_LOCATOR_AMBIGUITY_INIT);
 
 // APRSIS settings
 #ifdef ENABLE_WIFI
@@ -2253,15 +2888,21 @@ void load_preferences_from_flash()
       preferences.putBool(PREF_APRS_LATITUDE_PRESET_INIT, true);
       preferences.putString(PREF_APRS_LATITUDE_PRESET, aprsLatPreset.isEmpty() ? LATITUDE_PRESET : aprsLatPreset);
     }
-    aprsLatPreset = preferences.getString(PREF_APRS_LATITUDE_PRESET, "");
+    aprsLatPresetFromPreferences = preferences.getString(PREF_APRS_LATITUDE_PRESET, "");
     //LatShownP = aprsLonPreset;
 
     if (!preferences.getBool(PREF_APRS_LONGITUDE_PRESET_INIT)){
       preferences.putBool(PREF_APRS_LONGITUDE_PRESET_INIT, true);
       preferences.putString(PREF_APRS_LONGITUDE_PRESET, aprsLonPreset.isEmpty() ? LONGITUDE_PRESET : aprsLonPreset);
     }
-    aprsLonPreset = preferences.getString(PREF_APRS_LONGITUDE_PRESET, "");
+    aprsLonPresetFromPreferences = preferences.getString(PREF_APRS_LONGITUDE_PRESET, "");
     //LongShownP = aprsLonPreset;
+
+    if (!preferences.getBool(PREF_APRS_POSITION_AMBIGUITY_INIT)){
+      preferences.putBool(PREF_APRS_POSITION_AMBIGUITY_INIT, true);
+      preferences.putInt(PREF_APRS_POSITION_AMBIGUITY, position_ambiguity);
+    }
+    position_ambiguity = preferences.getInt(PREF_APRS_POSITION_AMBIGUITY);
 
     if (!preferences.getBool(PREF_APRS_SENDER_BLACKLIST_INIT)){
       preferences.putBool(PREF_APRS_SENDER_BLACKLIST_INIT, true);
@@ -2427,6 +3068,23 @@ void load_preferences_from_flash()
     }
     units = preferences.getInt(PREF_DEV_UNITS);
 
+    if (!preferences.getBool(PREF_DEV_OLED_L3_L4_FORMAT_INIT)){
+      preferences.putBool(PREF_DEV_OLED_L3_L4_FORMAT_INIT, true);
+      preferences.putInt(PREF_DEV_OLED_L3_L4_FORMAT, oled_line3and4_format);
+    }
+    oled_line3and4_format = preferences.getInt(PREF_DEV_OLED_L3_L4_FORMAT);
+
+    if (!preferences.getBool(PREF_DEV_OLED_LOCATOR_INIT)){
+      preferences.putBool(PREF_DEV_OLED_LOCATOR_INIT, true);
+      preferences.putInt(PREF_DEV_OLED_LOCATOR, oled_show_locator);
+    }
+    oled_show_locator = preferences.getInt(PREF_DEV_OLED_LOCATOR);
+
+    if (!preferences.getBool(PREF_DEV_OLED_LOCATOR_AMBIGUITY_INIT)){
+      preferences.putBool(PREF_DEV_OLED_LOCATOR_AMBIGUITY_INIT, true);
+      preferences.putInt(PREF_DEV_OLED_LOCATOR_AMBIGUITY, oled_loc_amb);
+    }
+    oled_loc_amb = preferences.getInt(PREF_DEV_OLED_LOCATOR_AMBIGUITY);
 
 // APRSIS settings
 #ifdef ENABLE_WIFI
@@ -2481,12 +3139,11 @@ void load_preferences_from_flash()
 
 void setup_phase2_soft_reconfiguration(boolean runtime_reconfiguration) {
 
-
   if (runtime_reconfiguration) {
     digitalWrite(TXLED, LOW);
-    Serial.printf("Init after reloading preferences for Callsign:%s\r\n", Tcall.c_str());
+    Serial.printf("Init after reloading preferences for Callsign: %s\r\n", Tcall.c_str());
     set_callsign();
-    Serial.printf("APRS Callsign:%s\r\n", Tcall.c_str());
+    Serial.printf("APRS Callsign: %s\r\n", Tcall.c_str());
   }
 
   #ifdef T_BEAM_V1_0
@@ -2540,7 +3197,7 @@ void setup_phase2_soft_reconfiguration(boolean runtime_reconfiguration) {
   units_speed = units & 15;
   units_dist = (units &= ~15);
   gps_speed = 0;
-  fillDisplayLines3to5();
+  fillDisplayLines3to5(1);
 
   // We need this assurance for fallback to fixed interval, if gps position is lost.
   // fixed beacon rate heigher than sb_max_interval does not make sense
@@ -2550,6 +3207,7 @@ void setup_phase2_soft_reconfiguration(boolean runtime_reconfiguration) {
 
   if (runtime_reconfiguration) {
     setup_oled_timer_values();
+    writedisplaytext(OledHdr,OledLine1,OledLine2,OledLine3,OledLine4,OledLine5);
   } // else: in setup() during boot, we have several unpredictable delays. That's why it's not called here
 
 
@@ -2639,7 +3297,8 @@ void setup()
             preferences.putString(PREF_WIFI_PASSWORD, wifi_ModeSTA_PASS);
             preferences.putString(PREF_AP_PASSWORD, wifi_ModeAP_PASS);
             #if defined(ENABLE_SYSLOG)
-              syslog_log(LOG_DEBUG, String("FlashWrite preferences: setup()"));
+              if (debug_verbose)
+                syslog_log(LOG_DEBUG, String("FlashWrite preferences: setup()"));
             #endif
             Serial.println("WiFi: Updated remote SSID: " + wifi_ModeSTA_SSID);
             Serial.println("WiFi: Updated remote PW: ***");
@@ -2780,8 +3439,8 @@ void setup()
   // TTGO: webserver cunsumes abt 80mA. User may not start the webserver
   // if bt-client is connected. We'll also wait here for clients.
   // If enable_webserver on LORA32_21 is set to 2 (or aprsis connection is
-  // configured, user likes the webserver always to be started
-  // -> do not start bluetooth.
+  // configured in webserver mode 1), user likes the webserver always
+  // to be started -> do not start bluetooth.
 #if defined(ENABLE_WIFI)
 #if defined(LORA32_21)
   if (enable_bluetooth && enable_webserver < 2 && !aprsis_enabled) {
@@ -2826,7 +3485,7 @@ void setup()
 #ifdef ENABLE_WIFI
   if (enable_webserver) {
 #if defined(KISS_PROTOCOL) && defined(ENABLE_BLUETOOTH)
-    // if enabble_webserver == 2 or (enable_webserver == 1 && (no serial-bt-client is connected OR aprs-is-connecion configuried)
+    // if enable_webserver == 2 or (enable_webserver == 1 && (no serial-bt-client is connected OR aprs-is-connecion configured)
     if (enable_webserver > 1 || aprsis_enabled || !enable_bluetooth || !SerialBT.hasClient()) {
 #else
     {
@@ -3268,8 +3927,11 @@ void handle_lora_frame_for_lora_digipeating(const char *received_frame, const ch
     // and have the original packet in our digipeating queue? -> clear queue.
     // If we are a WIDE2 digi, it may be desired that we digipeat him.
     // We'll throw that frame away if further down the new frame is worth digipeating. We don't build up Digipeating-TX-queues
-    if (p && strncmp(lora_TXBUFF_for_digipeating, received_frame, p-received_frame) && r && r > q && r < header_end && *(header_end+1))
-      *lora_TXBUFF_for_digipeating = 0;
+    if (p && !strncmp(lora_TXBUFF_for_digipeating, received_frame, p-received_frame) && r && r > q && r < header_end && *(header_end+1)) {
+      char *he_prev = strchr(lora_TXBUFF_for_digipeating, ':');
+      if (he_prev && !strcmp(header_end, he_prev))
+        *lora_TXBUFF_for_digipeating = 0;
+    }
   }
 
   int i = 0;
@@ -3508,19 +4170,23 @@ String create_long_aprs(const char *delimiter, RawDegrees lng, int precision) {
 
 
 void update_speed_from_gps() {
-  switch (units_speed) {
-  case UNITS_SPEED_MS:
-    gps_speed = gps.speed.mps();
-    break;
-  case UNITS_SPEED_MPH:
-    gps_speed = gps.speed.mph();
-    break;
-  case UNITS_SPEED_KN:
-    gps_speed = gps.speed.knots();
-    break;
-  case UNITS_SPEED_KMH: // fall through
-  default:
-    gps_speed = gps.speed.kmph();
+  if (gps_state) {
+    switch (units_speed) {
+    case UNITS_SPEED_MS:
+      gps_speed = gps.speed.mps();
+      break;
+    case UNITS_SPEED_MPH:
+      gps_speed = gps.speed.mph();
+      break;
+    case UNITS_SPEED_KN:
+      gps_speed = gps.speed.knots();
+      break;
+    case UNITS_SPEED_KMH: // fall through
+    default:
+      gps_speed = gps.speed.kmph();
+    }
+  } else {
+    gps_speed = 0;
   }
 }
 
@@ -3617,10 +4283,11 @@ void handle_usb_serial_input(void) {
     if (local_echo)
       Serial.print(c);
   } else if (c == '\n') {
+#ifdef notdef // no, ignore
     if (local_echo)
       Serial.print(c);
+#endif
   } else if (c == '\r') {
-
     if (local_echo)
       Serial.print("\r\n");
 
@@ -3644,6 +4311,18 @@ void handle_usb_serial_input(void) {
         } else if (arg == "off") {
           arg_bool = false;
         } else {
+          // This one is for us developers ;)
+          if (cmd == "debug") {
+            if (arg != "") {
+              debug_verbose = arg.toInt();
+              Serial.printf("Debug Level now:%d (Arg: %s)\r\n", debug_verbose, arg.c_str());
+            } else {
+              Serial.printf("Debug Level:%d\r\n", debug_verbose);
+            }
+            Serial.print("cmd:");
+            inputBuf = "";
+            return;
+          }  
           //  some commands need an non-binary agument
           #ifdef ENABLE_PREFERENCES
             if (cmd == "save_preferences_cfg") {
@@ -3744,10 +4423,10 @@ void handle_usb_serial_input(void) {
             Serial.println("*** display: I know the following commands:");
 #ifdef	ENABLE_WIFI
             Serial.println("  aprsis <on|off>");
-            Serial.println("  beacon      (tx a beacon)");
+            Serial.println("  beacon               (tx a beacon)");
 #endif
-            Serial.println("  display     (help)");
-            Serial.println("  converse    (leave with ^C)");
+            Serial.println("  display              (help)");
+            Serial.println("  converse             (leave with ^C)");
             Serial.println("  echo <on|off>");
             Serial.println("  kiss on");
             Serial.println("  logging <on|off>");
@@ -3767,7 +4446,7 @@ void handle_usb_serial_input(void) {
 #ifdef	ENABLE_WIFI
             Serial.println("  wifi <on|off>");
 #endif
-            Serial.println("  ?           (help)");
+            Serial.println("  ?                    (help)");
           } else if (cmd == "reboot") {
             Serial.println("*** reboot: rebooting!");
             #if defined(ENABLE_SYSLOG) && defined(ENABLE_WIFI)
@@ -3824,7 +4503,8 @@ void handle_usb_serial_input(void) {
               #ifdef ENABLE_PREFERENCES
                 preferences.putInt(PREF_DEV_USBSERIAL_DATA_TYPE, usb_serial_data_type);
                 #if defined(ENABLE_SYSLOG)
-                  syslog_log(LOG_DEBUG, String("FlashWrite preferences: handle_usb_serial_input() 1"));
+                  if (debug_verbose)
+                    syslog_log(LOG_DEBUG, String("FlashWrite preferences: handle_usb_serial_input() 1"));
                 #endif
               #endif
             }
@@ -3843,7 +4523,8 @@ void handle_usb_serial_input(void) {
               #ifdef ENABLE_PREFERENCES
                 preferences.putInt(PREF_DEV_USBSERIAL_DATA_TYPE, usb_serial_data_type);
                 #if defined(ENABLE_SYSLOG)
-                  syslog_log(LOG_DEBUG, String("FlashWrite preferences: handle_usb_serial_input() 2"));
+                  if (debug_verbose)
+                    syslog_log(LOG_DEBUG, String("FlashWrite preferences: handle_usb_serial_input() 2"));
                 #endif
              #endif
            }
@@ -3854,7 +4535,8 @@ void handle_usb_serial_input(void) {
               aprsis_enabled = arg_bool;
               preferences.putBool(PREF_APRSIS_EN, arg_bool);
               #if defined(ENABLE_SYSLOG)
-                syslog_log(LOG_DEBUG, String("FlashWrite preferences: handle_usb_serial_input() 3"));
+                if (debug_verbose)
+                  syslog_log(LOG_DEBUG, String("FlashWrite preferences: handle_usb_serial_input() 3"));
               #endif
             }
             Serial.println("*** " + cmd + " is " + (aprsis_enabled ? "on" : "off"));
@@ -3863,7 +4545,8 @@ void handle_usb_serial_input(void) {
               #ifdef ENABLE_PREFERENCES
                 preferences.putInt(PREF_WIFI_ENABLE, (arg_bool) ? 0 : 1);
                 #if defined(ENABLE_SYSLOG)
-                  syslog_log(LOG_DEBUG, String("FlashWrite preferences: handle_usb_serial_input() 4"));
+                  if (debug_verbose)
+                    syslog_log(LOG_DEBUG, String("FlashWrite preferences: handle_usb_serial_input() 4"));
                 #endif
               #endif
               if (arg_bool) {
@@ -3993,6 +4676,7 @@ void loop()
   if(digitalRead(BUTTON)==LOW && key_up == true){
     key_up = false;
     delay(50);
+    Serial.println("Tracker: Button pressed...");
     if(digitalRead(BUTTON)==LOW){
       delay(300);
       time_delay = millis() + 1500;
@@ -4000,17 +4684,17 @@ void loop()
         if (!display_is_on && enabled_oled) {
           enableOled(); // turn ON OLED temporary
         } else {
-          fillDisplayLines3to5();
+          fillDisplayLines3to5(0);
           if (gps_state && gps_isValid) {
 #ifdef ENABLE_WIFI
-            writedisplaytext("((MAN TX))","SSID: " + oled_wifi_SSID_curr,"IP: " + oled_wifi_IP_curr, OledLine3, OledLine4, OledLine5);
+            writedisplaytext("((MAN TX))","SSID: " + oled_wifi_SSID_curr, "IP: " + oled_wifi_IP_curr, OledLine3, OledLine4, OledLine5);
 #else
             writedisplaytext("((MAN TX))","","",OledLine3, OledLine4, OledLine5);
 #endif
             sendpacket(SP_POS_GPS);
           } else {
 #ifdef ENABLE_WIFI
-            writedisplaytext("((FIX TX))","SSID: " + oled_wifi_SSID_curr,"IP: " + oled_wifi_IP_curr, OledLine3, OledLine4, OledLine5);
+            writedisplaytext("((FIX TX))","SSID: " + oled_wifi_SSID_curr, "IP: " + oled_wifi_IP_curr, OledLine3, OledLine4, OledLine5);
 #else
             writedisplaytext("((FIX TX))","","",OledLine3, OledLine4, OledLine5);
 #endif
@@ -4024,7 +4708,7 @@ void loop()
     }
   }
 
-  if (gps.time.isValid() && gps.time.age() < 500) {
+  if (gps_state && gps.time.isValid() && gps.time.age() < 500) {
     if (gps.time.isUpdated()) {
       static int8_t t_hour_adjust_next = -1;
       // Time to adjust time?
@@ -4053,7 +4737,7 @@ void loop()
   // aprsLatPreset = ggmm.dd[N|S]
   boolean gps_isValid_oldState = gps_isValid;
   gps_isValid = false;
-  if (gps_state && gps.hdop.hdop() < 8) {
+  if (gps_state && gps.hdop.hdop() < 8.0) {
     if (gps.speed.isValid() && gps.speed.age() < 10000) {
       if (gps.speed.isUpdated()) {
         update_speed_from_gps();
@@ -4061,7 +4745,7 @@ void loop()
     } // else: assume we still move with last speed
   }
 
-  if (gps.location.isValid() && gps.location.age() < 10000) {
+  if (gps_state && gps.location.isValid() && gps.location.age() < 10000) {
     gps_isValid = true;
 
     if (gps.location.isUpdated()) {
@@ -4075,20 +4759,23 @@ void loop()
       // aprs resolution is 1sm/100 = 1852m/100 = 18.52m
       // Updating this every 200ms is enough for getting this resolution at speed of 18.52*3.6*5 = 333.36km/h.
       // aprsLatPreset and aprsLonPreset are used for displaying. The transmission uses the true value.
-      if (millis() >  ratelimit_until) {
+      if (millis() > ratelimit_until) {
         // always encode aprsLatPreset in notation ddmm.nn (N/S) and aprsLonPreset in notation dddmm.nn (E/W)
-        aprsLatPreset = create_lat_aprs("", gps.location.rawLat(), 2);
-        aprsLonPreset = create_long_aprs("", gps.location.rawLng(), 2);
-        // heigher precision 1/1000 arc-minute, if not > 36 knots (valid gps measurered speed). Idea behind:
-        // 18.52 m/s are 36kn. We need abt 1s time for understanding the whole displayed line -> resolution of > 2 decimal points is not needed
-        // If we consider gps age of < 2s, we use 18kt as limit
-        //boolean may_use_heigh_precision = (gps.speed.knots() < 18 && gps.speed.isValid() && gps.speed.age() < 2000);
-        boolean may_use_heigh_precision = false; // ..until we have a better concept for displaying position in OLED.
-        // No, unforunately, the display is too small for additional degrees-"-"-delimiter
-        //aprsLatPreset_heigher_precision = create_lat_aprs((units & UNITS_SPEED_KN) ? "-" : "", gps.location.rawLat(), may_use_heigh_precision ? 3 : 2);
-        //aprsLonPreset_heigher_precision = create_long_aprs((units & UNITS_SPEED_KN) ? "-" : "", gps.location.rawLng(), may_use_heigh_precision ? 3 : 2);
-        aprsLatPreset_heigher_precision = create_lat_aprs("", gps.location.rawLat(), may_use_heigh_precision ? 3 : 2);
-        aprsLonPreset_heigher_precision = create_long_aprs("", gps.location.rawLng(), may_use_heigh_precision ? 3 : 2);
+        //aprsLatPreset = create_lat_aprs("", gps.location.rawLat(), 2);
+        //aprsLonPreset = create_long_aprs("", gps.location.rawLng(), 2);
+        if (latlon_precision > 0 && gps.hdop.hdop() < 1.0 && gps.speed.isValid() && gps.speed.age() < 2000 && gps.speed.knots() < 18) {
+          // DAO: heigher precision 1/1000 arc-minute, if not > 36 knots (valid gps measurered speed). Idea behind:
+          // 18.52 m/s are 36kn. We need abt 1s time for understanding the whole displayed line -> resolution of > 2 decimal points is not needed
+          // If we consider gps age of < 2s, we use 18kt as limit
+          storeLatLonPreset(create_lat_aprs("-", gps.location.rawLat(), (latlon_precision == 2 ? 4 : 3)),
+                            create_long_aprs("-", gps.location.rawLng(), (latlon_precision == 2 ? 4 : 3)),
+                            latlon_precision);
+        } else {
+          storeLatLonPreset(create_lat_aprs("-", gps.location.rawLat(), 2), create_long_aprs("-", gps.location.rawLng(), 2), 0);
+        }
+        // aprs compressed position has always a high precision (29.17 cm in latitude, 58.34 cm (or less) in longitude)
+        store_compressed_position(gps.location.lat(), gps.location.lng());
+
         aprsPresetShown = "";
         ratelimit_until = millis() + 200;
       }
@@ -4121,13 +4808,15 @@ void loop()
     if (!gps_isValid) {
       // update to the old values
       update_speed_from_gps();
-      aprsLatPreset = create_lat_aprs("", gps.location.rawLat(), 2);
-      aprsLonPreset = create_long_aprs("", gps.location.rawLng(), 2);
-      // No, unforunately, the display is too small, even for gg-mm.ddN ggg-mm.ddE
-      //aprsLatPreset_heigher_precision = create_lat_aprs((units & UNITS_SPEED_KN) ? "-" : "", gps.location.rawLat(), 2);
-      //aprsLonPreset_heigher_precision = create_long_aprs((units & UNITS_SPEED_KN) ? "-" : "", gps.location.rawLng(), 2);
-      aprsLatPreset_heigher_precision = aprsLatPreset;
-      aprsLonPreset_heigher_precision = aprsLonPreset;
+      if (gps_state && gps.speed.age() < 2000 && gps.speed.knots() > 4) {
+        // if we stand still, we can keep high precision DAO. Only heigher precision's lat/lon values are comparable (due to rounding at next decimal)
+        // Background: if we look at the _minutes_, i.e. 42.237N, it's rounded for aprs position to 42.24N.
+        // DAO !W! or !w! needs the cut-off-string 42.23N for !W7x!.
+        if (aprsLatPresetDAO != create_lat_aprs("", gps.location.rawLat(), (latlon_precision == 2 ? 4 : 3)) || aprsLonPresetDAO != create_long_aprs("", gps.location.rawLng(), latlon_precision == 2 ? 4 : 3)) {
+          storeLatLonPreset(create_lat_aprs("-", gps.location.rawLat(), 2), create_long_aprs("-", gps.location.rawLng(), 2), 0);
+          store_compressed_position(gps.location.lat(), gps.location.lng());
+        }
+      }
       aprsPresetShown = "p";
     } else {
       aprsPresetShown = "";
@@ -4162,7 +4851,7 @@ void loop()
   if (manBeacon) {
     // Manually sending beacon from html page
     enableOled();
-    fillDisplayLines3to5();
+    fillDisplayLines3to5(0);
 #ifdef	ENABLE_WIFI
     writedisplaytext("((WEB TX))","SSID: " + oled_wifi_SSID_curr,"IP: " + oled_wifi_IP_curr, OledLine3, OledLine4, OledLine5);
 #else
@@ -4266,7 +4955,7 @@ void loop()
            (t_last_smart_beacon_sent && (!gps_state || !gps_isValid)) ) ) {
       enableOled(); // enable OLED
       next_fixed_beacon = millis() + fix_beacon_interval;
-      fillDisplayLines3to5();
+      fillDisplayLines3to5(0);
       writedisplaytext("((AUT TX))", "", "fixed", OledLine3, OledLine4, OledLine5);
       sendpacket(SP_POS_FIXED);
   }
@@ -4447,6 +5136,7 @@ out:
     byte  lora_RXBUFF[BG_RF95_MAX_MESSAGE_LEN];      //buffer for packet to send
     uint8_t loraReceivedLength = sizeof(lora_RXBUFF); // (implicit ) reset max length before receiving!
     boolean lora_rx_data_available = rf95.recvAPRS(lora_RXBUFF, &loraReceivedLength);
+
     // release lock here. We read the data from the lora chip. And we may call later loraSend (which should not be blocked by ourself)
 #ifdef IF_SEMAS_WOULD_WORK
     xSemaphoreGive(sema_lora_chip);
@@ -4472,7 +5162,7 @@ out:
         String loraReceivedFrameString_for_weblist;   //data on buff is copied to this string. Bad characters like \n and \0 are replaced by ' ' (also valid \r - aprs does not use two line messages ;); \r, \n or \0 at the end of the string are removed.
         char *s = 0;
 
-        for (int i=0 ; i < loraReceivedLength ; i++) {
+        for (int i=0; i < loraReceivedLength; i++) {
           loraReceivedFrameString += (char) lora_RXBUFF[i];
           #if defined(ENABLE_WIFI)   // || defined(ENABLE_SYSLOG)
             if (lora_RXBUFF[i] >= 0x20) {
@@ -4499,8 +5189,9 @@ out:
 
         const char *received_frame = loraReceivedFrameString.c_str();
 
+        char *header_end = strchr(received_frame, ':');
         // valid packet?
-        if (!packet_is_valid(received_frame)) {
+        if (!header_end || !packet_is_valid(received_frame)) {
           goto invalid_packet;
         }
 
@@ -4513,7 +5204,6 @@ out:
         //int rssi = rf95.lastSNR();
         //Serial.println(rssi);
 
-        char *header_end = strchr(received_frame, ':');
         char *digipeatedflag = strchr(received_frame, '*');
         if (digipeatedflag && digipeatedflag > header_end)
           digipeatedflag = 0;
@@ -4548,20 +5238,37 @@ out:
         if (((q = strstr(received_frame, ",QQ,")) || (q = strstr(received_frame, ",QQ:"))) && q < header_end)
           user_demands_trace = 2;
 
+
+        boolean do_not_gate = false;  // not to aprs-is and not cross-digipeat
+        boolean do_not_repeat_to_secondary_freq = false;
+        boolean do_not_repeat_on_main_freq = false;
+
+        if (our_packet ||
+            (header_end && header_end[1] == '}') ||
+            ((q = strstr(received_frame, ",TCPIP")) && q < header_end) ||
+            ((q = strstr(received_frame, ",TCPXX")) && q < header_end)) {
+          // 3rd party traffic. Do not send to aprsis. For main and secondary frequency, it's a filter for avoiding unnecessary traffic
+          do_not_repeat_on_main_freq = true;
+          do_not_repeat_to_secondary_freq = true;
+          do_not_gate = true;
+        } else if (header_end && header_end[1] == 'T') {
+          // this is actually a filter to prevent telemetry flood on main frequency. You can disable this and recompile, if you really need this
+          do_not_repeat_on_main_freq = true;
+        } else if ((q = strstr(received_frame, ",RFONLY")) && q < header_end) {
+          do_not_gate = true;
+        } else if ((q = strstr(received_frame, ",NOGATE")) && q < header_end) {
+          do_not_gate = true;
+          do_not_repeat_to_secondary_freq = true;
+        }
+
  #if defined(ENABLE_WIFI)
-        if (aprsis_enabled && !our_packet && !blacklisted) {
-          // No word "NOGATE" or "RFONLY" in header? -> may be sent to aprs-is
-          q = strstr(received_frame, ",NOGATE");
-          if (!q || q > header_end) {
-            q = strstr(received_frame, ",RFONLY");
-            if (!q || q > header_end) {
-              s = 0;
-              if (((lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_APRSIS) || user_demands_trace > 1) ||
-                  (!digipeatedflag && ((lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_APRSIS__ONLY_IF_HEARD_DIRECT) || user_demands_trace == 1)) )
-                s = append_element_to_path(received_frame, rssi_for_path);
-                send_to_aprsis(s ? String(s) : loraReceivedFrameString);
-            }
-          }
+        if (aprsis_enabled && !do_not_gate) {
+          // No word "NOGATE" or "RFONLY" or "TCPIP" or "TCPXX" in header and not third_party-traffic=? -> may be sent to aprs-is
+          s = 0;
+          if (((lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_APRSIS) || user_demands_trace > 1) ||
+              (!digipeatedflag && ((lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_APRSIS__ONLY_IF_HEARD_DIRECT) || user_demands_trace == 1)) )
+            s = append_element_to_path(received_frame, rssi_for_path);
+          send_to_aprsis(s ? String(s) : loraReceivedFrameString);
         }
 #endif
 
@@ -4597,27 +5304,31 @@ out:
         }
 
         // Are we configured as lora digi? Are we listening on the main frequency?
-        if (lora_tx_enabled && lora_digipeating_mode > 0 && !our_packet && !blacklisted && lora_freq_rx_curr == lora_freq) {
+        if (lora_tx_enabled && lora_digipeating_mode > 0 &&
+            (!do_not_repeat_on_main_freq || !do_not_repeat_to_secondary_freq) &&
+            lora_freq_rx_curr == lora_freq) {
           uint32_t time_lora_TXBUFF_for_digipeating_was_filled_prev = time_lora_TXBUFF_for_digipeating_was_filled;
-          if (((lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_RF) || user_demands_trace > 1) ||
+          if ( ((lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_RF) || user_demands_trace > 1) ||
                 (!digipeatedflag && ((lora_add_snr_rssi_to_path & FLAG_ADD_SNR_RSSI_FOR_RF__ONLY_IF_HEARD_DIRECT) || user_demands_trace == 1)) )
             handle_lora_frame_for_lora_digipeating(received_frame, rssi_for_path);
           else
             handle_lora_frame_for_lora_digipeating(received_frame, NULL);
           // new frame in digipeating queue? cross-digi freq enabled and freq set? Send without delay.
-	  if (*lora_TXBUFF_for_digipeating && lora_cross_digipeating_mode > 0 && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq && time_lora_TXBUFF_for_digipeating_was_filled > time_lora_TXBUFF_for_digipeating_was_filled_prev) {
-            // word 'NOGATE' part of the header? Don't gate it
-            q = strstr(lora_TXBUFF_for_digipeating, ",NOGATE");
-            if (!q || q > strchr(lora_TXBUFF_for_digipeating, ':')) {
-              loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, 0, String(lora_TXBUFF_for_digipeating));  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
-              enableOled(); // enable OLED
-              writedisplaytext("  ((TX cross-digi))", "", String(lora_TXBUFF_for_digipeating), "", "", "");
-              time_to_refresh = millis() + showRXTime;
+          if (!do_not_repeat_to_secondary_freq && *lora_TXBUFF_for_digipeating &&
+            // word 'NOGATE' is not part of the header
+            lora_cross_digipeating_mode > 0 && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq &&
+            time_lora_TXBUFF_for_digipeating_was_filled > time_lora_TXBUFF_for_digipeating_was_filled_prev) {
+            loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, 0, String(lora_TXBUFF_for_digipeating));  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
+            enableOled(); // enable OLED
+            writedisplaytext("(TX-Xdigi)", "", String(lora_TXBUFF_for_digipeating), "", "", "");
+            time_to_refresh = millis() + showRXTime;
 #ifdef KISS_PROTOCOL
-              s = add_element_to_path(lora_TXBUFF_for_digipeating, "GATE");
-              sendToTNC(s ? String(s) : lora_TXBUFF_for_digipeating);
+            s = add_element_to_path(lora_TXBUFF_for_digipeating, "GATE");
+            sendToTNC(s ? String(s) : lora_TXBUFF_for_digipeating);
 #endif
-            }
+          }
+	  if (do_not_repeat_on_main_freq) {
+            *lora_TXBUFF_for_digipeating = 0;
           }
         }
     } else {
@@ -4808,7 +5519,7 @@ invalid_packet:
       //writedisplaytext(" ((TX))","","LAT: "+LatShownP,"LON: "+LongShownP,"SPD: "+String(gps.speed.kmph(),1)+"  CRS: "+String(gps.course.deg(),1),getSatAndBatInfo());
       fillDisplayLine1();
       fillDisplayLine2();
-      fillDisplayLines3to5();
+      fillDisplayLines3to5(0);
       writedisplaytext("  ((TX))","",OledLine2,OledLine3,OledLine4,OledLine5);
       sendpacket(SP_POS_GPS | (nextTX == 1 ? SP_ENFORCE_COURSE : 0));
       // for fixed beacon (if we loose gps fix, we'll send our last position in fix_beacon_interval)
@@ -4832,7 +5543,7 @@ behind_position_tx:
         OledHdr = Tcall;
         fillDisplayLine1();
         fillDisplayLine2();
-        fillDisplayLines3to5();
+        fillDisplayLines3to5(0);
         writedisplaytext(OledHdr,OledLine1,OledLine2,OledLine3,OledLine4,OledLine5);
       } else {
         displayInvalidGPS();
@@ -4886,17 +5597,30 @@ behind_position_tx:
 
 
   // Data for digipeating in queue?
-  if (lora_tx_enabled && lora_rx_enabled && lora_digipeating_mode && *lora_TXBUFF_for_digipeating) {
-    // 5s grace time (plus up to 250ms random) for digipeating. 10s if we are a fill-in digi
-    if ((time_lora_TXBUFF_for_digipeating_was_filled + 5*lora_digipeating_mode*1000L + (millis() % 250)) < millis()) {
-      if (lora_cross_digipeating_mode < 2 && (time_lora_TXBUFF_for_digipeating_was_filled + 2* 5*lora_digipeating_mode*1000L) > millis()) {
+  if (*lora_TXBUFF_for_digipeating) {
+    boolean clear_lora_TXBUFF_for_digipeating = false;
+    if (!lora_digipeating_mode || lora_cross_digipeating_mode > 1 || !lora_tx_enabled || !lora_rx_enabled) {
+      clear_lora_TXBUFF_for_digipeating = true;
+    } else {
+      // Only digipeat if not too old (20s)
+      if ((time_lora_TXBUFF_for_digipeating_was_filled + 20*1000L) < millis()) {
+        clear_lora_TXBUFF_for_digipeating = true;
+      }
+    }
+    if (!clear_lora_TXBUFF_for_digipeating) {
+      // 3s grace time (plus up to 250ms random) for digipeating. 10s if we are a fill-in-digi (WIDE1);
+      // -> If we are WIDE1 and another digipeater repeated it, we'll have deleted it from queue
+      if (time_lora_TXBUFF_for_digipeating_was_filled + (lora_digipeating_mode == 2 ? 10 : 3 )*1000L > millis()) {
         // if SF12: we degipeat in fastest mode CR4/5. -> if lora_speed < 300 tx in lora_speed_300.
         loraSend(txPower, lora_freq, (lora_speed < 300) ? 300 : lora_speed, 0, String(lora_TXBUFF_for_digipeating));  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
-        writedisplaytext("  ((TX digi))", "", String(lora_TXBUFF_for_digipeating), "", "", "");
+        writedisplaytext("((TXdigi))", "", String(lora_TXBUFF_for_digipeating), "", "", "");
 #ifdef KISS_PROTOCOL
         sendToTNC(String(lora_TXBUFF_for_digipeating));
 #endif
-      } // else: too late. skip TX
+        clear_lora_TXBUFF_for_digipeating = true;
+      } // else: keep packet for next round in loop
+    }
+    if (clear_lora_TXBUFF_for_digipeating)  {
       *lora_TXBUFF_for_digipeating = 0;
     }
   }

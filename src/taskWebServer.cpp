@@ -6,8 +6,11 @@
 #include <time.h>
 #include <ArduinoJson.h>
 #include <esp_task_wdt.h>
+#include "taskGPS.h"
 
 #ifdef ENABLE_WIFI
+
+extern int debug_verbose;
 
 /**
  * @see board_build.embed_txtfiles in platformio.ini
@@ -52,6 +55,7 @@ String dnsHostname;
 
 extern bool tncServer_enabled;
 extern bool gpsServer_enabled;
+extern bool gps_state;
 
 
 extern boolean wifi_do_fallback_to_mode_AP;
@@ -76,7 +80,10 @@ extern boolean lora_tx_enabled;
 
 extern String aprsLatPreset;
 extern String aprsLonPreset;
+extern String aprsLatPresetNiceNotation;
+extern String aprsLonPresetNiceNotation;
 extern String aprsPresetShown;
+extern int oled_line3and4_format;
 // last line of display, Sat & Batt Info
 extern String OledLine1;
 extern String OledLine2;
@@ -244,6 +251,7 @@ void handle_ScanWifi() {
 }
 
 void handle_SaveWifiCfg() {
+  String s = "";
   #if defined(ENABLE_SYSLOG)
     syslog_log(LOG_INFO, String("WebServer: handle_SaveWifiCfg()"));
   #endif
@@ -258,14 +266,20 @@ void handle_SaveWifiCfg() {
   preferences.putString(PREF_WIFI_SSID, server.arg(PREF_WIFI_SSID));
   do_serial_println("WiFi: Updated remote SSID: " + server.arg(PREF_WIFI_SSID));
 
-  if (server.arg(PREF_WIFI_PASSWORD) != "" && server.arg(PREF_AP_PASSWORD) != "*") {
-    if (server.arg(PREF_WIFI_PASSWORD).length() < 8 || server.arg(PREF_AP_PASSWORD).length() > 63){
-      server.send(403, "text/plain", "WiFi Password must be minimum 8 characters, anx max 63.");
+  s = server.arg(PREF_WIFI_PASSWORD);
+  if (s.length() == 0 && server.arg(PREF_WIFI_SSID) == "") {
+    // user has deleted both, WIFI_SSID and WIFI_PASS
+    preferences.putString(PREF_WIFI_PASSWORD, "");
+    do_serial_println("WiFi: Deconfigured your remote AP (SSID and password cleared)");
+  } else if (s != "*") {
+    if (s.length() < 8 || s.length() > 63) {
+      preferences.putString(PREF_WIFI_SSID, server.arg(PREF_WIFI_SSID));
+      server.send(403, "text/plain", "WiFi Password must be minimum 8 characters, and max 63.");
       return;
     } else {
       // Update WiFi password
-      preferences.putString(PREF_WIFI_PASSWORD, server.arg(PREF_WIFI_PASSWORD));
-      do_serial_println("WiFi: Updated remote PASS: " + server.arg(PREF_WIFI_PASSWORD));
+      preferences.putString(PREF_WIFI_PASSWORD, s);
+      do_serial_println("WiFi: Updated remote PASS: " + s);
     }
   }
   if (server.hasArg(PREF_WIFI_TXPWR_MODE_STA)) {
@@ -278,14 +292,21 @@ void handle_SaveWifiCfg() {
   }
 
   // Mode AP:
-  if (server.arg(PREF_AP_PASSWORD) != "" && server.arg(PREF_AP_PASSWORD) != "*") {
-    if (server.arg(PREF_AP_PASSWORD).length() < 8 || server.arg(PREF_AP_PASSWORD).length() > 63) {
+  s = server.arg(PREF_AP_PASSWORD);
+  if (s.length() == 0) {
+    // user has deleted both, WIFI_SSID and WIFI_PASS. Show ownly once
+    if (preferences.getString(PREF_AP_PASSWORD) != "") {
+      preferences.putString(PREF_AP_PASSWORD, "");
+      do_serial_println("WiFi: your AP password is now factory default: " + wifi_ModeAP_PASS_default);
+    }
+  } else if (s != "*") {
+    if (s.length() < 8 || s.length() > 63) {
       server.send(403, "text/plain", "AP Password must be minimum 8 characters, and max 63.");
       return;
     } else {
       // Update AP password
-      preferences.putString(PREF_AP_PASSWORD, server.arg(PREF_AP_PASSWORD));
-      do_serial_println("WiFi: Updated local AP PASS: " + server.arg(PREF_AP_PASSWORD));
+      preferences.putString(PREF_AP_PASSWORD, s);
+      do_serial_println("WiFi: Updated local AP PASS: " + s);
     }
   }
   preferences.putBool(PREF_WIFI_STA_ALLOW_FAILBACK_TO_MODE_AP_AFTER_ONCE_CONNECTED,  server.hasArg(PREF_WIFI_STA_ALLOW_FAILBACK_TO_MODE_AP_AFTER_ONCE_CONNECTED));
@@ -303,13 +324,13 @@ void handle_SaveWifiCfg() {
 
   preferences.putBool(PREF_TNCSERVER_ENABLE, server.hasArg(PREF_TNCSERVER_ENABLE));
   preferences.putBool(PREF_GPSSERVER_ENABLE, server.hasArg(PREF_GPSSERVER_ENABLE));
-  String s = "";
-  if (server.hasArg(PREF_NTP_SERVER) && server.arg(PREF_NTP_SERVER).length()) {
+  s = "";
+  if (server.hasArg(PREF_NTP_SERVER)) {
     s = server.arg(PREF_NTP_SERVER);
     s.trim();
     preferences.putString(PREF_NTP_SERVER, s);
   }
-  if (server.hasArg(PREF_SYSLOG_SERVER) && server.arg(PREF_SYSLOG_SERVER).length()) {
+  if (server.hasArg(PREF_SYSLOG_SERVER)) {
     s = server.arg(PREF_SYSLOG_SERVER);
     s.trim();
     preferences.putString(PREF_SYSLOG_SERVER, s);
@@ -417,6 +438,7 @@ void refill_preferences_as_jsonData()
   s = s + "\n  " +  jsonLineFromPreferenceString(PREF_APRS_COMMENT);
   s = s + "\n  " +  jsonLineFromPreferenceString(PREF_APRS_LATITUDE_PRESET);
   s = s + "\n  " +  jsonLineFromPreferenceString(PREF_APRS_LONGITUDE_PRESET);
+  s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_APRS_POSITION_AMBIGUITY);
   s = s + "\n  " +  jsonLineFromPreferenceString(PREF_APRS_SENDER_BLACKLIST);
   s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_APRS_FIXED_BEACON_INTERVAL_PRESET);
   s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_APRS_SB_MIN_INTERVAL_PRESET);
@@ -451,6 +473,9 @@ void refill_preferences_as_jsonData()
   s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_DEV_SHOW_OLED_TIME);
   s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_DEV_CPU_FREQ);
   s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_DEV_UNITS);
+  s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_DEV_OLED_L3_L4_FORMAT);
+  s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_DEV_OLED_LOCATOR);
+  s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_DEV_OLED_LOCATOR_AMBIGUITY);
   s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_APRSIS_EN);
   s = s + "\n  " +  jsonLineFromPreferenceString(PREF_APRSIS_SERVER_NAME);
   s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_APRSIS_SERVER_PORT);
@@ -465,12 +490,17 @@ void refill_preferences_as_jsonData()
   s = s + "\n  " +  jsonLineFromInt("FreeSketchSpace", ESP.getFreeSketchSpace());
   s = s + "\n  " +  jsonLineFromInt("PSRAMSize", ESP.getPsramSize());
   s = s + "\n  " +  jsonLineFromInt("PSRAMFree", ESP.getFreePsram());
-  s_tmp = aprsLatPreset + " " + aprsLonPreset + " [" + (aprsPresetShown == "" ? "GPS" : aprsPresetShown) + "]";
+  if (oled_line3and4_format == 0) {
+    s_tmp = aprsLatPreset + " " + aprsLonPreset + " [" + (aprsPresetShown == "" ? "GPS" : aprsPresetShown) + "]";
+  } else {
+    s_tmp = aprsLatPresetNiceNotation + " " + aprsLonPresetNiceNotation + " [" + (aprsPresetShown == "" ? "GPS" : aprsPresetShown) + "]";
+  }
   s = s + jsonLineFromString("curPos", s_tmp.c_str());
   s = s + "\n  " +  jsonLineFromInt("UptimeMinutes", millis()/1000/60);
   s = s + "\n  " +  jsonLineFromString("OledLine1", OledLine1.c_str());
   s = s + "\n  " +  jsonLineFromString("OledLine2", OledLine2.c_str());
-  s = s + "\n  " +  jsonLineFromString("OledLine3", OledLine3.c_str());
+  s_tmp = String(OledLine3); s_tmp.replace("\xF7", "°");
+  s = s + "\n  " +  jsonLineFromString("OledLine3", s_tmp.c_str());
   s_tmp = String(OledLine4); s_tmp.replace("\xF7", "°");
   s = s + "\n  " +  jsonLineFromString("OledLine4", s_tmp.c_str());
   s = s + "\n  " +  jsonLineFromString("OledLine5", OledLine5.c_str(), true);
@@ -622,7 +652,8 @@ void store_lat_long(float f_lat, float f_long) {
   sprintf(buf, "%3.3d-%07.4f%c", i_deg, f_min, f_long < 0 ? 'W' :  'E');
   preferences.putString(PREF_APRS_LONGITUDE_PRESET, String(buf));
   #if defined(ENABLE_SYSLOG)
-    syslog_log(LOG_DEBUG, String("FlashWrite preferences: store_lat_long()"));
+    if (debug_verbose)
+      syslog_log(LOG_DEBUG, String("FlashWrite preferences: store_lat_long()"));
   #endif
 
 }
@@ -722,7 +753,7 @@ void set_lat_long(String s_lat, String s_long) {
 
   float f_lat = 0.0f;
   float f_long = 0.0f;
-  int curr_long = 0;
+  int curr_deg = 0;
 
   // If notation min ' sec "" is used, then sec has to follow min
   if (s_lat.indexOf("\"") > -1 && (s_lat.indexOf("\"") == -1 || s_lat.indexOf("\"") < s_lat.indexOf("'"))) goto out;
@@ -745,10 +776,10 @@ void set_lat_long(String s_lat, String s_long) {
   }
 
   char buf[64];
-  for (curr_long = 0; curr_long < 2; curr_long++) {
+  for (curr_deg = 0; curr_deg < 2; curr_deg++) {
     float f_degree = 0.0f;
     boolean is_negative = false;
-    strncpy(buf, (curr_long == 0) ? s_lat.c_str() : s_long.c_str(), sizeof(buf)-1);
+    strncpy(buf, (curr_deg == 0) ? s_lat.c_str() : s_long.c_str(), sizeof(buf)-1);
     buf[sizeof(buf)-1] = 0;
     char *p = buf;
     char c = p[strlen(p)-1];
@@ -760,7 +791,7 @@ void set_lat_long(String s_lat, String s_long) {
         p = p+1;
         while (*p && *p == ' ') p++;
       }
-    } else if ((curr_long == 0 && (c == 'N' || c == 'S')) || (curr_long == 1 && (c == 'E' || c == 'W'))) {
+    } else if ((curr_deg == 0 && (c == 'N' || c == 'S')) || (curr_deg == 1 && (c == 'E' || c == 'W'))) {
       if (c == 'S' || c == 'W')
         is_negative = 1;
       buf[strlen(buf)-1] = 0;
@@ -807,10 +838,10 @@ void set_lat_long(String s_lat, String s_long) {
       f_degree = f_minute / 60.0;
     } else {
       // dd.nnnn, or aprs notation ddmm.nn (latt) / dddmm.nn (long)
-      if (strlen(p) == (curr_long ? 8 : 7)) {
-        q = p + (curr_long ? 3 : 2);
+      if (strlen(p) == (curr_deg ? 8 : 7)) {
+        q = p + (curr_deg ? 3 : 2);
         if (q[2] == '.') {
-          // atof of mm.nn. dd part comes later
+          // atof of mm.nn; dd part comes further down
           f_degree = atof(q) / 60.0;
           if (f_degree >= 1.0)
             goto out;
@@ -819,13 +850,18 @@ void set_lat_long(String s_lat, String s_long) {
         }
       }
     }
-    f_degree = atof(p) + f_degree;
+    f_degree = atof(p) + f_degree + 0.0000001;
+    if (curr_deg == 0) {
+      if (f_degree > 89.99999) f_degree = 89.99999;
+    } else {
+       if (f_degree > 179.99999) f_degree = 179.99999;
+    }
 
-    if (f_degree < 0 || f_degree > (curr_long == 1 ? 180 : 90))
+    if (f_degree < 0 || f_degree > (curr_deg == 1 ? 180 : 90))
       goto out;
 
     if (is_negative) f_degree *= -1;
-    if (curr_long == 0)
+    if (curr_deg == 0)
       f_lat = f_degree;
     else
       f_long = f_degree;
@@ -943,7 +979,12 @@ void handle_SaveAPRSCfg() {
   if (server.hasArg(PREF_APRS_COMMENT)){
     preferences.putString(PREF_APRS_COMMENT, server.arg(PREF_APRS_COMMENT));
   }
-  set_lat_long(server.hasArg(PREF_APRS_LATITUDE_PRESET) ? server.arg(PREF_APRS_LATITUDE_PRESET) : String(""), server.hasArg(PREF_APRS_LONGITUDE_PRESET) ? server.arg(PREF_APRS_LONGITUDE_PRESET) : String(""));
+  if (server.hasArg(PREF_APRS_LATLON_FROM_GPS) && gps_state && gps.location.isValid() && gps.location.age() < 10000) {
+    // String conversion precison: 6 decimals. 5 shoud be enough, the six's is for good rounding
+    set_lat_long(String(gps.location.lat(), 6), String(gps.location.lng(), 6));
+  } else {
+    set_lat_long(server.hasArg(PREF_APRS_LATITUDE_PRESET) ? server.arg(PREF_APRS_LATITUDE_PRESET) : String(""), server.hasArg(PREF_APRS_LONGITUDE_PRESET) ? server.arg(PREF_APRS_LONGITUDE_PRESET) : String(""));
+  }
   //if (server.hasArg(PREF_APRS_LATITUDE_PRESET)){
     ////preferences.putString(PREF_APRS_LATITUDE_PRESET, server.arg(PREF_APRS_LATITUDE_PRESET));
     //String s_lat = latORlon(server.arg(PREF_APRS_LATITUDE_PRESET), 0);
@@ -956,6 +997,9 @@ void handle_SaveAPRSCfg() {
     //if (s_lon.length() == 9)
       //preferences.putString(PREF_APRS_LONGITUDE_PRESET, s_lon);
   //}
+  if (server.hasArg(PREF_APRS_POSITION_AMBIGUITY)) {
+    preferences.putInt(PREF_APRS_POSITION_AMBIGUITY, server.arg(PREF_APRS_POSITION_AMBIGUITY).toInt());
+  }
   if (server.hasArg(PREF_APRS_SENDER_BLACKLIST)){
     String s = server.arg(PREF_APRS_SENDER_BLACKLIST);
     s.toUpperCase(); s.trim(); s.replace(" ", ","); s.replace(",,", ",");
@@ -1091,6 +1135,15 @@ void handle_saveDeviceCfg(){
   if (server.hasArg(PREF_DEV_UNITS)){
     preferences.putInt(PREF_DEV_UNITS, server.arg(PREF_DEV_UNITS).toInt());
   }
+  if (server.hasArg(PREF_DEV_OLED_L3_L4_FORMAT)){
+    preferences.putInt(PREF_DEV_OLED_L3_L4_FORMAT, server.arg(PREF_DEV_OLED_L3_L4_FORMAT).toInt());
+  }
+  if (server.hasArg(PREF_DEV_OLED_LOCATOR)){
+    preferences.putInt(PREF_DEV_OLED_LOCATOR, server.arg(PREF_DEV_OLED_LOCATOR).toInt());
+  }
+  if (server.hasArg(PREF_DEV_OLED_LOCATOR_AMBIGUITY)){
+    preferences.putInt(PREF_DEV_OLED_LOCATOR_AMBIGUITY, server.arg(PREF_DEV_OLED_LOCATOR_AMBIGUITY).toInt());
+  }
 
   // runtime reconfiguration with changed settings
   load_preferences_from_flash();
@@ -1125,15 +1178,15 @@ boolean restart_STA(String use_ssid, String use_password) {
   while (WiFi.status() != WL_CONNECTED) {
     esp_task_wdt_reset();
     if (retryWifi > 30) {
-      do_serial_println(String("WiFi: Status " + String(int(WiFi.status())) + ". Try " + retryWifi + ". Giving up."));
+      do_serial_println(String("WiFi: Status " + String((int ) WiFi.status()) + ". Try " + retryWifi + ". Giving up."));
       return false;
     }
-    do_serial_println(String("WiFi: Status " + String(int(WiFi.status())) + ". Try " + retryWifi));
+    do_serial_println(String("WiFi: Status " + String((int ) WiFi.status()) + ". Try " + retryWifi));
     retryWifi += 1;
     vTaskDelay(500/portTICK_PERIOD_MS);
   }
   // WL_CONNECTED = Status 3
-  do_serial_println(String("WiFi: Status " + String(int(WiFi.status())) + ". Try " + retryWifi + ". Connected."));
+  do_serial_println(String("WiFi: Status " + String((int ) WiFi.status()) + ". Try " + retryWifi + ". Connected."));
   esp_task_wdt_reset();
   return true;;
 }
@@ -1160,24 +1213,29 @@ void restart_AP_or_STA(void) {
     start_soft_ap = false;
     for (pos = 0; pos < apcnt; pos++) {
       do_serial_println("Wifi: Trying AP " + String(pos) + "/" + String(apcnt) + ": SSID " + APs[pos].ssid);
+      wifi_connection_status = WIFI_SEARCHING_FOR_AP;
       successfully_associated = restart_STA(String(APs[pos].ssid), String(APs[pos].pw));
       if (successfully_associated) {
         used_wifi_ModeSTA_SSID = String(APs[pos].ssid);
         used_wifi_ModeSTA_PASS = String(APs[pos].pw);
 
         static uint32_t last_write = 0L;
+	boolean changed = false;
         // store last successfull association into flash (preferences); ratelimit writing to flash
         if (!last_write || millis() > last_write + 5*60*1000L) {
           if (used_wifi_ModeSTA_PASS != preferences.getString(PREF_WIFI_PASSWORD, "")) {
             preferences.putString(PREF_WIFI_PASSWORD, used_wifi_ModeSTA_PASS);
+	    changed = true;
             last_write = millis();
           }
           if (used_wifi_ModeSTA_SSID != preferences.getString(PREF_WIFI_SSID, "")) {
             preferences.putString(PREF_WIFI_SSID, used_wifi_ModeSTA_SSID);
+	    changed = true;
             last_write = millis();
           }
           #if defined(ENABLE_SYSLOG)
-            syslog_log(LOG_DEBUG, String("FlashWrite preferences: restart_AP_or_STA()"));
+	    if (changed && debug_verbose)
+              syslog_log(LOG_DEBUG, String("FlashWrite preferences: restart_AP_or_STA()"));
           #endif
         }
         if (pos) {
@@ -1191,16 +1249,23 @@ void restart_AP_or_STA(void) {
       }
     }
 
-    if (!successfully_associated && (!mode_sta_once_successfully_connected || wifi_do_fallback_to_mode_AP)) {
-      start_soft_ap = true;
+    if (!successfully_associated) {
+      if (wifi_do_fallback_to_mode_AP || (!mode_sta_once_successfully_connected && millis() < +3*60*1000L)) {
+        start_soft_ap = true;
+      } else {
+	// if not fallback to mode ap, we are finished here. wifi_connection_status is still WIFI_SEARCHING_FOR_AP
+	return;
+      }
     }
 
   } else {
 
     // may start soft AP, if not already running as AP
-    if (WiFi.getMode() == WIFI_MODE_STA) {
-      start_soft_ap = true;
+    if (WiFi.getMode() == WIFI_MODE_AP) {
+      // nothing to do
+      return;
     }
+    start_soft_ap = true;
 
   }
 
@@ -1257,7 +1322,7 @@ void restart_AP_or_STA(void) {
       esp_wifi_set_max_tx_power(8);
     }
   } else {
-    log_msg="WiFi: Unexpected Mode: " + WiFi.getMode();
+    log_msg=String("WiFi: Unexpected Mode: ") + String(WiFi.getMode());
     #ifdef ENABLE_SYSLOG
       syslog_log(LOG_INFO, log_msg);
     #endif
@@ -1275,6 +1340,7 @@ void restart_AP_or_STA(void) {
       ntp_server = "ntp.hc.r1.ampr.org";
     else
       ntp_server = "pool.ntp.org";
+    preferences.putString(PREF_NTP_SERVER, ntp_server);
   }
   configTime(0, 0, ntp_server.c_str());
   #ifdef ENABLE_SYSLOG
@@ -1372,7 +1438,7 @@ void do_send_status_message_about_connect_to_aprsis(void) {
   else {
     outString = outString + ", Booted[B" + buildnr;
     if (millis() > 60*1000)
-      outString = outString + ",up:" + String(int(millis()/1000/60));
+      outString = outString + ",up:" + String((int ) (millis()/1000/60));
     outString = outString + "]";
   }
 
@@ -1444,8 +1510,11 @@ int connect_to_aprsis(void) {
   aprsis_status = "Login";
 
   char buffer[1024];
-  sprintf(buffer, "user %s pass %s TTGO-T-Beam-LoRa-APRS 0.1%s%s\r\n", aprsis_callsign.c_str(), aprsis_password.c_str(), aprsis_filter.isEmpty() ? "" : " filter ", aprsis_filter.isEmpty() ? "" :  aprsis_filter.c_str());
-  aprsis_client.print(String(buffer));
+  sprintf(buffer, "user %.9s pass %.5s vers TTGO-T-Beam-LoRa-APRS-MDD-SAU-EL 2023-02-19",
+    aprsis_callsign.c_str(), aprsis_password.c_str());
+  if (!aprsis_filter.isEmpty())
+    sprintf(buffer+strlen(buffer), " filter %.900s", aprsis_filter.c_str());
+  aprsis_client.print(String(buffer) + "\r\n");
 
   t_start = millis();
   while (!aprsis_client.available() && (millis()-t_start) < 25000L) { delay(100); esp_task_wdt_reset(); }
@@ -1483,39 +1552,38 @@ String generate_third_party_packet(String callsign, String packet_in) {
   char *p = strchr(s, '>');
   char *q = strchr(s, ',');
   char *r = strchr(s, ':');
-  char buf[20]; // room for max (due to spec) 'DL9SAU-15>APRSXX-NN' + \0
+  char buf[82]; // room for max (due to spec) 'DL9SAU-15>APRSXX-NN' + \0. No, we use buf also for digi path
+                // -> room for len("DL9SAU-12,") == 10, * up-to 8 digipeater, plus '*' plus \0. 10*8+1+1 = 82
+
   if (p && q && r && p > s && p-s < 10 && p < q && q < r && (q-s) < sizeof(buf)) {
     strncpy(buf, s, q-s);
     buf[(q-s)] = 0;
-    packet_out = callsign + ">" + MY_APRS_DEST_IDENTIFYER + ":}" + buf + ",TCPIP,";
+    packet_out = callsign + ">" + MY_APRS_DEST_IDENTIFYER + ":}" + buf;
                              // ^ 3rd party traffic should be addressed directly (-> not to WIDE2-1 or so)
-    buf[0] = 0;
-    if ((q = strstr(q+1, ",q")) && q < r) {
-      if ((q = strchr(q+1, ',')) && q < r) {
-        q++;
-        // search for receiving igate: i.e. path...,qAR,DB0AAA:
-        // please note, that AE5PL>APRS,WIDE1*,qAI,AE5PL-10,AE5PL-JS:payload   may also occur
-        char *t = strchr(q, ',');
-        if (!t || t > r)
-          t = r;
-        if (t-q < sizeof(buf)) {
-          strncpy(buf, q, t-q);
-          buf[t-q] = 0;
-        }
-      }
+
+    // Copy repeater ",DIGI1,DIGI2*,..". Buf size is 82 (incl. \0). Copy header (excl. ':'), without leading ''
+    // Skip leading ','
+    q++;
+    // snprintf len is incl. \0
+    snprintf(buf, r-q +1, "%.81s", q);
+    buf[81] = 0;
+    // strip q-construct
+    if (*(q = buf) == 'q' || (q = strstr(buf, ",q"))) {
+      *q = 0;
     }
-    // no qAR,CALL found?
-    if (buf[0] == 0 && p-s < 10) {
-      // add his src callsign
-      strncpy(buf, s, p-s);
-      buf[p-s] = 0;
+    // Strip TCPIP if present. We'll add it. We like to avoid packets like TCPIP,TCPIP*
+    if ((q = strstr(buf, ",TCPIP")))
+      *q = 0;
+    // cut unused digipeaters. Remove '*' from the last-repeated one.
+    if ((q = strchr(buf, '*'))) {
+      *q = 0;
+    } else {
+      // no digipeater? -> Nothing to add as third-party header
+      *buf = 0;
     }
-    // should never happen. A really bad packet
-    if (buf[0] == 0) {
-      packet_out = "";
-      return packet_out;
-    }
-    packet_out = packet_out + buf + "*" + r;
+    if (*buf)
+      packet_out = packet_out + "," + buf;
+    packet_out = packet_out + ",TCPIP," + callsign + "*" + r;
   }
   return packet_out;
 }
@@ -1638,7 +1706,10 @@ void read_from_aprsis(void) {
           }
           if (!err) {
             for (q = s.c_str(); *q && *q != ':'; q++) {
-              if (! ( (*q >= '0' && *q <= '9') || (*q >= 'A' && *q <= 'Z') || *q == 'q' || *q == '>' || *q == '-' || *q == ',' || *q == '*' ) ) {
+	      // q (for qAR) is also a valid character
+              //if (! ( (*q >= '0' && *q <= '9') || (*q >= 'A' && *q <= 'Z') || *q == 'q' || *q == '>' || *q == '-' || *q == ',' || *q == '*' ) ) {
+	      //No, unfortunately some aprs-submitters have a lowercase call
+              if (! ( isalnum(*q) || *q == '>' || *q == '-' || *q == ',' || *q == '*' ) ) {
                 err = 1;
                 log_msg = "bad character in header";
                 break;
@@ -1693,6 +1764,10 @@ void read_from_aprsis(void) {
     }
   }
 
+  // Don't gate, if packet has word TCPXX, NOGATE or RFONLY in header (TCPIP is allowed). See aprs-is iGateDetails spec
+  if ((q = strstr(s.c_str(), ",TCPIP")) || (q = strstr(s.c_str(), ",NOGATE")) || (q = strstr(s.c_str(), "RFONLY")))
+    return;
+
   // generate third party packet. Use aprs_callsign (deriving from webServerCfg->callsign), because aprsis_callsign may have a non-aprs (but only aprsis-compatible) ssid like '-L4'
   String third_party_packet = generate_third_party_packet(aprs_callsign, s);
   if (!third_party_packet.isEmpty()) {
@@ -1744,7 +1819,9 @@ void send_to_aprsis()
     // Due to http://www.aprs-is.net/IGateDetails.aspx , never gate third-party traffic contining TCPIP or TCPXX
     // IGATECALL>APRS,GATEPATH:}FROMCALL>TOCALL,TCPIP,IGATECALL*:original packet data
     char *r; char *s;
-    if (!(q[1] == '}' && (r = strchr(q+2, '>')) && ((s = strstr(r+1, ",TCPIP,")) || (s = strstr(r+1, ",TCPXX,"))) && strstr(s+6, "*:"))) {
+    if (!(((s = strstr(p+1, ",TCPIP")) || (s = strstr(p+1, ",TCPXX")) || (s = strstr(p+1, ",NOGATE")) || (s = strstr(p+1, ",RFONLY"))) && s < q) &&
+	q[1] != '?' &&
+	!(q[1] == '}' && (r = strchr(q+2, '>')) && ((s = strstr(r+1, ",TCPIP,")) || (s = strstr(r+1, ",TCPXX,"))) && strstr(s+6, "*:")) ) {
       char buf[256];
       int len = (q-data.c_str());
       if (len > 0 && len < sizeof(buf)) {
@@ -1861,10 +1938,12 @@ void send_to_aprsis()
        syslog_server=String(SYSLOG_IP);
    #endif
    // syslog server configured?
-   if (syslog_server.length())
+   if (syslog_server.length()) {
      syslog.server(syslog_server.c_str(), 514);
-   else
+   } else {
      syslog.server(NULL, 0);
+     preferences.putString(PREF_SYSLOG_SERVER, "");
+   }
    syslog.deviceHostname(webServerCfg->callsign.c_str());
    syslog.appName("TTGO");
    //syslog.defaultPriority(LOG_KERN);
@@ -1875,7 +1954,7 @@ void send_to_aprsis()
   restart_AP_or_STA();
 
   if (MDNS.begin(webServerCfg->callsign.c_str())) {
-    MDNS.setInstanceName(webServerCfg->callsign + " TTGO LoRa APRS TNC " + TXFREQ + "MHz");
+    MDNS.setInstanceName(webServerCfg->callsign + " TTGO LoRa APRS TNC " + String(TXFREQ, 4) + "MHz");
     MDNS.addService("http", "tcp", 80);
     #ifdef KISS_PROTOCOL
       MDNS.addService("kiss-tnc", "tcp", NETWORK_TNC_PORT);
@@ -1921,24 +2000,36 @@ void send_to_aprsis()
   while (true) {
     esp_task_wdt_reset();
 
-    // Mode STA and connection lost? -> reconnect. Or when dhcp renew failed?
-    if (WiFi.getMode() == WIFI_MODE_STA) {
-      if (WiFi.status() != WL_CONNECTED || WiFi.localIP() == IP_NULL || WiFi.subnetMask() == IP_SUBNET_NULL || WiFi.gatewayIP() == IP_GATEWAY_NULL) {
-        static uint32_t last_connection_attempt = millis();
-        if (aprsis_client.connected()) aprsis_client.stop();
-        if (millis() - last_connection_attempt > 20000L) {
-          esp_task_wdt_reset();
-          restart_AP_or_STA();
-          webserver_started = millis();
-          esp_task_wdt_reset();
-          last_connection_attempt = millis();
-        }
-      }
-    } else {
-      // If we are in self-AP-mode and remote APs are configured (but not had been reachable),
+    if (apcnt && millis() - webserver_started > 60*1000L &&
+         (millis() > 3*60*1000L && (!wifi_do_fallback_to_mode_AP || WiFi.getMode() != WIFI_MODE_AP || WiFi.softAPgetStationNum() < 1) ) ) {
+      // If a remote AP is configured and we are in self-AP-mode,
       // try to give up self AP mode and try to reconnect an remote AP again. But only do this,
-      // if no user is currently associated with our self-AP.
-      if (apcnt && millis() - webserver_started > 60*1000L && WiFi.softAPgetStationNum() < 1) {
+      // uptime is >3min AND if wifi_do_fallback_to_mode_AP is not allowed AND
+      //   we are either in WIFI_MODE_STA OR: in MODE_AP user is currently associated with our self-AP
+      // -> If a remoteAP is configured or uptime <3min (grace time for him to be able to reach Webinterface for change config):
+      //      If wifi-client is connected:
+      //         If wifi_do_fallback_mode is enabled, we'll keep his connection alive.
+      //         else: we'll disconnect the wifi-client and search for a remoteAP
+      //      else: search for a remoteAP
+      //    else:
+      //     selfAP will stay on and connections are not interrupted.
+      // wifi_do_fallback_to_mode_AP: false: Disable this for igates, where you don't need your tracker to be a hotspot; or if your phone (which knows your tracker's AP SSID) should not mis-interpre te the tracker as Wifi-Hotspot with Internet-Access.
+      //                              true: You like to enable, if you use your tracker portable and it should automatically be wifi client to your home network, and be AP if you are outside, and should not search for a remoteAP
+
+      // Mode STA and connection lost? -> reconnect. Or when dhcp renew failed?
+      if (WiFi.getMode() == WIFI_MODE_STA) {
+        if (WiFi.status() != WL_CONNECTED || WiFi.localIP() == IP_NULL || WiFi.subnetMask() == IP_SUBNET_NULL || WiFi.gatewayIP() == IP_GATEWAY_NULL) {
+          static uint32_t last_connection_attempt = millis();
+          if (aprsis_client.connected()) aprsis_client.stop();
+          if (millis() - last_connection_attempt > 20000L) {
+            esp_task_wdt_reset();
+            restart_AP_or_STA();
+            webserver_started = millis();
+            esp_task_wdt_reset();
+            last_connection_attempt = millis();
+          }
+        }
+      } else {
         if (aprsis_client.connected()) aprsis_client.stop();
         restart_AP_or_STA();
         webserver_started = millis();
@@ -1992,8 +2083,7 @@ void send_to_aprsis()
                 aprsis_client.stop();
                 // Known problems which usually resolve by reboot:
                 if (ret == -5 /* login denied, until reboot. Reason unknown */ ||
-		       (ret == -1 /* sometimes after boot it can't connect. DNS- or IP-stack Problem? */ &&
-                         (/* lora_rx_enabled || */ lora_digipeating_mode > 1) /* we are a digi */ )) {
+                     (ret == -1 /* sometimes after boot it can't connect. DNS- or IP-stack Problem? */ && lora_digipeating_mode > 1) /* we are a digi */ ) {
 
                   // sometimes after boot, connection does not work:
                   //   APRS-IS: connecting to 'aprs.hc.r1.ampr.org', tries 1
@@ -2025,13 +2115,15 @@ void send_to_aprsis()
                 }
               }
 
-              #if defined(ENABLE_SYSLOG)
-                syslog_log(LOG_INFO, log_msg);
-              #endif
-              do_serial_println(log_msg);
+	      if (log_msg.length()) {
+                #if defined(ENABLE_SYSLOG)
+                  syslog_log(LOG_INFO, log_msg);
+                #endif
+                do_serial_println(log_msg);
+              }
               if (!aprsis_status.startsWith("Error: "))
                 aprsis_status = "Disconnected";
-            }
+	    }
           }
 
           // session died during read / write?

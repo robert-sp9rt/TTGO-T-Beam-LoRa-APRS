@@ -82,14 +82,24 @@
                       </div>
                     <div>
                         <label for="syslog_server">Syslog Server</label>
-                        <input type="text" name="syslog_server" id="syslog_server" placeholder="" title="Syslog Server name or IP Address. Leave empty to switch off. Syslog needs do be compiled in (it's by default now)">
+                        <input type="text" name="syslog_server" id="syslog_server" placeholder="" title="Syslog Server name or IP Address. Leave empty to switch off. If unsure, you may use the broadcast address 255.255.255.255. Syslog needs do be compiled in (it's by default now)">
                       </div>
                 </div>
                 </div>
                 <div class="grid-container quarters">
                     <div>
                         <label for="wifi_failAP">Allow failback to Mode AP</label>
-                        <input name="wifi_failAP" id="wifi_failAP" type="checkbox" value="1" title="Allow failback to mode AP after once connected successfully connected (after boot) to configured remote AP. Disable for igates, where you don't need your tracker to be a hotspot. You like to enable, if you use your tracker portable and it should automatically be wifi client to your home network, and be AP if you are outside.">
+                        <input name="wifi_failAP" id="wifi_failAP" type="checkbox" value="1" title="
+If a remoteAP is configured or uptime <3min (grace time for him to be able to reach Webinterface for change config):
+  If wifi-client is connected:
+    If wifi_do_fallback_mode is enabled, we'll keep his connection alive.
+    else: we'll disconnect the wifi-client and search for a remoteAP
+  else: search for a remoteAP
+else:
+   selfAP will stay on and connections are not interrupted.
+
+Disable this for igates, where you don't need your tracker to be a hotspot; or if your phone (which knows your tracker's AP SSID) should not mis-interprete the tracker as Wifi-Hotspot with Internet-Access.
+You like to enable, if you use your tracker portable and it should automatically be wifi client to your home network, and be AP if you are outside, and should not search for a remoteAP.">
                     </div>
                     <div>
                         <label for="tncsrvr_en">Enable TNC-Server</label>
@@ -207,11 +217,11 @@
                     </div>
                     <div>
                         <label for="aprs_alt_r">Altitude ratio [%]</label>
-                        <input name="aprs_alt_r" id="aprs_alt_r" type="number" min="0" max="100" title="Altitude ratio every n'th packet.. Use 100 for every packet, 0 for no altitude, or any number in between. Recommended: 10 (altitude every tenth's frame). If you use compression ('Send Course/Speed along with Altitude switched off') for reducing airtime (-> then n% altitude-encoding packets are sent, and 100-n% course/speed-encoded packets), you may choose 50 for ballons, where speed/dir and altitude are of equal interrest; if you choose 10, then 90 % of your transmissions encode speed/direction. Cave: if you set it to 100 and switch next option 'Send Course/Speed along with Altitude' to off, then only altitude packets are sent. If you configure 0, altitude is never sent (-> only compressed speed). If ratio is < 100 and gps altitude is not refreshed, only encoded speed is sent." placeholder="10">
+                        <input name="aprs_alt_r" id="aprs_alt_r" type="number" min="0" max="100" title="Altitude ratio every n'th packet.. Use 100 for every packet, 0 for no altitude, or any number in between. Recommended: 10 (altitude every tenth's frame). If you use compression ('Send Course/Speed along with Altitude switched off') for reducing airtime (-> then n% altitude-encoding packets are sent, and 100-n% course/speed-encoded packets), you may choose 50 for ballons, where speed/dir and altitude are of equal interrest; if you choose 10, then 90 % of your transmissions encode speed/direction. Cave: if you set it to 100 and switch next option 'Always send CSE/SPD and ALT' to off, then only altitude packets are sen; if you switch the next option on, then altitude is always sent and this configured Altitude ratio is ignored. If you configure 0, altitude is never sent (-> only compressed speed). If ratio is < 100 and gps altitude is not refreshed, only encoded speed is sent." placeholder="10">
                     </div>
                     <div>
-                        <label for="aprs_CSandA">Send Course/Speed along with Altitude</label>
-                        <input name="aprs_CSandA" id="aprs_CSandA" type="checkbox" value="1" title="If set to on, course/speed and altitude are always sent both in one (larger) packet. If gps signal for course/speed is valid, cse/spd will be encoded in the compressed part and altitude is added as /A=...... in the message-part. If set off, either compressed cse/spd OR compressed altitude packets are sent, according to the 'Altitude ratio' setting.">
+                        <label for="aprs_CSandA">Always send CSE/SPD and ALT</label>
+                        <input name="aprs_CSandA" id="aprs_CSandA" type="checkbox" value="1" title="If set to on, course/speed and altitude are always sent both in one (larger) packet. If gps signal for course/speed is valid, cse/spd will be encoded in the compressed part and altitude is added as /A=...... in the message-part (this actually overwrites altitude ratio = 100 setting in most cases). If set off, either compressed cse/spd OR compressed altitude packets are sent, according to the 'Altitude ratio' setting.">
                     </div>
                     <div>
                         <label for="show_cmt">Show Comment</label>
@@ -256,7 +266,7 @@
                     </div>
                     <div>
                         <label for="tnc_tel_mic">Self Telemetry Sequence</label>
-                        <select id="tnc_tel_mic" name="tnc_tel_mic" title="self telemetry sequence type (only 'numeric' sequences and 'time based numeric sequences' are supported by aprs.fi and aprsdirect.de). Sequence overflow: Type 'time based, alphanumeric' uses digits and letters 0-9,A-Z,a-z and has a resolution of 23s in two months; 'numeric timebased' has only digits and has resolotuin of 10min in one week. Type 'Numeric' (except for numeric time based): Caution: sequence number is stored to flash; flash has a limited number of writes before it becomes defect.">
+                        <select id="tnc_tel_mic" name="tnc_tel_mic" title="self telemetry sequence type (only 'numeric' sequences and 'time based numeric sequences' are supported by aprs.fi and aprsdirect.de). Time based secuence needs a proper system time (GPS or NTP); else it fails back to 'MIC'. Sequence overflow: Type 'time based, alphanumeric' uses digits and letters 0-9,A-Z,a-z and has a resolution of 23s in two months; 'numeric timebased' has only digits and has resolotuin of 10min in one week. Type 'Numeric' (except for numeric time based): Caution: sequence number is stored to flash; flash has a limited number of writes before it becomes defect.">
                             <option value="-2">Time based, numeric encoding</option>
                             <option value="-1">Time based, alphanumeric encoding</option>
                             <option value="0">Numeric</option>
@@ -265,7 +275,7 @@
                     </div>
                     <div>
                         <label for="tnc_tel_path">Self Telemetry Relay Path</label>
-                        <input class="u-full-width" type="text" minlength="0" name="tnc_tel_path" id="tnc_tel_path" title="APRS path for self telemetry, use the shortest as possible (émpty path is recommended; for aprs-is connection, no path is necessary). Or use WIDE2-1.">
+                        <input class="u-full-width" type="text" minlength="0" name="tnc_tel_path" id="tnc_tel_path" title="APRS path for self telemetry, use the shortest as possible (empty path is recommended; for aprs-is connection, no path is necessary). Or use WIDE2-1. Path is not honored on RF transmission.">
                     </div>
                 </div>
                 <div class="grid-container full">
@@ -282,11 +292,43 @@
                     </div>
                     <div>
                         <label for="aprs_lat_p">Latitude</label>
-                        <input class="u-full-width" type="text" minlength="0" name="aprs_lat_p" id="aprs_lat_p" title="latitude for fixed beacon, APRS format for example: 5215.00N. 'dd.nnnnS', '-dd.nnnn', 'dd mm[.nnn]' and 'dd mm ss' and 'dd mm' ss&quot;' and 'dd-mm[.nn]N' are also supported. If position is south, you can prefix '-' instead of writing 'S' behind the coordinate. '-nnS' does not make sense. If you like to add a locator, add it here and leave longitude field blank. If GPS is enabled and a valid position has been received, that one will be used instead of the configured one, until the next system reboot">
+                        <input class="u-full-width" type="text" minlength="0" name="aprs_lat_p" id="aprs_lat_p" title="latitude for fixed beacon, APRS format for example: 5215.00N (this is ddmm.mmN). 'dd.nnnnN', '-dd.nnnn', 'dd mm[.nnn]' and 'dd mm ss' and 'dd mm' ss&quot;' and 'dd-mm[.nn]N' are also supported. If position is south, you can prefix '-' instead of writing 'S' behind the coordinate. '-nnS' does not make sense. If you like to add a locator, add it here and leave longitude field blank. If GPS is enabled and a valid position has been received, that one will be used instead of the configured one, until the next system reboot">
                     </div>
                     <div>
                         <label for="aprs_lon_p">Longitude</label>
-                        <input class="u-full-width" type="text" minlength="0" name="aprs_lon_p" id="aprs_lon_p" title="longtitude for fixed beacon, APRS format for example 02050.59E. 'ddd.nnnnS', '-ddd.nnnn',  'ddd mm[.nnn]' and 'ddd mm ss' and 'ddd mm' ss&quot;' and 'ddd-mm[.nn]E' are also supported. If position is west, you can prefix '-' instead of writing 'W' behind the coordinate. '-nnW' does not make sense.. If you like to add a locator, add it to the latitude field and leave this field blank.">
+                        <input class="u-full-width" type="text" minlength="0" name="aprs_lon_p" id="aprs_lon_p" title="longtitude for fixed beacon, APRS format for example 02050.59Ei (this is ddd.mmE). 'ddd.nnnnE', '-ddd.nnnn',  'ddd mm[.nnn]' and 'ddd mm ss' and 'ddd mm' ss&quot;' and 'ddd-mm[.nn]E' are also supported. If position is west, you can prefix '-' instead of writing 'W' behind the coordinate. '-nnW' does not make sense.. If you like to add a locator, add it to the latitude field and leave this field blank.">
+                    </div>
+                </div>
+                <div class="grid-container quarters">
+                    <div>
+                        <label for="aprs_llfgps">Use lat/lon of current GPS position</label>
+                        <input name="aprs_llfgps" id="aprs_llfgps" type="checkbox" value="1" title="Use lat/lon of current GPS position. Overwrites Latitude / Longitude settings above. Requires valid GPS position.">
+                    </div>
+                </div>
+                <div class="grid-container full">
+                    <h5 class="u-full-width">Position format and precision / ambiguity</h5>
+                </div>
+                <div class="grid-container quarters">
+                    <div>
+                        <label for="pos_amb">Position precision *</label>
+                        <select id="pos_amb" name="pos_amb" title="Position precision / Ambiguity
+I.   High precision: default is compressed (sends cse/speed or altitude without overhead; position is more acurate than uncompressed position, and needs only 8 bytes for lat/lon (but the price is, that the position is not human readable) and it's resolution is 29.17cm for latitude distances, and up to 58.34cm for longitude. Be aware that course has a resolution of only 4 degrees, and height resolution is non-linear (1.002^cs), and could not be negative.
+     Uncompressed (APRS default notation) is not very precise: >18.52m (APRS Notation 1234.56N/01234.56E == 12-34.56N 012-34.56E).
+  Uncompressed can be enhanced with the DAO extension in Text message part: !W..!: 1.852m or !w..!: 20.35cm to 22.39cm. DAO W is better human readable; DAO w is base91-encoded (-> precision loss for the decimals 3+4 by factor 1.10); good for manually positioning your digipeager antenna or fox hunting equipment on the map - but keep in mind that your GPS does not have this great precision anyway.
+     Uncompressed (with / without DAO): If GPS signal is lost and you was not moving and last coordinates have not changed, DAO variant will still be used if configured.
+II:  Ambiguiti 1/10' -> >185.2m), 1' -> > 1.852km, 10' -> >18.12km, 1 deg == 60'-> >111.12km. Works for both modes, compressed and uncompressed.
+III: Values above are referring to latitude; distance between two latitudes is always equal; distance between two longitudes becomes smaller towards the north / south poles of the earth (at 0 deg, even high values  align to 0.0m). At aequator, lat/lon relation is 1:1. At 60 deg N or S it's about factor 2).
+     Keep in mind: While this is is good for high precision, it's worse for ambiguity.
+     Compressed positions have a 2 times lesser precision on the longitude, which leads to factor 1:2 at aequator, and an 1:1 ratio at abt. 60 deg N or S); this is comparable how maidenhead grid locators are defined.">
+                            <option value="0">Compressed (default) == >25.17cm</option>
+                            <option value="-1">Uncompressed == >18.52m.</option>
+                            <option value="-2">Uncompressed, with DAO W == >1.852m</option>
+                            <option value="-3">Uncompressed, with DAO w == >20.35cm</option>
+                            <option value="1">Ambiguity 1/10' == 185.2m</option>
+                            <option value="2">Ambiguity 1' == >1.852km</option>
+                            <option value="3">Ambiguity 10' == >18.12km</option>
+                            <option value="4">Ambiguity 1 deg == 60' == >111.12km</option>
+                        </select>
                     </div>
                 </div>
                 <div class="grid-container full">
@@ -429,7 +471,7 @@
                 <div class="grid-container halves">
                   <div>
                     <label for="aprsis_en">Enable APRS-IS connection</label>
-                    <input name="aprsis_en" id="aprsis_en" type="checkbox" value="1" title="If we are configured as WIFI client, connet to the APRS-IS net">
+                    <input name="aprsis_en" id="aprsis_en" type="checkbox" value="1" title="If we are configured as WIFI client, connect to the APRS-IS net">
                   </div>
                   <div>
                     <label for="aprsis_srv_h">Server Name</label>
@@ -555,12 +597,78 @@
                     <option value="72">kn, m (nautic)</option>
                   </select>
                 </div>
+            </div>
+            <div class="grid-container quarters">
+                <div>
+                  <label for="oledl3l4fmt">OLED Line3 and Line4 Format</label>
+                  <select id="oledl3l4fmt" name="oledl3l4fmt" title="A: (default): Original format, L3: Lat/Lon; L4: speed, course, altitude. Lat/Lon in APRS format. Good for learning how aprs works.
+Bx: Left side: L3: course, altitude. L4: speed. Right side: see below:
+B1: Lat/Lon in classic format, good for non-technicals. Lat/Lon on right side.
+B2: Lat/Lon in nautical notation. Lat/Lon Lat/Lon on right side.
+Cx: Right side: L3: speed. L4: course, altitude. Left side: see below:
+C1: Lat/Lon in classic format, good for non-technicals. Lat/Lon on left side.
+C2: Lat/Lon in nautical notation. Lat/Lon on left side.
+
+About Lat/Lon notations: Acuracy depends on speed, gps signal quality and choosen format; B2 and C2 has room for precision up to 0.1'.
+APRS-style is 1234.56N 01234.56E.
+Beginners style is 012°34.56'.
+Nautical style is 12-34,567N 012-34.567E.
+See also the option beneath about showing maidenhead grid locator.">
+                    <option value="0">A:  Lat/Lon in APRS-notation</option>
+                    <option value="1">B1: Lat/Lon in classic notation</option>
+                    <option value="2">B2: Lat/Lon in nautical notation</option>
+                    <option value="3">C1: Lat/Lon in classic notation, left side</option>
+                    <option value="4">C1: Lat/Lon in nautical notation, left side</option>
+                  </select>
+                </div>
+		<div>
+                  <label for="oledlocator">Maidenhead Locator</label>
+                  <select id="oledlocator" name="oledlocator" title="Show Maidenhead grid locator: always (instead of Lat/Lon), never, alternating. Alternating:
+                          0: Never
+                          1: Always
+                          2: Maidenhead 10s, Lat/Lon 50s
+                          3: Maidenhead 20s, Lat/Lon 100s
+                          4: Maidenhead 20s, Lat/Lon 20s
+                          While showing maidenhead grid locator, free space is left at one side of line3 or line4 (depending on your 'Oled Line3 and Line4 Format' settings), so other values like measurement of temp/humidity/pressure or statistics, etc. may be displayed.">
+                    <option value="0">Off (only Lat/Lon)</option>
+                    <option value="1">On (never Lat/Lon)</option>
+                    <option value="2">Loc 10s, Lat/Lon 50s</option>
+                    <option value="3">Loc 20s, Lat/Lon 100s</option>
+                    <option value="4">Loc 20s, Lat/Lon 20s</option>
+                  </select>
+                </div>
+                <div>
+                  <label for="oled_loc_amb">Locator precision</label>
+                  <select id="oled_loc_amb" name="oled_loc_amb" title="Maidenhead grid locator resolution on your display.
+The longer the string is, the harder it's to read. That's why we toggle between the length of 10 and the length of 8,
+depending on your speed and your configured position precision.
+If you prefer the max. displayed length of 6, choose the first entry.
+  RR99XX (default)
+  RR99XX99
+  RR99XX99xx
+For RR99XX99xx99, we do not have enough space on the display.
+Length of 6 has a precision (for lattitude) with 2.5nm; longitude: 5nm on aequator (and abt 2nm at 60deg N or S).
+Background:
+RR99 has a range of 18*10 degrees in latitude and 18*10*2 degress in longitude and has a resolution of 1 deg (60min == 60nm == 111.12km ) in lat and 2 deg (120min in lon).
+Length of 4 (RR99) would have a resolution 25nm in lat (46.3km). It does not make sense to have this ambiguity being displayed.
+RR99XX is 180deg / 24 = 2.5min = 2.5nm (= 4.63km) in lat (and 5min = 5nm  (= 9.26km in lon at 0 deg north).
+RR99XX99 divides the values above by 10, as you might have expected: 463m in lat, 926m in lon. Good to read, good resolution if you are moving.
+RR99XX99xx has a resolution of 0.010416 nm (== 19.3m) in latitude; standard aprs resolution is 0.01nm (18.52m) -> Matches quite good - for latitude.
+			                             In longgitude, maidenhead's resolution is 0.02083 nm (385.83m at aequator).
+Hard readable lengths / too long for our display:
+  RR99XX99xx99 has half the resolution than the one above. -> 1.93m in lat. It matches quite good to the Position precision 'uncompressed with DAO (!W..!)' extension (which has a resolutuion of 1.852m in lat and lon).
+  RR99XX99xx99xx is unreadable and would give us a resolution of 0.000434' (8.043cm) in lat. So precise is no GPS, and your antenna is probably longer than that locator.">
+                    <option value="0">RR99XX (default)</option>
+                    <option value="-1">RR99XX99</option>
+                    <option value="-2">RR99XX99xx</option>
+                  </select>
+                </div>
+            </div>
+            <div class="grid-container halves">
                 <div>
                   <label for="UptimeMinutes">Uptime of Device [min]</label>
                   <input type="text" name="UptimeMinutes" id="UptimeMinutes" readonly title="uptime device in minutes">
                 </div>
-            </div>
-            <div class="grid-container halves">
                 <div>
                   <label for="curPos">Current Position</label>
                   <input type="text" name="curPos" id="curPos" readonly title="Current Position of device [P if fixed mode; p, if gps is invalid and used as temporary preset]">
