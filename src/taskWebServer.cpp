@@ -495,7 +495,7 @@ void refill_preferences_as_jsonData()
   } else {
     s_tmp = aprsLatPresetNiceNotation + " " + aprsLonPresetNiceNotation + " [" + (aprsPresetShown == "" ? "GPS" : aprsPresetShown) + "]";
   }
-  s = s + jsonLineFromString("curPos", s_tmp.c_str());
+  s = s + "\n  " +  jsonLineFromString("curPos", s_tmp.c_str());
   s = s + "\n  " +  jsonLineFromInt("UptimeMinutes", millis()/1000/60);
   s = s + "\n  " +  jsonLineFromString("OledLine1", OledLine1.c_str());
   s = s + "\n  " +  jsonLineFromString("OledLine2", OledLine2.c_str());
@@ -1467,12 +1467,14 @@ void do_send_status_message_about_connect_to_aprsis(void) {
 
   outString.replace(":>", ",RFONLY:>");
   if (lora_tx_enabled && tx_own_beacon_from_this_device_or_fromKiss__to_frequencies) {
-    esp_task_wdt_reset();
-    if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies % 2)
+    if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies % 2) {
+      esp_task_wdt_reset();
       loraSend(txPower, lora_freq, lora_speed, 0, outString);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
-    esp_task_wdt_reset();
-    if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies > 1 && lora_digipeating_mode > 1 && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq)
+    }
+    if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies > 1 && lora_digipeating_mode > 1 && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq) {
+      esp_task_wdt_reset();
       loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, 0, outString);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
+    }
   }
 
   esp_task_wdt_reset();
@@ -1503,7 +1505,7 @@ int connect_to_aprsis(void) {
   aprsis_status = "Connected. Waiting for greeting.";
 
   uint32_t t_start = millis();
-  while (!aprsis_client.available() && (millis()-t_start) < 25000L) { delay(100); esp_task_wdt_reset(); }
+  while (!aprsis_client.available() && (millis()-t_start) < 25000L) { vTaskDelay(100 / portTICK_PERIOD_MS); esp_task_wdt_reset(); }
   if (aprsis_client.available()) {
     // check
     String s = aprsis_client.readStringUntil('\n');
@@ -1525,7 +1527,7 @@ int connect_to_aprsis(void) {
   aprsis_client.print(String(buffer) + "\r\n");
 
   t_start = millis();
-  while (!aprsis_client.available() && (millis()-t_start) < 25000L) { delay(100); esp_task_wdt_reset(); }
+  while (!aprsis_client.available() && (millis()-t_start) < 25000L) { vTaskDelay(100 / portTICK_PERIOD_MS); esp_task_wdt_reset(); }
   if (aprsis_client.available()) {
     // check
     String s = aprsis_client.readStringUntil('\n');
@@ -1801,6 +1803,7 @@ void read_from_aprsis(void) {
         loraSend(txPower, lora_freq, lora_speed, 0, third_party_packet);
       }
       if (aprsis_data_allow_inet_to_rf > 1 && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq) {
+        esp_task_wdt_reset();
         loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, 0, third_party_packet);
         esp_task_wdt_reset();
       }
@@ -1925,7 +1928,7 @@ void send_to_aprsis()
   server.onNotFound(handle_NotFound);
 
 
-  esp_task_wdt_init(120, true); //enable panic so ESP32 restarts
+  // esp_task_wdt_init() has already been done in main task during setup()
   esp_task_wdt_add(NULL); //add current thread to WDT watch
 
   // 8 characters is requirements for WPA2
@@ -2005,6 +2008,7 @@ void send_to_aprsis()
   uint32_t webserver_started = millis();
 
 
+  // main loop
   while (true) {
     esp_task_wdt_reset();
 

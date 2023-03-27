@@ -1038,7 +1038,7 @@ void writedisplaytext(String HeaderTxt, String Line1, String Line2, String Line3
   if (InpVolts < 1.0) {
     if (BattVolts < 3.5 && BattVolts > 3.3){
       #ifdef T_BEAM_V1_0
-        # ifdef ENABLE_LED_SIGNALING
+        #ifdef ENABLE_LED_SIGNALING
           axp.setChgLEDMode(AXP20X_LED_BLINK_4HZ);
         #endif
       #endif
@@ -1392,8 +1392,17 @@ void fillDisplayLines3to5(int force) {
 
   if (oled_line3and4_format == 0) {
     if (show_locator) {
-      OledLine3 = aprsLatLonAsMaidenheadGridLocator + " " + aprsPresetShown /* + " " + foobar */;
-      //                                                                                ^ free for future use, i.e. temp, pressure, humidity
+      OledLine3 = aprsLatLonAsMaidenheadGridLocator + " " + aprsPresetShown;
+      #ifdef T_BEAM_V1_0
+        // field for extended use, i.e. temp, pressure, humidity
+        if (aprsLatLonAsMaidenheadGridLocator.length() + 1 + 1 + + 12 <= 21) {
+          char sensor_data[13] = { 0 } ; // room for 12 + \0 == 13
+          float t_AXP = axp.getTemp();
+          if (t_AXP < -9.9) t_AXP = -9.9; else if (t_AXP > 99.9) t_AXP = 99.9;
+          sprintf(sensor_data, " tAXP:%.1f%cC", t_AXP, '\xF7');
+          OledLine3 = OledLine3 + String(sensor_data);
+        }
+      #endif
     } else {
       OledLine3 = aprsLatPreset + " " + aprsLonPreset + " " + aprsPresetShown;
     }
@@ -1454,18 +1463,23 @@ void fillDisplayLines3to5(int force) {
     // end of hack
 
     if (show_locator) {
+      // field for extended use, i.e. temp, pressure, humidity
+      char sensor_data[12] = { 0 } ; // room for 11 + \0 == 12
+      #ifdef T_BEAM_V1_0
+        float t_AXP = axp.getTemp();
+        if (t_AXP < -9.9) t_AXP = -9.9; else if (t_AXP > 99.9) t_AXP = 99.9;
+        sprintf(sensor_data, "tAXP:%.1f%cC", t_AXP, '\xF7');
+      #endif
       // show maidenhead grid locator
       if (oled_line3and4_format < 3) {
         sprintf(buf, "%4.4s%6.6s %-10.10s", str_course(0), str_altitude(), aprsLatLonAsMaidenheadGridLocator.c_str());
         OledLine3 = String(buf);
-        sprintf(buf, "%7.7s %.1s %-11.11s", spd, aprsPresetShown.c_str(), "");
-        //                                                                 ^ free for future use, i.e. temp, pressure, humidity
+        sprintf(buf, "%7.7s %.1s %-11.11s", spd, aprsPresetShown.c_str(), sensor_data);
         OledLine4 = String(buf);
       } else {
         sprintf(buf, "%11.11s %.1s %7.7s", aprsLatLonAsMaidenheadGridLocator.c_str(), aprsPresetShown.c_str(), spd);
         OledLine3 = String(buf);
-        sprintf(buf, "%11.11s %4.4s%5.5s", "", str_course(0), str_altitude());
-        //                                 ^ free for future use, i.e. temp, pressure, humidity
+        sprintf(buf, "%11.11s %4.4s%5.5s", sensor_data, str_course(0), str_altitude());
         OledLine4 = String(buf);
       }
     } else {
@@ -3270,6 +3284,9 @@ void setup()
   // for diagnostics
   uint32_t t_setup_entered = millis();
 
+  // initialize ESP32 Process WDT, 120s T/O
+  esp_task_wdt_init(120, true);
+
   // Our BUILD_NUMBER. The define is not available in the WEBSERVR -> we need to assign a global variable
   buildnr = BUILD_NUMBER;
 
@@ -3554,10 +3571,10 @@ void setup()
 #endif /* ENABLE_WIFI */
 
 
-  esp_task_wdt_init(120, true); //enable panic so ESP32 restarts
-  esp_task_wdt_add(NULL); //add current thread to WDT watch
-
   setup_oled_timer_values();
+
+  esp_task_wdt_add(NULL); //add current thread to WDT watch
+  esp_task_wdt_reset();
 
   writedisplaytext("LoRa-APRS","","Init:","FINISHED OK!","   =:-)   ","");
   fillDisplayLine1();
