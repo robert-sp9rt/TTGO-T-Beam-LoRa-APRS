@@ -1775,7 +1775,7 @@ void sendTelemetryFrame() {
     // Pad telemetry message address to 9 characters. Plus string termination \0. Plus 2x ':'
     char Tcall_message_char[2+9+1];
     //sprintf_P(Tcall_message_char, ":%-9s:", Tcall.c_str());
-    sprintf_P(Tcall_message_char, ":%9.9s:", Tcall.c_str());
+    sprintf_P(Tcall_message_char, ":%-9.9s:", Tcall.c_str());
     String Tcall_message = String(Tcall_message_char);
 
     send_telemetry_to_TNC_usb_serial_and_aprsis(telemetryBase + Tcall_message + s);
