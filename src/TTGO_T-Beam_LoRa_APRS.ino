@@ -166,6 +166,8 @@ String aprsLonPresetNiceNotation;
 String aprsLatLonAsMaidenheadGridLocator;
 String aprsLatLonDAO = "";
 String aprsLatLonPresetCOMP = "";
+boolean no_gps_position_since_boot = true;
+
 int position_ambiguity = 0; // 0: default, compressed. -1: uncompressed. -2: uncompressed, with DAO '!W..!'. -3: uncompressed, with DAO '!w..!'. 1: ambiguity 1/10'. 2: ambiguity 1'. 3: ambiguity 10'. 4: Ambuguity 1 deg (60').
 //String LatShownP = aprsLonPreset;
 //String LongShownP = aprsLonPreset;
@@ -275,7 +277,7 @@ int oled_line3and4_format = 0; // 0: original format of line3 and line4; Lat/Lon
 int oled_show_locator = 0;    // 0: show always locator (and never lat/lon). 1: show never locator (and always Lat/lon). 2: 10:50 ratio. 6: with 20:100 ratio. 5: 20:20 ratio
 int oled_loc_amb = 0;     // display locator not more precise than 0: RR99XX. -1: RR99XX99. -2: RR99XX99XX
 
-#if defined(ENABLE_TNC_SELF_TELEMETRY) && defined(KISS_PROTOCOL)
+#if defined(ENABLE_TNC_SELF_TELEMETRY)
   time_t nextTelemetryFrame = 60*1000L;  // first possible start of telemetry 60s after boot.
 #endif
 
@@ -320,7 +322,7 @@ int point_avg_speed = 0, point_avg_course = 0;
 ulong nextTX=60000L;                  // preset time period between TX = 60000ms = 60secs = 1min
 
 ulong time_to_refresh = 0;            // typical time display lines are shown, before overwritten with new info
-ulong next_fixed_beacon = 75000L;    // first fixed beacon app. 125s after system start (DL3EL)
+ulong next_fixed_beacon = 75000L;    // first fixed beacon approx 125s after system start (DL3EL)
 ulong fix_beacon_interval = FIX_BEACON_INTERVAL;
 ulong showRXTime = SHOW_RX_TIME;
 ulong time_delay = 0;
@@ -793,10 +795,17 @@ out_relay_path:
     }
   }
 
-  if (showBattery && (BattVolts > 1.0 || InpVolts > 1.0)){
-    outString += " Batt=";
-    outString += String((BattVolts > 1.0 ? BattVolts : InpVolts), 2);
-    outString += ("V");
+  if (showBattery) {
+    if (BattVolts > 1.0) {
+      outString += " Batt=";
+      outString += String(BattVolts, 2);
+      outString += ("V");
+    }
+    if (InpVolts > 1.0) {
+      outString += " P=";
+      outString += String(InpVolts, 2);
+      outString += ("V");
+    }
   }
 
   // finally, we may add DAO extension
@@ -1001,10 +1010,10 @@ void batt_read(){
   BattVolts = axp.getBattVoltage()/1000;
   InpVolts = axp.getVbusVoltage()/1000;
 #elif T_BEAM_V0_7
-  BattVolts = (((float)analogRead(35) / 8192.0) * 2.0 * 3.3 * (1100.0 / 1000.0))+0.41;    // fixed thanks to Luca IU2FRL
-  //BattVolts = adc1_get_raw(ADC1_CHANNEL_7)/1000;
+  InpVolts = (((float)analogRead(35) / 8192.0) * 2.0 * 3.3 * (1100.0 / 1000.0))+0.41;    // fixed thanks to Luca IU2FRL
+  //InpVolts = adc1_get_raw(ADC1_CHANNEL_7)/1000;
 #else
-  BattVolts = analogRead(35)*7.221/4096;
+  InpVolts = analogRead(35)*7.221/4096;
 #endif
 }
 
@@ -1263,37 +1272,34 @@ String getSatAndBatInfo() {
   else
     line5 = "S:-/-";
 #ifdef T_BEAM_V1_0
-  int b_out_c = (int ) axp.getBattDischargeCurrent();
-  int b_in_c = (int ) axp.getBattChargeCurrent();
-  if (b_out_c == 0 && b_in_c == 0) {
+  int b_c_out = (int ) axp.getBattDischargeCurrent();
+  int b_c_in = (int ) axp.getBattChargeCurrent();
+  if (b_c_out == 0 && b_c_in == 0) {
     line5 = line5 + " P:" + String(InpVolts, 2) + "V";
   } else {
+    line5 = line5 + " B:" + String(BattVolts, 2) + "V";
+  }
 #else
-    {
+  line5 = line5 + " P:" + String(InpVolts, 2) + "V";
 #endif
-      line5 = line5 + " B:" + String(BattVolts, 2) + "V";
-    }
 #ifdef T_BEAM_V1_0
-    String charge = "";
-
-    if (b_out_c > 0) {
-      charge = "-" + String(b_out_c);
-    } else {
-      if (b_in_c > 0) {
-        charge = String(b_in_c);
-    } else {
-        charge = "-" + String((int ) axp.getVbusCurrent());
-      }
-    }
-    line5 = line5 + "/" + charge + "mA";
+  String charge = "";
+  if (b_c_out > 0) {
+    charge = "-" + String(b_c_out);
+  } else if (b_c_in > 0) {
+      charge = String(b_c_in);
+  } else {
+    charge = "-" + String((int ) axp.getVbusCurrent());
+  }
+  line5 = line5 + "/" + charge + "mA";
 #endif
 #if defined(ENABLE_BLUETOOTH) && defined(KISS_PROTOCOL)
-    if (line5.length() < 21-3 && enable_bluetooth && SerialBT.hasClient()) {
-      // ^ "S:0/99 B:3.52V/-190mA BT" would be too long for one oled line
-      line5 += " BT";
-    }
+  if (line5.length() < 21-3 && enable_bluetooth && SerialBT.hasClient()) {
+    // ^ "S:0/99 B:3.52V/-190mA BT" would be too long for one oled line
+    line5 += " BT";
+  }
 #endif
-    return line5;
+  return line5;
 }
 
 void fillDisplayLine1() {
@@ -1321,8 +1327,9 @@ void fillDisplayLine1() {
       sprintf(s_uptime, "%2.2d:%2.2d", h, m);
     old_time = t;
   }
-  OledLine1 = gps_time_s;
-  OledLine1 = OledLine1 + " Up " + s_uptime;
+  OledLine1 = String("Up ") + String(s_uptime);
+  if (*gps_time_s)
+    OledLine1 = String(gps_time_s) + String(" ") + OledLine1;
 }
 
 void fillDisplayLine2() {
@@ -1343,7 +1350,7 @@ void fillDisplayLine2() {
 #endif
 
   if (dont_send_own_position_packets || !lora_tx_enabled) {
-    OledLine2 = wifi_info + " never TX";
+    OledLine2 = wifi_info + " LoRa-TX: dis";
   } else {
     if (gps_isValid) {
       if (fixed_beacon_enabled) {
@@ -1515,13 +1522,13 @@ void fillDisplayLines3to5(int force) {
 
 void displayInvalidGPS() {
   uint32_t gpsage;
-  String gpsage_p = " GPS dis";
+  String gpsage_p = " GPS: dis";
   fillDisplayLine1();
   if (gps_state) {
     //show GPS age (only if last retrieval was invalid)
     gpsage = gps.location.age()/1000;
     if (gpsage > 49700) {
-      gpsage_p = " no GPS fix ";
+      gpsage_p = " GPS: no fix";
     } else {
       if (gpsage < 60) {
         gpsage_p = String(gpsage) + "s";
@@ -1618,6 +1625,9 @@ void set_callsign() {
 // telemetry frames
 #if defined(ENABLE_TNC_SELF_TELEMETRY)
 
+// DO NOT ENABLE THIS UNTIL YOU READ AND UNDERSTOOD THE IMPACT DESCRIBED ABOVE
+boolean really_allow_telemetry_on_main_freq = false;
+
 void send_telemetry_to_TNC_usb_serial_and_aprsis(const String &telemetryPacket)
 {
   #if defined(KISS_PROTOCOL)
@@ -1642,17 +1652,32 @@ char encode_int_in_char(int i) {
   return 'a' + (i - 36);
 }
 
-void sendTelemetryFrame() {
-  if (!enable_tel)
-    return;
 
+// These variables should have been inside sendTelemetryFrame, declared static,
+// but due to some obscure phaenomen they loose their assigned value. WTF!
+// Bufferoverflow somewhere in the function??
+uint8_t EqnsParmUnitBITS_frame_curr = 0;
+uint32_t next_time_to_send_telemetry_EqnsParmUnitBITS = 0L;
+#ifdef T_BEAM_V1_0
+  // We may add axp temperature either if we have no battery (B V, B C out, B C in 0),
+  // or if no USB is plugeed in (B C in will be 0). -> We could use the position
+  // of B C in. We decided this on boot and remember,
+  boolean may_add_temperature = (!axp.isVBUSPlug() || axp.getBattVoltage() < 1);
+#endif
+
+#define ALSO_SEND_Telemetry_BITS 0	// Set this to 1 if you need to send also the "digital BITS packet"
+void sendTelemetryFrame() {
+  const uint8_t EqnsParmUnitBITS_frames = (ALSO_SEND_Telemetry_BITS ? 4 : 3);
   String tel_sequence_str;
   String tel_path_str;
 
+  if (!enable_tel)
+    return;
+
   // Format telemetry path
-  if(tel_path == ""){
+  if (tel_path == "") {
     tel_path_str = tel_path;
-  }else{
+  } else {
     tel_path_str = "," + tel_path;
   }
   String telemetryBase = Tcall + ">" + MY_APRS_DEST_IDENTIFYER + tel_path_str + ":";
@@ -1664,24 +1689,26 @@ void sendTelemetryFrame() {
   // messages sent to aprsis (except they come as // 3rd party traffic back
   // to RF); or: if someone has the idea to send this over our slow LoRa..
 
-  static uint32_t next_time_to_send_telemetry_NamesEquatBITS = 0L;
-  if (millis() > next_time_to_send_telemetry_NamesEquatBITS) {
+  if (millis() > next_time_to_send_telemetry_EqnsParmUnitBITS) {
     // hack: Send one of the messages along with one one telemetryData frame.
     // If all are sent, remember the time we last sent all of them.
-    static uint8_t n = 0;
-    const boolean use_BITS = false; // Set this to true if you need to send also the "digital BITS packet"
-    const uint8_t m = (use_BITS ? 4 : 3);
     String s;
 
-    switch (n) {
+    switch (EqnsParmUnitBITS_frame_curr) {
     case 0:
       // Equations are defined only for the 5 analog channels. May be less then 5.
       // Most important for correct interpretation -> position 0.
       // Item length may vary
       s = String("EQNS.");
-      s = s + "0,5.1,3000";
+      //s = s + "0,5.1,3000";
+      s = s + "0,33.8,0";
       #ifdef T_BEAM_V1_0
-        s = s + ",0,10,0" + ",0,10,0" + ",0,28,3000" + ",0,10,0";
+        //s = s + ",0,10,0" + ",0,10,0" + ",0,28,3000" + ",0,10,0";
+        s = s + ",0,10,0" + ",0,16.9,0" + ",0,10,0";
+        if (may_add_temperature)
+          s = s + ",0,0.25,-5";
+        else
+          s = s + ",0,10,0";
       #endif
       break;
     case 1:
@@ -1689,11 +1716,17 @@ void sendTelemetryFrame() {
       // if you use 4 analog and 2 digital channel, set names to "A,B,C,D,,X,Y"
       // Item lengths are strict. Look at spec!
       s = String("PARM.");
-      s = s + "B Volt";
+      //s = s + "B Volt";
+      s = s + "P V";
       #ifdef T_BEAM_V1_0
-        s = s + ",B In" + ",B Out" + ",AC V" + ",AC C";
+        //s = s + ",B In" + ",B Out" + ",AC V" + ",AC C";
+        s = s + ",P C" + ",B V" + ",BCout";
+        if (may_add_temperature)
+          s = s + ",Temp";
+        else
+          s = s + ",BCin";
       #else
-        //if (m == 4) s = s + ",,,,," + /* yourDigitalParamNames: * / ,2,3,4,5,6,7,8";
+        //if (EqnsParmUnitBITS_frames == 3) s = s + ",,,,," /* + "yourDigitalParamNames1,2,3,4,5,6,7,8" */;
       #endif
       break;
     case 2:
@@ -1703,9 +1736,14 @@ void sendTelemetryFrame() {
       s = String("UNIT.");
       s = s + "mV";
       #ifdef T_BEAM_V1_0
-        s = s + ",mA" + ",mA" + ",mV" + ",mA";
+        //s = s + ",mA" + ",mA" + ",mV" + ",mA";
+        s = s + ",mA" + ",mV" + ",mA";
+        if (may_add_temperature)
+          s = s + ",C";
+        else
+          s = s + ",mA";
       #else
-        //if (m == 4) s = s + ",,,," + "yourDigitalUnitsNames1,2,3,4,5,6,7,8";
+        //if (EqnsParmUnitBITS_frames == 3) s = s + ",,,,," /* + "yourDigitalUnitsNames1,2,3,4,5,6,7,8" */;
       #endif
       break;
     case 3:
@@ -1715,16 +1753,21 @@ void sendTelemetryFrame() {
       s = s + "00000000" + "SQ9MDD LoRa Tracker";
       break;
     }
-    if (n == m-1)
-      next_time_to_send_telemetry_NamesEquatBITS = millis() + 24*60*60*1000L;
-    n = (n+1) % m;
 
-    // Pad telemetry message address to 9 characters. Plus string termination \0
-    char Tcall_message_char[9+1];
-    sprintf_P(Tcall_message_char, "%-9s", Tcall.c_str());
+    if (EqnsParmUnitBITS_frame_curr == EqnsParmUnitBITS_frames-1) {
+      next_time_to_send_telemetry_EqnsParmUnitBITS = millis() + 24*60*60*1000L;
+      EqnsParmUnitBITS_frame_curr = 0;
+    } else {
+      EqnsParmUnitBITS_frame_curr++;
+    }
+
+    // Pad telemetry message address to 9 characters. Plus string termination \0. Plus 2x ':'
+    char Tcall_message_char[2+9+1];
+    //sprintf_P(Tcall_message_char, ":%-9s:", Tcall.c_str());
+    sprintf_P(Tcall_message_char, ":%9.9s:", Tcall.c_str());
     String Tcall_message = String(Tcall_message_char);
 
-    send_telemetry_to_TNC_usb_serial_and_aprsis(telemetryBase + ":" + Tcall_message + ":" + s);
+    send_telemetry_to_TNC_usb_serial_and_aprsis(telemetryBase + Tcall_message + s);
 
     // We don't like to see telemetry on RF.
     // But since we have been asked several times, here's a suggestion we could live with it:
@@ -1736,16 +1779,15 @@ void sendTelemetryFrame() {
     // Telemetry on secondary qrg is sent if config variable is 2 or 3. On main qrg: 1 or 3.
 
     if (tel_allow_tx_on_rf) {
-      String telemetryPacket = telemetryBaseRF + ":" + Tcall_message + ":" + s;
+      String telemetryPacket = telemetryBaseRF + Tcall_message + s;
       if (tel_allow_tx_on_rf & 2) {
         if (lora_freq_cross_digi != lora_freq && lora_speed_cross_digi >= 1200) {
           loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, 0, telemetryPacket);
         }
       }
-      // DO NOT ENABLE THIS UNTIL YOU READ AND UNDERSTOOD THE IMPACT DESCRIBED ABOVE
-      //if (tel_allow_tx_on_rf & 1) {
-      //  loraSend(txPower, lora_freq, (lora_speed < 300) ? 300 : lora_speed, 1, telemetryPacket);
-      //}
+      if ((tel_allow_tx_on_rf & 1) && really_allow_telemetry_on_main_freq) {
+        loraSend(txPower, lora_freq, (lora_speed < 300) ? 300 : lora_speed, 1, telemetryPacket);
+      }
     }
   }
 
@@ -1811,7 +1853,7 @@ void sendTelemetryFrame() {
   } else {
     // Get the current saved telemetry sequence
     #ifdef ENABLE_PREFERENCES
-      tel_sequence = preferences.getUInt(PREF_TNC_SELF_TELEMETRY_SEQ, 0);
+      tel_sequence = preferences.getUInt(PREF_TNC_SELF_TELEMETRY_SEQ, 0) % 1000;
     #endif
     // Pad to 3 digits. Plus string termination \0
     char tel_sequence_char[3+1];
@@ -1838,14 +1880,19 @@ void sendTelemetryFrame() {
   // Working with uint8_t is a good decision, because due to spec, the value must not
   // be greater than 255, because it's the numeric representation of an 8 bit value.
   #ifdef T_BEAM_V1_0
-    uint8_t b_volt = min((int ) ((axp.getBattVoltage() - 3000) / 5.1), 255);
-    uint8_t b_in_c = min((int ) ((axp.getBattChargeCurrent()) / 10), 255);
-    uint8_t b_out_c = min((int ) ((axp.getBattDischargeCurrent()) / 10), 255);
-    uint8_t ac_volt = min((int ) ((axp.getVbusVoltage() - 3000) / 28), 255);
-    uint8_t ac_c = min((int ) ((axp.getVbusCurrent()) / 10), 255);
+    // No, batteries or external power may not be present -> do not start at 3000 mW
+    //uint8_t dc_volt = min((int ) (((axp.getVbusVoltage() - 3000) / 28), 255);
+    uint8_t dc_volt = min((int ) (axp.getVbusVoltage() / 33.8), 255);
+    uint8_t dc_c = min((int ) (axp.getVbusCurrent() / 10), 255);
+    //uint8_t b_volt = min((int ) (((axp.getBattVoltage() - 3000) / 5.1), 255);
+    uint8_t b_volt = min((int ) (axp.getBattVoltage() / 16.9), 255);
+    uint8_t b_c_out = min((int ) (axp.getBattDischargeCurrent() / 10), 255);
+    uint8_t b_c_in = may_add_temperature ? 0 : min((int ) (axp.getBattChargeCurrent() / 10), 255);
+    uint8_t axp_temperature = may_add_temperature ?  max(min((int ) ((axp.getTemp() + 5) / 0.25), 255), 0) : 0;
   #else
     batt_read();
-    uint8_t b_volt = min((int ) (((BattVolts * 1000) - 3000) / 5.1), 255);
+    //uint8_t b_volt = min((int ) ((InpVolts * 1000) - 3000 / 5.1), 255);
+    uint8_t dc_volt = min((int ) (InpVolts * 1000 / 33.8), 255);
   #endif
 
 
@@ -1855,12 +1902,16 @@ void sendTelemetryFrame() {
   // aprs spec that Telemetry Report format is exactly 5 analog values and 8 digital values.
   // We break with this standard here, because we don't like waste bandwith
   char buf[5]; // ",000" + \0 == 5
-  sprintf(buf, ",%03u", b_volt); telemetryData += String(buf);
+  sprintf(buf, ",%03u", dc_volt); telemetryData += String(buf);
   #ifdef T_BEAM_V1_0
-    sprintf(buf, ",%03u", b_in_c); telemetryData += String(buf);
-    sprintf(buf, ",%03u", b_out_c); telemetryData += String(buf);
-    sprintf(buf, ",%03d", ac_volt); telemetryData += String(buf);
-    sprintf(buf, ",%03u", ac_c); telemetryData += String(buf);
+    sprintf(buf, ",%03u", dc_c); telemetryData += String(buf);
+    sprintf(buf, ",%03u", b_volt); telemetryData += String(buf);
+    sprintf(buf, ",%03u", b_c_out); telemetryData += String(buf);
+    if (may_add_temperature) {
+      sprintf(buf, ",%03u", axp_temperature); telemetryData += String(buf);
+    } else {
+      sprintf(buf, ",%03u", b_c_in); telemetryData += String(buf);
+    }
   #else
     //telemetryData += ",000,000,000,000"; // <- would be needed if we'd standard conform!
   #endif
@@ -1891,10 +1942,9 @@ void sendTelemetryFrame() {
         loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, 0, telemetryPacket);
       }
     }
-    // DO NOT ENABLE THIS UNTIL YOU READ AND UNDERSTOOD THE IMPACT DESCRIBED ABOVE
-    //if (tel_allow_tx_on_rf & 1) {
-    //  loraSend(txPower, lora_freq, (lora_speed < 300) ? 300 : lora_speed, 1, telemetryPacket);
-    //}
+    if ((tel_allow_tx_on_rf & 1) && really_allow_telemetry_on_main_freq) {
+      loraSend(txPower, lora_freq, (lora_speed < 300) ? 300 : lora_speed, 1, telemetryPacket);
+    }
   }
 
   // Show when telemetry is being sent
@@ -2887,14 +2937,14 @@ void load_preferences_from_flash()
 
     if (!preferences.getBool(PREF_APRS_LATITUDE_PRESET_INIT)){
       preferences.putBool(PREF_APRS_LATITUDE_PRESET_INIT, true);
-      preferences.putString(PREF_APRS_LATITUDE_PRESET, aprsLatPreset.isEmpty() ? LATITUDE_PRESET : aprsLatPreset);
+      preferences.putString(PREF_APRS_LATITUDE_PRESET, aprsLatPresetFromPreferences.isEmpty() ? LATITUDE_PRESET : aprsLatPresetFromPreferences);
     }
     aprsLatPresetFromPreferences = preferences.getString(PREF_APRS_LATITUDE_PRESET, "");
     //LatShownP = aprsLonPreset;
 
     if (!preferences.getBool(PREF_APRS_LONGITUDE_PRESET_INIT)){
       preferences.putBool(PREF_APRS_LONGITUDE_PRESET_INIT, true);
-      preferences.putString(PREF_APRS_LONGITUDE_PRESET, aprsLonPreset.isEmpty() ? LONGITUDE_PRESET : aprsLonPreset);
+      preferences.putString(PREF_APRS_LONGITUDE_PRESET, aprsLonPresetFromPreferences.isEmpty() ? LONGITUDE_PRESET : aprsLonPresetFromPreferences);
     }
     aprsLonPresetFromPreferences = preferences.getString(PREF_APRS_LONGITUDE_PRESET, "");
     //LongShownP = aprsLonPreset;
@@ -3393,7 +3443,7 @@ void setup()
     adc1_config_channel_atten(ADC1_CHANNEL_7,ADC_ATTEN_DB_6);
   #endif
   batt_read();
-  writedisplaytext("LoRa-APRS","","Init:","ADC OK!","BAT: "+String(BattVolts,2),"");
+  writedisplaytext("LoRa-APRS","","Init:","ADC OK!","P: "+String(InpVolts, 2)+"V, BAT: "+String(BattVolts,2)+"V","");
   delay(500);
 
 
@@ -4709,27 +4759,22 @@ void loop()
     }
   }
 
-  if (gps_state && gps.time.isValid() && gps.time.age() < 500) {
-    if (gps.time.isUpdated()) {
-      static int8_t t_hour_adjust_next = -1;
-      // Time to adjust time?
-      if (t_hour_adjust_next == -1 || t_hour_adjust_next == gps.time.hour()) {
-        struct tm t;
-        time_t t_of_day;
-        t.tm_year = gps.date.year()-1900;
-        t.tm_mon = gps.date.month()-1;	// Month, 0 - jan
-        t.tm_mday = gps.date.day();	// Day of the month
-        t.tm_hour = gps.time.hour();
-        t.tm_min =  gps.time.minute();
-        t.tm_sec = gps.time.second();
-        t_of_day = mktime(&t);
-        int epoch_time = t_of_day;
-        timeval epoch = {epoch_time, 0};
-        const timeval *tv = &epoch;
-        settimeofday(tv, NULL);
-        t_hour_adjust_next = (t.tm_hour + 1) % 24;
-      }
-    }
+  // Time to adjust time?
+  int8_t t_hour_adjust_next = -1;
+  if (gps_state && gps.time.isValid() && gps.time.isUpdated() &&
+       gps.time.second() < 59 &&
+       (t_hour_adjust_next == -1 || t_hour_adjust_next == gps.time.hour()) &&
+       gps.time.age() < 500) {
+    struct tm t;
+    timeval tv = { 0, 0 };;
+    t.tm_year = gps.date.year()-1900;
+    t.tm_mon = gps.date.month()-1;	// Month, 0 - jan
+    t.tm_mday = gps.date.day();	// Day of the month
+    t.tm_hour = gps.time.hour();
+    t.tm_min =  gps.time.minute();
+    t.tm_sec = gps.time.second();
+    if ((tv.tv_sec = mktime(&t)) != (time_t ) -1 && settimeofday(&tv, NULL) != -1)
+      t_hour_adjust_next = (t.tm_hour + 1) % 24;
   }
 
   // time is now taken from system time and updates once per second in display_blinker
@@ -4746,10 +4791,10 @@ void loop()
     } // else: assume we still move with last speed
   }
 
-  if (gps_state && gps.location.isValid() && gps.location.age() < 10000) {
+  if (gps_state && gps.location.isValid() && (gps.location.age() < 10000 || no_gps_position_since_boot)) {
     gps_isValid = true;
 
-    if (gps.location.isUpdated()) {
+    if (gps.location.isUpdated() || no_gps_position_since_boot) {
       static uint32_t ratelimit_until = 0L;
 
       // to smoothen the speed, the distance between pos is calculated on gps retrieval. (DL3EL)
@@ -4760,7 +4805,7 @@ void loop()
       // aprs resolution is 1sm/100 = 1852m/100 = 18.52m
       // Updating this every 200ms is enough for getting this resolution at speed of 18.52*3.6*5 = 333.36km/h.
       // aprsLatPreset and aprsLonPreset are used for displaying. The transmission uses the true value.
-      if (millis() > ratelimit_until) {
+      if (millis() > ratelimit_until || no_gps_position_since_boot) {
         // always encode aprsLatPreset in notation ddmm.nn (N/S) and aprsLonPreset in notation dddmm.nn (E/W)
         //aprsLatPreset = create_lat_aprs("", gps.location.rawLat(), 2);
         //aprsLonPreset = create_long_aprs("", gps.location.rawLng(), 2);
@@ -4779,6 +4824,7 @@ void loop()
 
         aprsPresetShown = "";
         ratelimit_until = millis() + 200;
+        no_gps_position_since_boot = false;
       }
     }
 
@@ -4859,6 +4905,7 @@ void loop()
     writedisplaytext("((WEB TX))","","",OledLine3, OledLine4, OledLine5);
 #endif
     sendpacket(SP_POS_GPS);
+    next_fixed_beacon = millis() + fix_beacon_interval;
     manBeacon=false;
   }
 
@@ -4952,13 +4999,13 @@ void loop()
   // fixed beacon, or if smartbeaconing with lost gps fix (but had at least one gps fix).
   // smartbeaconing also ensures correct next_fixed_beacon time
   if (!dont_send_own_position_packets && millis() >= next_fixed_beacon &&
-         (fixed_beacon_enabled ||
-           (t_last_smart_beacon_sent && (!gps_state || !gps_isValid)) ) ) {
-      enableOled(); // enable OLED
-      next_fixed_beacon = millis() + fix_beacon_interval;
-      fillDisplayLines3to5(0);
-      writedisplaytext("((AUT TX))", "", "fixed", OledLine3, OledLine4, OledLine5);
-      sendpacket(SP_POS_FIXED);
+       (fixed_beacon_enabled ||
+       (t_last_smart_beacon_sent && (!gps_state || !gps_isValid)) ) ) {
+    enableOled(); // enable OLED
+    fillDisplayLines3to5(0);
+    writedisplaytext("((AUT TX))", "", "fixed", OledLine3, OledLine4, OledLine5);
+    sendpacket(SP_POS_FIXED);
+    next_fixed_beacon = millis() + fix_beacon_interval;
   }
 
   #ifdef T_BEAM_V1_0
@@ -5512,6 +5559,11 @@ invalid_packet:
     // now, nextTX is <= sb_min_interval
   }
 
+  // If we just booted and gps is on but we still haven no position, wait up to 10 minutes with entering smart-beaconing code,
+  // for preventing our stored preset-position to be sent.
+  if (gps_state && no_gps_position_since_boot && millis() < 10*60*1000L)
+    goto behind_position_tx;
+
   // rate limit to 20s in SF12 CR4/5 aka lora_speed 300; 5s in lora_speed 1200 (SF9 CR4/7). -> 1200/lora_speed*5 seconds == 6000000 / lora_speed ms
   // If special case nextTX <= 1: we already enforced rate-limiting (see course computation)
   if (!fixed_beacon_enabled && !dont_send_own_position_packets && lora_tx_enabled && (lastTX+nextTX) < millis() && (nextTX <= 1 || (millis()-lastTX) >= (6000000L / lora_speed ))) {
@@ -5556,7 +5608,7 @@ behind_position_tx:
   }
 
 
-  #if defined(ENABLE_TNC_SELF_TELEMETRY) && defined(KISS_PROTOCOL)
+  #if defined(ENABLE_TNC_SELF_TELEMETRY)
     if (nextTelemetryFrame < millis()){
       // Schedule the next telemetry frame
       nextTelemetryFrame = millis() + (tel_interval * 1000);
@@ -5584,7 +5636,7 @@ behind_position_tx:
           debug_message += ", ";
           debug_message += "Temp C: " + String(axp.getTemp());
         #else
-          debug_message += "Bat V: " + String(BattVolts);
+          debug_message += "USB V: " + String(InpVolts);
         #endif
 
         Serial.print(encapsulateKISS(debug_message, CMD_HARDWARE));

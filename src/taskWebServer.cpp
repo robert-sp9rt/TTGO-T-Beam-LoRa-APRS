@@ -1390,11 +1390,15 @@ void do_send_status_message_about_shutdown_or_reboot_to_aprsis(int why) {
       strftime(buf, sizeof(buf), "%Y%m%d %H:%M:%Sz", &timeinfo);
       //sprintf(buf, "%X%2.2d %2.2d:%2.2d:%2.2dz", timeinfo.tm_mon+1, timeinfo.tm_mday, timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
     } else {
-      strncpy(buf, gps_time_s, sizeof(buf));
+      if (strlen(gps_time_s) == 8)
+        sprintf(buf, "%.8sz", gps_time_s);
+      else
+        strncpy(buf, gps_time_s, sizeof(buf));
     }
-    outString = outString + String(buf);
+    if (*buf)
+      outString = outString + String(buf) + ", ";
     if (aprsis_time_last_successful_connect.length()) {
-      outString = outString + ", since " + aprsis_time_last_successful_connect + ", ";
+      outString = outString + "since " + aprsis_time_last_successful_connect + ", ";
     }
     if (why == SSMASTA_SHUTDOWN)
       outString = outString + "Shutdown";
@@ -1430,13 +1434,17 @@ void do_send_status_message_about_connect_to_aprsis(void) {
     strftime(buf, sizeof(buf), "%Y%m%d %H:%M:%Sz", &timeinfo);
     //sprintf(buf, "%X%2.2d %2.2d:%2.2d:%2.2dz", timeinfo.tm_mon+1, timeinfo.tm_mday, timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
   } else {
-    strncpy(buf, gps_time_s, sizeof(buf));
+    if (strlen(gps_time_s) == 8)
+      sprintf(buf, "%.8sz", gps_time_s);
+    else
+      strncpy(buf, gps_time_s, sizeof(buf));
   }
-  outString = outString + String(buf);
+  if (*buf)
+    outString = outString + String(buf) + ", ";
   if (aprsis_time_last_successful_connect.length())
-    outString = outString + ", last " + aprsis_time_last_successful_connect;
+    outString = outString + "last " + aprsis_time_last_successful_connect;
   else {
-    outString = outString + ", Booted[B" + buildnr;
+    outString = outString + "Booted[B" + buildnr;
     if (millis() > 60*1000)
       outString = outString + ",up:" + String((int ) (millis()/1000/60));
     outString = outString + "]";
