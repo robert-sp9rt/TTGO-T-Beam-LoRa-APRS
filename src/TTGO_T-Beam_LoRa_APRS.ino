@@ -522,9 +522,10 @@ void store_compressed_position(double Tlat, double Tlon) {
     char helper_base91[] = {"0000\0"};
     String s;
     int i;
+
     if (position_ambiguity > 0) {
       // strip off n decimals
-      int i = (position_ambiguity > 4 ? 4 : position_ambiguity) -1;
+      i = (position_ambiguity > 4 ? 4 : position_ambiguity) -1;
       aprs_lat = (uint32_t ) (aprs_lat / (10000 * pow(10, i)) * 1000 * pow(10, i));
       aprs_lon = (uint32_t ) (aprs_lon / (10000 * pow(10, i)) * 1000 * pow(10, i));
     }
