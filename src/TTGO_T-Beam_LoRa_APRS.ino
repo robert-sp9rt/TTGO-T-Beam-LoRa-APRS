@@ -5623,7 +5623,7 @@ behind_position_tx:
 
 
   #if defined(ENABLE_TNC_SELF_TELEMETRY)
-    if (nextTelemetryFrame < millis()){
+    if (enable_tel && nextTelemetryFrame < millis()){
       // Schedule the next telemetry frame
       nextTelemetryFrame = millis() + (tel_interval * 1000);
       sendTelemetryFrame();
