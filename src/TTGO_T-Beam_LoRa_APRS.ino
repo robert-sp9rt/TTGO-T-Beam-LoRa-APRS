@@ -180,7 +180,7 @@ String aprsPresetShown = "P";
 #else
   boolean gps_state = false;
 #endif
-// as we now collect the gps_data at the beginning of loop(), also the speed ist from there, we should not query gps.speed.kmph directly later on
+// as we now collect the gps_data at the beginning of loop(), also the speed ist from there, we should not query gps.speed.kmph() directly later on
 // the same show be done with course and alti (later)
 // after successful data retrieval, gps_isValid becomes true (or turn false, if retrieval fails)
 boolean gps_isValid = false;
@@ -635,10 +635,6 @@ out_relay_path:
   if (position_ambiguity == 0 && aprsLatLonPresetCOMP.length()) {
     char helper_base91[] = {"0000\0"};
 
-    // refresh with current position
-    if (gps_state && gps_isValid)
-      store_compressed_position(gps.location.lat(), gps.location.lng());
-
     outString += aprsSymbolTable;
     outString += aprsLatLonPresetCOMP;
     outString += aprsSymbol;
@@ -882,6 +878,7 @@ void sendpacket(uint8_t sp_flags){
     if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies > 1 && lora_digipeating_mode > 1 && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq)
       loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, (sp_flags & SP_ENFORCE_COURSE) ? LORA_FLAGS_NODELAY : 0, outString);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
   }
+  lastTX = millis();
 #if defined(ENABLE_WIFI)
   if (tx_own_beacon_from_this_device_or_fromKiss__to_aprsis)
     send_to_aprsis(outString);
@@ -967,7 +964,6 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, uint8_t fla
   #ifdef ENABLE_LED_SIGNALING
     digitalWrite(TXLED, LOW);
   #endif
-  lastTX = millis();
   rf95.sendAPRS(lora_TXBUFF, messageSize);
   rf95.waitPacketSent();
   #ifdef ENABLE_LED_SIGNALING
@@ -1684,6 +1680,8 @@ void sendTelemetryFrame() {
 
   if (!enable_tel)
     return;
+  if (!lora_tx_enabled)
+    tel_allow_tx_on_rf = 0;
 
   // Format telemetry path
   if (tel_path == "") {
@@ -4745,7 +4743,7 @@ void loop()
     if(digitalRead(BUTTON)==LOW){
       delay(300);
       time_delay = millis() + 1500;
-      if(digitalRead(BUTTON)==HIGH){
+      if (digitalRead(BUTTON)==HIGH && lora_tx_enabled){
         if (!display_is_on && enabled_oled) {
           enableOled(); // turn ON OLED temporary
         } else {
@@ -4909,7 +4907,7 @@ void loop()
   }
 #endif
 
-  if (manBeacon) {
+  if (manBeacon && lora_tx_enabled) {
     // Manually sending beacon from html page
     enableOled();
     fillDisplayLines3to5(0);
@@ -5012,9 +5010,10 @@ void loop()
 
   // fixed beacon, or if smartbeaconing with lost gps fix (but had at least one gps fix).
   // smartbeaconing also ensures correct next_fixed_beacon time
-  if (!dont_send_own_position_packets && millis() >= next_fixed_beacon &&
+  if (lora_tx_enabled && !dont_send_own_position_packets && millis() >= next_fixed_beacon &&
        (fixed_beacon_enabled ||
-       (t_last_smart_beacon_sent && (!gps_state || !gps_isValid)) ) ) {
+       ((!gps_state || !gps_isValid) && t_last_smart_beacon_sent && t_last_smart_beacon_sent + sb_max_interval < millis()) ) ) {
+      nextTX = sb_max_interval;
     enableOled(); // enable OLED
     fillDisplayLines3to5(0);
     writedisplaytext("((AUT TX))", "", "fixed", OledLine3, OledLine4, OledLine5);
