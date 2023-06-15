@@ -154,6 +154,11 @@ String Tcall;                       //your Call Sign for normal position reports
 String aprsSymbolTable = APRS_SYMBOL_TABLE;
 String aprsSymbol = APRS_SYMBOL;
 String relay_path;
+#ifdef APRS_OBJECT_NAME
+  String aprsObjectName = APRS_OBJECT_NAME;
+#else
+  String aprsObjectName = "";
+#endif
 String aprsComment = MY_COMMENT;
 String aprsLatPreset = LATITUDE_PRESET;
 String aprsLonPreset = LONGITUDE_PRESET;
@@ -166,6 +171,12 @@ String aprsLonPresetNiceNotation;
 String aprsLatLonAsMaidenheadGridLocator;
 String aprsLatLonDAO = "";
 String aprsLatLonPresetCOMP = "";
+RawDegrees bestRawLat;
+RawDegrees bestRawLng;
+double bestDoubleLat;
+double bestDoubleLng;
+double bestHdop = 99.9;
+double debug_bestHdop = 99.9;
 boolean no_gps_position_since_boot = true;
 
 int position_ambiguity = 0; // 0: default, compressed. -1: uncompressed. -2: uncompressed, with DAO '!W..!'. -3: uncompressed, with DAO '!w..!'. 1: ambiguity 1/10'. 2: ambiguity 1'. 3: ambiguity 10'. 4: Ambuguity 1 deg (60').
@@ -315,7 +326,9 @@ int sb_turn_slope = 26;			// kenwood example: 26 in mph. Yaesu suggests 26 in hi
 					// TS 7 if <= 20km/h, TS 11 if <= 50km/h, TS 26 else.
 int sb_turn_time = 30;			// min. 30s between transmissions (kenwood example)
 
-float average_speed[5] = {0,0,0,0,0}, average_speed_final=0;
+float average_speed[5] = {0,0,0,0,0};
+float average_speed_final = 0.0;
+float average_speed_final_last = 0.0;
 float old_course = 0, new_course = 0;
 int point_avg_speed = 0, point_avg_course = 0;
 
@@ -546,12 +559,15 @@ void store_compressed_position(double Tlat, double Tlon) {
 
 void prepareAPRSFrame(uint8_t sp_flags) {
   static uint8_t cnt = 0;
+  double curr_hdop = (gps.hdop.isValid() ? gps.hdop.hdop() : 99.9);
+  double curr_kmph = (gps.speed.isValid() ? gps.speed.kmph() : 0.0);
+  int curr_sats = gps.satellites.value();
   boolean may_add_dao_extension = (position_ambiguity <= -2 && latlon_precision > 0 && aprsLatLonDAO != "");
   boolean time_to_add_alt = false;
   // altitude_ratio: 0%, 10%, 25%, 50%, 75%, 90%, 100%
   // course change on turn has a heigher priority
-  boolean altitude_isValid = (gps_state && gps.altitude.isValid() && gps.altitude.age() < 10000);
-  boolean cseSpd_isValid = (gps_state && gps.speed.isValid() && gps.speed.age() < 10000 && gps.course.isValid() && gps.course.age() < 10000);
+  boolean altitude_isValid = (gps_state && gps.altitude.isValid() && gps.altitude.age() < 10000L && ((curr_hdop < 1.0 && curr_sats >= 5) || (curr_kmph > 16.0 && curr_sats >= 4)));
+  boolean cseSpd_isValid = (gps_state && gps.speed.isValid() && (sp_flags & SP_ENFORCE_COURSE || (gps.speed.age() < 10000L && gps.course.isValid() && gps.course.age() < 10000L && ((curr_hdop < 1.5 && curr_sats >= 5) || (curr_kmph > 16.0 && curr_sats >= 4)))));
   int Tspeed = (cseSpd_isValid ? gps.speed.knots() : 0);
   int Tcourse = (cseSpd_isValid ? gps.course.deg() : -1);
   long Talt = (altitude_isValid ? gps.altitude.feet() : 0);
@@ -612,16 +628,39 @@ void prepareAPRSFrame(uint8_t sp_flags) {
 out_relay_path:
   outString += ":";
 
-  if (
+  if (aprsObjectName.isEmpty()) {
+    if (
 #if defined(ENABLE_BLUETOOTH) && defined(KISS_PROTOCOL)
-      (enable_bluetooth && SerialBT.hasClient()) ||
+        (enable_bluetooth && SerialBT.hasClient()) ||
 #endif
-      (time_last_own_text_message_via_kiss_received &&
-        ((time_last_own_text_message_via_kiss_received + 24*60*60*1000L) > millis()) )
-     )
-    outString += "=";
-  else
-    outString += "!";
+        (time_last_own_text_message_via_kiss_received &&
+          ((time_last_own_text_message_via_kiss_received + 24*60*60*1000L) > millis()) )
+       )
+      outString += "=";
+    else
+      outString += "!";
+  } else {
+    // We can send our position as APRS objects. For those who love to see their tracker as "DL1AAA-L4"
+    // on the map (which whould not be a valid src-call on RF)
+    char buf[19]; // room for ";NameLen09*123456z" == 1 + 9 + 1 + 7 + \0 == 19
+    char buf_time[8]; //room for 123456z + \0 == 8
+    struct tm timeinfo;
+    char *p;
+
+    // Objects always have a length of 9 and a timestamp
+    if (getLocalTime(&timeinfo)) {
+      strftime(buf_time, sizeof(buf_time), "%H%M%Sz", &timeinfo);
+    } else {
+      strcpy(buf_time, "000000");
+    }
+    snprintf(buf, sizeof(buf), ";%-9.9s*%-7.7s", aprsObjectName.c_str(), buf_time);
+    buf[sizeof(buf)-1] = 0;
+    for (p = buf; *p; p++) {
+      if (!isprint(*p & 0xff))
+        *p = '_';
+    }
+    outString += String(buf);
+  }
 
   // position_ambiguity is not defined for compressed positions.
   // But we test it, in order to see what happens.
@@ -2618,6 +2657,7 @@ void load_preferences_cfg_file()
 
   aprsSymbolTable = jsonElementFromPreferenceCFGString(PREF_APRS_SYMBOL_TABLE,0);
   aprsSymbol = jsonElementFromPreferenceCFGString(PREF_APRS_SYMBOL,0);
+  aprsObjectName = jsonElementFromPreferenceCFGString(PREF_APRS_OBJECT_NAME,0);
   aprsComment = jsonElementFromPreferenceCFGString(PREF_APRS_COMMENT,PREF_APRS_COMMENT_INIT);
   relay_path = jsonElementFromPreferenceCFGString(PREF_APRS_RELAY_PATH,PREF_APRS_RELAY_PATH_INIT);
   showAltitude = jsonElementFromPreferenceCFGBool(PREF_APRS_SHOW_ALTITUDE,PREF_APRS_SHOW_ALTITUDE_INIT);
@@ -2851,6 +2891,12 @@ void load_preferences_from_flash()
       preferences.putString(PREF_APRS_SYMBOL, APRS_SYMBOL);
       aprsSymbol = preferences.getString(PREF_APRS_SYMBOL, aprsSymbol.length() != 1 ? APRS_SYMBOL : aprsSymbol);
     }
+
+    if (!preferences.getBool(PREF_APRS_OBJECT_NAME_INIT)){
+      preferences.putBool(PREF_APRS_OBJECT_NAME_INIT, true);
+      preferences.putString(PREF_APRS_OBJECT_NAME, aprsObjectName);
+    }
+    aprsObjectName = preferences.getString(PREF_APRS_OBJECT_NAME, "");
 
     if (!preferences.getBool(PREF_APRS_COMMENT_INIT)){
       preferences.putBool(PREF_APRS_COMMENT_INIT, true);
@@ -4385,7 +4431,7 @@ void handle_usb_serial_input(void) {
             Serial.print("cmd:");
             inputBuf = "";
             return;
-          }  
+          }
           //  some commands need an non-binary agument
           #ifdef ENABLE_PREFERENCES
             if (cmd == "save_preferences_cfg") {
@@ -4722,6 +4768,10 @@ void handle_usb_serial_input(void) {
 // +---------------------------------------------------------------------+//
 void loop()
 {
+  double curr_knots = 0.0;
+  double curr_kmph = 0.0;
+  double curr_hdop = 99.9;
+  int curr_sats = 0;
 
   esp_task_wdt_reset();
 
@@ -4795,50 +4845,80 @@ void loop()
   // aprsLatPreset = ggmm.dd[N|S]
   boolean gps_isValid_oldState = gps_isValid;
   gps_isValid = false;
-  if (gps_state && gps.hdop.hdop() < 8.0) {
-    if (gps.speed.isValid() && gps.speed.age() < 10000) {
+  // refresh speed and hdop
+  curr_kmph = (gps.speed.isValid() ? gps.speed.kmph() : 0.0);
+  curr_knots = (gps.speed.isValid() ? gps.speed.knots() : 0.0);
+  curr_hdop = (gps.hdop.isValid() ? gps.hdop.hdop() : 99.9);
+  curr_sats = gps.satellites.value();
+  //if (gps_state && curr_hdop < 8.0) {
+  if (gps_state && curr_hdop < (curr_kmph > 16.0 ? 8.0 : 4.0)) {
+    if (gps.speed.isValid() && gps.speed.age() < 10000L) {
       if (gps.speed.isUpdated()) {
         update_speed_from_gps();
       }
     } // else: assume we still move with last speed
   }
 
-  if (gps_state && gps.location.isValid() && (gps.location.age() < 10000 || no_gps_position_since_boot)) {
-    gps_isValid = true;
+  if (gps_state && gps.location.isValid()) {
+    // store best hdop in a speed dependent time range
+    static uint32_t t_interval_start = millis();
+    int do_update = 0;
 
-    if (gps.location.isUpdated() || no_gps_position_since_boot) {
-      static uint32_t ratelimit_until = 0L;
-
-      // to smoothen the speed, the distance between pos is calculated on gps retrieval. (DL3EL)
-      //LatShownP = create_lat_aprs("-", gps.location.rawLat());
-      //LongShownP = create_long_aprs("-", gps.location.rawLng());
-      // save last valid position as new fixed location
-
-      // aprs resolution is 1sm/100 = 1852m/100 = 18.52m
-      // Updating this every 200ms is enough for getting this resolution at speed of 18.52*3.6*5 = 333.36km/h.
-      // aprsLatPreset and aprsLonPreset are used for displaying. The transmission uses the true value.
-      if (millis() > ratelimit_until || no_gps_position_since_boot) {
-        // always encode aprsLatPreset in notation ddmm.nn (N/S) and aprsLonPreset in notation dddmm.nn (E/W)
-        //aprsLatPreset = create_lat_aprs("", gps.location.rawLat(), 2);
-        //aprsLonPreset = create_long_aprs("", gps.location.rawLng(), 2);
-        if (latlon_precision > 0 && gps.hdop.hdop() < 1.0 && gps.speed.isValid() && gps.speed.age() < 2000 && gps.speed.knots() < 18) {
-          // DAO: heigher precision 1/1000 arc-minute, if not > 36 knots (valid gps measurered speed). Idea behind:
-          // 18.52 m/s are 36kn. We need abt 1s time for understanding the whole displayed line -> resolution of > 2 decimal points is not needed
-          // If we consider gps age of < 2s, we use 18kt as limit
-          storeLatLonPreset(create_lat_aprs("-", gps.location.rawLat(), (latlon_precision == 2 ? 4 : 3)),
-                            create_long_aprs("-", gps.location.rawLng(), (latlon_precision == 2 ? 4 : 3)),
-                            latlon_precision);
-        } else {
-          storeLatLonPreset(create_lat_aprs("-", gps.location.rawLat(), 2), create_long_aprs("-", gps.location.rawLng(), 2), 0);
-        }
-        // aprs compressed position has always a high precision (29.17 cm in latitude, 58.34 cm (or less) in longitude)
-        store_compressed_position(gps.location.lat(), gps.location.lng());
-
-        aprsPresetShown = "";
-        ratelimit_until = millis() + 200;
-        no_gps_position_since_boot = false;
-      }
+    if (gps.location.age() < 10000L) {
+      gps_isValid = true;
     }
+
+  if (gps.location.isUpdated()) {
+
+    if (curr_hdop < bestHdop) {
+      // remember location with best hdop in this time range
+      bestRawLat = gps.location.rawLat();
+      bestRawLng = gps.location.rawLng();
+      bestDoubleLat = gps.location.lat();
+      bestDoubleLng = gps.location.lng();
+      bestHdop = curr_hdop;
+debug_bestHdop = bestHdop;
+    }
+
+    uint32_t t_elapsed = millis() - t_interval_start;
+    if (curr_hdop < bestHdop && curr_sats >= 4) {
+      do_update = 1;
+    } else if (t_elapsed > 15000L && ((curr_hdop < 1.5 && curr_sats >= 5) || no_gps_position_since_boot)) {
+      // Approach to avoid gps inaccuracy (we observed bad gps positions in a range of 30m, or more):
+      // Resolution of GPS is +/- 3 to 5m. In 1s at 10m/s (= 36 km/h) we are in 'best' case still
+      // in behalf the resolution of GPS.
+      do_update = 1;
+    } else if (t_elapsed > 400L && gps.speed.isValid() && curr_knots > 20.0 && curr_sats >= 4) {
+      // aprs resolution is 1sm/100 = 1852m/100 = 18.52m
+      // Updating this every 200ms would be enough for getting this resolution at speed of 18.52*3.6*5 = 333.36km/h.
+      do_update = 1;
+    } else if (millis() >= next_fixed_beacon && curr_sats >= 5 &&
+      TinyGPSPlus::distanceBetween(bestDoubleLat, bestDoubleLng, gps.location.lat(), gps.location.lng()) > 185.2)  {
+      // This hack tries to avoid position jumps due to inaccurate gps measurement, but it updates if we moved 185.2m in 10min
+      do_update = 1;
+    }
+
+    if (do_update) {
+      if (latlon_precision > 0 && bestHdop < 1.0 && gps.speed.age() < 2000 && curr_knots < 18.0) {
+        // DAO: heigher precision 1/1000 arc-minute, if not > 36 knots (valid gps measurered speed). Idea behind:
+        // 18.52 m/s are 36kn. We need abt 1s-2s time for understanding the whole displayed line -> resolution of > 2 decimal points is not needed
+        // If we consider gps age of < 2s, we use 18kt as limit
+        storeLatLonPreset(create_lat_aprs("-", bestRawLat, (latlon_precision == 2 ? 4 : 3)),
+                          create_long_aprs("-", bestRawLng, (latlon_precision == 2 ? 4 : 3)),
+                          latlon_precision);
+      } else {
+        storeLatLonPreset(create_lat_aprs("-", bestRawLat, 2), create_long_aprs("-", bestRawLng, 2), 0);
+      }
+      // aprs compressed position has always a high precision (29.17 cm in latitude, 58.34 cm (or less) in longitude)
+      store_compressed_position(bestDoubleLat, bestDoubleLng);
+
+      aprsPresetShown = "";
+
+      bestHdop = 99.9;
+      t_interval_start = millis();
+      no_gps_position_since_boot = false;
+   }
+  }
 
 #ifdef notdef
     static uint32_t lastTxdistance_millis = 0;
@@ -4867,13 +4947,19 @@ void loop()
     if (!gps_isValid) {
       // update to the old values
       update_speed_from_gps();
-      if (gps_state && gps.speed.age() < 2000 && gps.speed.knots() > 4) {
+      if (gps_state && gps.speed.age() < 2000 && curr_knots > 4.0 && curr_hdop < 1.5) {
         // if we stand still, we can keep high precision DAO. Only heigher precision's lat/lon values are comparable (due to rounding at next decimal)
         // Background: if we look at the _minutes_, i.e. 42.237N, it's rounded for aprs position to 42.24N.
         // DAO !W! or !w! needs the cut-off-string 42.23N for !W7x!.
-        if (aprsLatPresetDAO != create_lat_aprs("", gps.location.rawLat(), (latlon_precision == 2 ? 4 : 3)) || aprsLonPresetDAO != create_long_aprs("", gps.location.rawLng(), latlon_precision == 2 ? 4 : 3)) {
-          storeLatLonPreset(create_lat_aprs("-", gps.location.rawLat(), 2), create_long_aprs("-", gps.location.rawLng(), 2), 0);
-          store_compressed_position(gps.location.lat(), gps.location.lng());
+        // Do this only on good hdop; with bad hdop, the gps springs in a wide circle.
+        bestRawLat = gps.location.rawLat();
+        bestRawLng = gps.location.rawLng();
+        bestDoubleLat = gps.location.lat();
+        bestDoubleLng = gps.location.lng();
+        bestHdop = gps.hdop.hdop();
+        if (aprsLatPresetDAO != create_lat_aprs("", bestRawLat, (latlon_precision == 2 ? 4 : 3)) || aprsLonPresetDAO != create_long_aprs("", bestRawLng, latlon_precision == 2 ? 4 : 3)) {
+          storeLatLonPreset(create_lat_aprs("-", bestRawLat, 2), create_long_aprs("-", bestRawLng, 2), 0);
+          store_compressed_position(bestDoubleLat, bestDoubleLng);
         }
       }
       aprsPresetShown = "p";
@@ -5492,16 +5578,21 @@ invalid_packet:
   if (!gps_state && (!dont_send_own_position_packets || !lora_tx_enabled))
     goto behind_position_tx;
 
+  // refresh speed and hdop
+  curr_kmph = (gps.speed.isValid() ? gps.speed.kmph() : 0.0);
+  curr_hdop = (gps.hdop.isValid() ?  gps.hdop.hdop() : 99.9);
+  curr_sats = gps.satellites.value();
 
-  average_speed[point_avg_speed] = gps.speed.kmph();   // calculate smart beaconing. Even a not-updated old speed is ok here.
+  average_speed[point_avg_speed] = (((curr_hdop < 1.5 && curr_sats >= 3 && curr_kmph <= 16.0) || (curr_hdop < 4.0 && curr_sats >= 3 && curr_kmph > 16.0)) ? curr_kmph : average_speed[(point_avg_speed-1) % 4]);   // calculate smart beaconing. Even a not-updated old speed is ok here.
   ++point_avg_speed;
-  if (point_avg_speed>4) {
-    point_avg_speed=0;
+  if (point_avg_speed > 4) {
+    point_avg_speed = 0;
+    average_speed_final_last = average_speed_final;
   }
 
   average_speed_final = (average_speed[0]+average_speed[1]+average_speed[2]+average_speed[3]+average_speed[4])/5;
-  if (gps.course.isValid() && gps.course.age() < 10000) {
-    average_course[point_avg_course] = gps.course.deg();   // calculate smart beaconing course
+  if (gps.course.isValid() && gps.course.age() < 10000L) {
+    average_course[point_avg_course] = ((curr_kmph > 1.8 && ((curr_hdop < 1.5 && curr_sats >= 3 && curr_kmph <= 16.0) || (curr_hdop < 4.0 && curr_sats >= 3 && curr_kmph > 16.0))) ? gps.course.deg() : average_course[(point_avg_course-1) % ANGLE_AVGS]);   // calculate smart beaconing course
     ++point_avg_course;
 
     if (point_avg_course>(ANGLE_AVGS-1)) {
@@ -5550,7 +5641,7 @@ invalid_packet:
   }
 
   // No course change (indicator nextTX==1)? Recompute nextTX
-  if (nextTX > 1 && millis()-lastTX >= sb_min_interval) {
+  if (nextTX > 2 && millis()-lastTX >= sb_min_interval) {
 #ifdef SB_ALGO_KENWOOD
     if (average_speed_final < sb_min_speed)
       nextTX = sb_max_interval;
@@ -5579,7 +5670,7 @@ invalid_packet:
 
   // rate limit to 20s in SF12 CR4/5 aka lora_speed 300; 5s in lora_speed 1200 (SF9 CR4/7). -> 1200/lora_speed*5 seconds == 6000000 / lora_speed ms
   // If special case nextTX <= 1: we already enforced rate-limiting (see course computation)
-  if (!fixed_beacon_enabled && !dont_send_own_position_packets && lora_tx_enabled && (lastTX+nextTX) < millis() && (nextTX <= 1 || (millis()-lastTX) >= (6000000L / lora_speed ))) {
+  if (!fixed_beacon_enabled && !dont_send_own_position_packets && lora_tx_enabled && (lastTX+nextTX) < millis() && (nextTX <= 2 || (millis()-lastTX) >= (6000000L / lora_speed ))) {
     if (gps_isValid) {
       enableOled(); // enable OLED
       //writedisplaytext(" ((TX))","","LAT: "+LatShownP,"LON: "+LongShownP,"SPD: "+String(gps.speed.kmph(),1)+"  CRS: "+String(gps.course.deg(),1),getSatAndBatInfo());

@@ -143,7 +143,7 @@ You like to enable, if you use your tracker portable and it should automatically
                     </div>
                     <div>
                         <label for="lora_tx_en">Enable LoRa transmitter</label>
-                        <input name="lora_tx_en" id="lora_tx_en" type="checkbox" value="1" title="Allow TX on LoRa. Disable this if you like to prevent TX under all circumstances (i.e. if your tracker is behind an rx-amplifier)">
+                        <input name="lora_tx_en" id="lora_tx_en" type="checkbox" value="1" title="Allow TX on LoRa. Disable this if you like to prevent TX under all circumstances (i.e. if your tracker is behind an rx-amplifier). If this checkbox keeps off after trying to enable, you might check if your configured CALLSIGN-SSID is correct (see explanation there).">
                     </div>
                     <div>
                         <label for="lora_rx_en">Enable LoRa receiver</label>
@@ -201,7 +201,7 @@ You like to enable, if you use your tracker portable and it should automatically
                 <div class="grid-container quarters">
                     <div>
                         <label for="aprs_callsign">Callsign and SSID *</label>
-                        <input class="u-full-width" type="text" minlength="3" maxlength="9" name="aprs_callsign" placeholder="NOCALL-1" id="aprs_callsign" title="your callsign with SSID">
+                        <input class="u-full-width" type="text" minlength="3" maxlength="9" name="aprs_callsign" placeholder="NOCALL-1" id="aprs_callsign" title="your callsign with SSID. SSID is optional and should be in the range of -1 to -15". SSIDs like "-L4" are ok for aprs-is, but should not be sent on RF; thus LoRa TX will be disabled.">
                     </div>
                     <div>
                         <label for="aprs_relay_path">Relay Path</label>
@@ -214,6 +214,10 @@ You like to enable, if you use your tracker portable and it should automatically
                     <div>
                         <label for="aprs_symbol">Symbol</label>
                         <input class="u-full-width" type="text" minlength="1" maxlength="1" name="aprs_symbol" id="aprs_symbol" title="select an icon, for example: [ - jogger, Y - jacht, > - car, b - bike">
+                    </div>
+                    <div>
+                        <label for="aprs_objnam">ObjectName (optional)</label>
+                        <input class="u-full-width" type="text" minlength="0" maxlength="9" name="aprs_objnam" id="aprs_objnam" title="This is optional; most users will leave this empty. If you set this to DL1AAA-L4 because like to see your gateway as DL1AAA-L4 on the map (and also like to send on RF), we'll send our position as type APRS Object (instead of a normal aprs position), with the configured Callsign you configured above.">
                     </div>
                     <div>
                         <label for="aprs_alt_r">Altitude ratio [%]</label>

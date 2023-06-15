@@ -435,6 +435,7 @@ void refill_preferences_as_jsonData()
   s = s + "\n  " +  jsonLineFromPreferenceString(PREF_APRS_RELAY_PATH);
   s = s + "\n  " +  jsonLineFromPreferenceString(PREF_APRS_SYMBOL_TABLE);
   s = s + "\n  " +  jsonLineFromPreferenceString(PREF_APRS_SYMBOL);
+  s = s + "\n  " +  jsonLineFromPreferenceString(PREF_APRS_OBJECT_NAME);
   s = s + "\n  " +  jsonLineFromPreferenceString(PREF_APRS_COMMENT);
   s = s + "\n  " +  jsonLineFromPreferenceString(PREF_APRS_LATITUDE_PRESET);
   s = s + "\n  " +  jsonLineFromPreferenceString(PREF_APRS_LONGITUDE_PRESET);
@@ -680,7 +681,7 @@ boolean is_locator(String s) {
 }
 
 
-void compute_locator(String s)
+void locator_to_lat_lon(String s)
 {
   float f_long, f_lat;
   const char *p = s.c_str();
@@ -765,12 +766,12 @@ void set_lat_long(String s_lat, String s_long) {
     if (s_lat.isEmpty())
       goto out;
     if (is_locator(s_lat)) {
-      compute_locator(s_lat);
+      locator_to_lat_lon(s_lat);
       return;
     }
   } else {
     if (is_locator(s_long)) {
-      compute_locator(s_long);
+      locator_to_lat_lon(s_long);
       return;
     }
   }
@@ -918,34 +919,41 @@ void handle_SaveAPRSCfg() {
   }
   // APRS station settings
   if (server.hasArg(PREF_APRS_CALLSIGN) && !server.arg(PREF_APRS_CALLSIGN).isEmpty()){
-    boolean is_valid = true;
+    uint8_t is_valid = 2;
     const char *p;
     const char *q;
     String s = server.arg(PREF_APRS_CALLSIGN);
     s.toUpperCase();
     s.trim();
+    if (s.endsWith("-0"))
+      s.replace("-0", "");
 
     p = s.c_str();
     for (q = p; *q; q++) {
       if (isalnum(*q) || *q == '-')
         continue;
-      is_valid = false;
+      is_valid = 0;
       break;
     }
 
     if (is_valid) {
-      is_valid = false;
+      is_valid = 0;
       q = strchr(p, '-');
       if (q) {
         if (q > p && q-p <= 6 && strlen(q) > 1 && strlen(q) <= 3) {
           q++;
-          if (q[1]) {
-            if (q[0] == '1' && q[1] >= '0' && q[1] <= '5') {
-              is_valid = true;
-            }
+          if ((q[0] >= 'A' && q[0] <= 'Z') || (q[1] >= 'A' && q[1] <= 'Z')) {
+            // non-conformal SSIDs like "-L4" are ok for aprs-is, but should not be sent on RF -> disable TX
+            is_valid = 1;
           } else {
-            if (q[0] > '0' && q[0] <= '9') {
-              is_valid = true;
+            if (q[1]) {
+              if (q[0] == '1' && q[1] >= '0' && q[1] <= '5') {
+                is_valid = 2;
+              }
+            } else {
+              if (q[0] > '0' && q[0] <= '9') {
+                is_valid = 2;
+              }
             }
           }
         }
@@ -956,8 +964,11 @@ void handle_SaveAPRSCfg() {
       }
     }
 
-    if (is_valid) {
+    if (is_valid > 0) {
       preferences.putString(PREF_APRS_CALLSIGN, s);
+    }
+    if (is_valid < 2) {
+      preferences.putBool(PREF_LORA_TX_ENABLE, false);
     }
   }
   if (server.hasArg(PREF_APRS_SYMBOL_TABLE) && !server.arg(PREF_APRS_SYMBOL_TABLE).isEmpty()){
@@ -975,6 +986,14 @@ void handle_SaveAPRSCfg() {
     // Avoid wrong paths like WIDE2-1,WIDE1-1
     if (! ( s.indexOf("WIDE1") > s.indexOf("WIDE") || s.indexOf("WIDE-") > -1 || s.startsWith("RFONLY,WIDE") || s.startsWith("NOGATE,WIDE") || s.indexOf("*") > -1 ))
       preferences.putString(PREF_APRS_RELAY_PATH, s);
+  }
+  if (server.hasArg(PREF_APRS_OBJECT_NAME)){
+    String s = server.arg(PREF_APRS_OBJECT_NAME);
+    s.trim();
+    if (s == preferences.getString(PREF_APRS_CALLSIGN))
+      preferences.putString(PREF_APRS_OBJECT_NAME, "");
+    else
+      preferences.putString(PREF_APRS_OBJECT_NAME, s);
   }
   if (server.hasArg(PREF_APRS_COMMENT)){
     preferences.putString(PREF_APRS_COMMENT, server.arg(PREF_APRS_COMMENT));
