@@ -959,7 +959,7 @@ void handle_SaveAPRSCfg() {
         }
       } else {
         if (*p && strlen(p) <= 6) {
-          is_valid = true;
+          is_valid = 2;
         }
       }
     }
