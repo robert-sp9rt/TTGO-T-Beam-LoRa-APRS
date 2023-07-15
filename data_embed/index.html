@@ -464,6 +464,7 @@ III: Values above are referring to latitude; distance between two latitudes is a
                         <option value="1">TX on main frequency</option>
                         <option value="2">TX on secondary frequency</option>
                         <option value="3">TX on both frequencies</option>
+                        <option value="4">(TX on both frequencies as USER - not recommended, needed in SP)</option>
                         <option value="0">Don't send our beacon on RF (but only to kiss and to APRS-IS)</option>
                       </select>
                     </div>
@@ -575,7 +576,7 @@ III: Values above are referring to latitude; distance between two latitudes is a
                 </div>
                 <div>
                     <label for="shutdown_act">Auto power off</label>
-                    <input name="shutdown_act" id="shutdown_act" type="checkbox" value="1" title="activate auto shutdown after usb plug off (not for T-BEAM 0.7). The power off the device will be switched off.">
+                    <input name="shutdown_act" id="shutdown_act" type="checkbox" value="1" title="activate auto shutdown after usb plug off (not for T-BEAM 0.7). The power off the device will be switched off. Default: 'yes' (power off). Consider if you need to switch it to 'no' (keep power on), i.e. if you are an additionaly battery-connected igate, or if you have a not reliable power source.">
                 </div>
                 <div>
                     <label for="shutdown_dt">Auto power off delay [s]</label>

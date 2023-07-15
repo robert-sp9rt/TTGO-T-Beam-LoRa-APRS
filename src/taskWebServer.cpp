@@ -105,7 +105,7 @@ String aprsis_status = "Disconnected";
 // aprsis 3rd party traffic encoding
 String generate_third_party_packet(String, String);
 void do_send_status_message_about_reboot_to_aprsis();
-#ifdef T_BEAM_V1_0
+#if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
 void do_send_status_message_about_shutdown_to_aprsis();
 #endif
 #ifdef KISS_PROTOCOL
@@ -156,7 +156,11 @@ WiFiClient aprsis_client;
   Syslog syslog(udpClient, SYSLOG_PROTO_IETF);
 #endif
 
-#ifdef T_BEAM_V1_0
+#ifdef T_BEAM_V1_2
+#define XPOWERS_CHIP_AXP2101
+  #include <XPowersLib.h>
+  extern XPowersAXP2101 axp;
+#elif T_BEAM_V1_0
   #include <axp20x.h>
   extern AXP20X_Class axp;
 #endif
@@ -367,14 +371,18 @@ void handle_Beacon() {
 }
 
 void handle_Shutdown() {
-  #ifdef T_BEAM_V1_0
+  #if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
     #if defined(ENABLE_SYSLOG)
       syslog_log(LOG_WARNING, String("WebServer: Shutdown Request -> Shutdown..."));
     #endif
     Serial.println("WebServer: Shutdown Request -> Shutdown...");
     server.send(200,"text/html", "Shutdown");
     do_send_status_message_about_shutdown_to_aprsis();
-    axp.setChgLEDMode(AXP20X_LED_OFF);
+    #ifdef T_BEAM_V1_0
+      axp.setChgLEDMode(AXP20X_LED_OFF);
+    #elif T_BEAM_V1_2
+      axp.setChargingLedMode(XPOWERS_CHG_LED_OFF);
+    #endif
     axp.shutdown();
   #else
     #if defined(ENABLE_SYSLOG)
@@ -1435,7 +1443,7 @@ void do_send_status_message_about_reboot_to_aprsis()
 {
   do_send_status_message_about_shutdown_or_reboot_to_aprsis(SSMASTA_REBOOT);
 }
-#ifdef T_BEAM_V1_0
+#if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
 void do_send_status_message_about_shutdown_to_aprsis()
 {
   do_send_status_message_about_shutdown_or_reboot_to_aprsis(SSMASTA_SHUTDOWN);
@@ -1490,7 +1498,7 @@ void do_send_status_message_about_connect_to_aprsis(void) {
       esp_task_wdt_reset();
       loraSend(txPower, lora_freq, lora_speed, 0, outString);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
     }
-    if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies > 1 && lora_digipeating_mode > 1 && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq) {
+    if (((tx_own_beacon_from_this_device_or_fromKiss__to_frequencies > 1 && lora_digipeating_mode > 1) || tx_own_beacon_from_this_device_or_fromKiss__to_frequencies == 4) && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq) {
       esp_task_wdt_reset();
       loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, 0, outString);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
     }
@@ -1908,6 +1916,8 @@ void send_to_aprsis()
       // switch LORA chip off during firmware upload
       #ifdef T_BEAM_V1_0
         axp.setPowerOutPut(AXP192_LDO2, AXP202_OFF);
+      #elif T_BEAM_V1_2
+        axp.disableALDO2();
       #endif
       Serial.printf("Firmware: Update: %s\r\n", upload.filename.c_str());
       if (!Update.begin(UPDATE_SIZE_UNKNOWN)) { //start with max available size
@@ -1925,6 +1935,9 @@ void send_to_aprsis()
         Update.printError(Serial);
         #ifdef T_BEAM_V1_0
           axp.setPowerOutPut(AXP192_LDO2, AXP202_ON);
+        #elif T_BEAM_V1_2
+          axp.setALDO2Voltage(3300);
+          axp.enableALDO2();
         #endif
       }
     } else if (upload.status == UPLOAD_FILE_END) {
@@ -1940,6 +1953,9 @@ void send_to_aprsis()
         Update.printError(Serial);
         #ifdef T_BEAM_V1_0
           axp.setPowerOutPut(AXP192_LDO2, AXP202_ON);
+        #elif T_BEAM_V1_2
+          axp.setALDO2Voltage(3300);
+          axp.enableALDO2();
         #endif
       }
     }

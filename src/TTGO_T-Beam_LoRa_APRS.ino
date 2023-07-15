@@ -19,7 +19,12 @@
 #include <Adafruit_SPITFT.h>
 #include <Adafruit_SPITFT_Macros.h>
 #include <gfxfont.h>
+#ifdef T_BEAM_V1_2
+#define	XPOWERS_CHIP_AXP2101
+#include <XPowersLib.h>
+#else
 #include <axp20x.h>
+#endif
 #include <esp_task_wdt.h>
 #include <sys/time.h>
 #include "taskGPS.h"
@@ -60,7 +65,7 @@ String wifi_info;                // saving wifi info (CLI|AP|dis) for Oled. If W
 #define SPI_ss 18
 
 // IO config
-#ifdef T_BEAM_V1_0
+#if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
   #define I2C_SDA 21
   #define I2C_SCL 22
   #define BUTTON  38                //pin number for Button on TTGO T-Beam
@@ -141,7 +146,7 @@ String aprsis_callsign = "";
 String aprsis_password = "-1";
 uint8_t aprsis_data_allow_inet_to_rf = 0;  // 0: disable (default). 1: gate to main qrg. 2: gate to secondary qrg. 3: gate to both frequencies
 extern void do_send_status_message_about_reboot_to_aprsis();
-#ifdef T_BEAM_V1_0
+#if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
 extern void do_send_status_message_about_shutdown_to_aprsis();
 #endif
 #endif
@@ -186,7 +191,7 @@ int position_ambiguity = 0; // 0: default, compressed. -1: uncompressed. -2: unc
 String aprsPresetShown = "P";
 //double lastTxdistance = 0;
 
-#if defined(T_BEAM_V1_0) || defined(T_BEAM_V0_7)
+#if defined(T_BEAM_V1_2) || defined(T_BEAM_V1_0) || defined(T_BEAM_V0_7)
   boolean gps_state = true;
 #else
   boolean gps_state = false;
@@ -435,7 +440,7 @@ uint8_t lora_cross_digipeating_mode = 0;	// 0: disable cross freq digipeating. 1
 #define FLAG_ADD_SNR_RSSI_FOR_APRSIS__ONLY_IF_HEARD_DIRECT 32
 uint8_t lora_add_snr_rssi_to_path = (FLAG_ADD_SNR_RSSI_FOR_KISS | FLAG_ADD_SNR_RSSI_FOR_APRSIS__ONLY_IF_HEARD_DIRECT);	// Add snr+rssi to path. May become default, after it proves it behaves good to our network
 boolean kiss_add_snr_rssi_to_path_at_position_without_digippeated_flag = 1; // Add snr+rssi at last digipeater, without digipeated flag, at last position in path. Set to 1, if you pass data to aprs-is. Set to 0 if you pass data to your favourite digipeater software. We need this hack because our rssi-encoded data should not be interpreted as "(last ==) direct heard station" in the aprs-is net.
-int tx_own_beacon_from_this_device_or_fromKiss__to_frequencies = 1;	// TX own beacon generated from this device or our beacon from from-kiss on following frequencies. Only if lora_digipeating_mode > 1 (we are a WIDE1 or WIDE2 digi). 1: main freq. 2: cross_digi_freq. 3: both frequencies
+int tx_own_beacon_from_this_device_or_fromKiss__to_frequencies = 1;	// TX own beacon generated from this device or our beacon from from-kiss on following frequencies. Only if lora_digipeating_mode > 1 (we are a WIDE1 or WIDE2 digi). 1: main freq. 2: cross_digi_freq. 3: both frequencies. 4: special case for SP (allow sending on both frequencies, even if wie are not a WIDE digi; not recommended)
 boolean tx_own_beacon_from_this_device_or_fromKiss__to_aprsis = true;	// TX own beacon generated from this device or our beacon from from-kiss to aprs-is.
 int rx_on_frequencies = 1;			// RX freq. Only if lora_digipeating_mode < 2 (we are a user) 1: main freq. 2: cross_digi_freq. 3: both frequencies
 
@@ -486,6 +491,8 @@ static const adc_atten_t atten = ADC_ATTEN_DB_6;
 static const adc_unit_t unit = ADC_UNIT_1;
 #ifdef T_BEAM_V1_0
   AXP20X_Class axp;
+#elif T_BEAM_V1_2
+  XPowersAXP2101 axp;
 #endif
 
 
@@ -914,7 +921,7 @@ void sendpacket(uint8_t sp_flags){
   if (lora_tx_enabled && tx_own_beacon_from_this_device_or_fromKiss__to_frequencies) {
     if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies % 2)
       loraSend(txPower, lora_freq, lora_speed, (sp_flags & SP_ENFORCE_COURSE) ? LORA_FLAGS_NODELAY : 0, outString);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
-    if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies > 1 && lora_digipeating_mode > 1 && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq)
+    if (((tx_own_beacon_from_this_device_or_fromKiss__to_frequencies > 1 && lora_digipeating_mode > 1) || tx_own_beacon_from_this_device_or_fromKiss__to_frequencies == 4) && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq)
       loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, (sp_flags & SP_ENFORCE_COURSE) ? LORA_FLAGS_NODELAY : 0, outString);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
   }
   lastTX = millis();
@@ -990,6 +997,9 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, uint8_t fla
   esp_task_wdt_reset();
 #ifdef T_BEAM_V1_0
   axp.setPowerOutPut(AXP192_LDO2, AXP202_ON);                           // switch LoRa chip on
+#elif T_BEAM_V1_2
+  axp.setALDO2Voltage(3300);
+  axp.enableALDO2();                                                    // switch LoRa chip on
 #endif
 
   //byte array
@@ -1017,7 +1027,7 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, uint8_t fla
   }
   if (lora_SPEED != lora_speed_rx_curr)
     lora_set_speed(lora_speed_rx_curr);
-#ifdef T_BEAM_V1_0
+#if (T_BEAM_V1_0) || defined(T_BEAM_V1_2)
   // if lora_rx is disabled, but  ONLY if lora_digipeating_mode == 0 AND no SerialBT.hasClient is connected,
   // we can savely go to sleep
   if (! (lora_rx_enabled || lora_digipeating_mode > 0
@@ -1025,8 +1035,13 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, uint8_t fla
             || (enable_bluetooth && SerialBT.hasClient())
           #endif
       ) )
-    axp.setPowerOutPut(AXP192_LDO2, AXP202_OFF);                           // switch LoRa chip off
+    #ifdef T_BEAM_V1_0
+      axp.setPowerOutPut(AXP192_LDO2, AXP202_OFF);                           // switch LoRa chip off
+    #else
+      axp.disableALDO2();                                                    // switch LoRa chip off
+    #endif
 #endif
+  esp_task_wdt_reset();
   // release lock
 #ifdef IF_SEMAS_WOULD_WORK
   xSemaphoreGive(sema_lora_chip);
@@ -1038,9 +1053,9 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, uint8_t fla
 
 
 void batt_read(){
-#ifdef T_BEAM_V1_0
-  BattVolts = axp.getBattVoltage()/1000;
-  InpVolts = axp.getVbusVoltage()/1000;
+#if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
+  BattVolts = ((float ) axp.getBattVoltage())/1000.0;
+  InpVolts = ((float ) axp.getVbusVoltage())/1000.0;
 #elif T_BEAM_V0_7
   InpVolts = (((float)analogRead(35) / 8192.0) * 2.0 * 3.3 * (1100.0 / 1000.0))+0.41;    // fixed thanks to Luca IU2FRL
   //InpVolts = adc1_get_raw(ADC1_CHANNEL_7)/1000;
@@ -1073,19 +1088,24 @@ void writedisplaytext(String HeaderTxt, String Line1, String Line2, String Line3
 #ifdef notdef
   if (InpVolts < 1.0) {
     if (BattVolts < 3.5 && BattVolts > 3.3){
-      #ifdef T_BEAM_V1_0
-        #ifdef ENABLE_LED_SIGNALING
+      #ifdef ENABLE_LED_SIGNALING
+        #ifdef T_BEAM_V1_0
           axp.setChgLEDMode(AXP20X_LED_BLINK_4HZ);
-        #endif
+        #elif T_BEAM_V1_2
+          axp.setChargingLedMode(XPOWERS_CHG_LED_BLINK_4HZ);
+      #endif
       #endif
     } else if (BattVolts <= 3.3) {
       #ifdef T_BEAM_V1_0
         axp.setChgLEDMode(AXP20X_LED_OFF);
-        //axp.shutdown(); <-we need fix this
+      #elif T_BEAM_V1_2
+        axp.setChargingLedMode(XPOWERS_CHG_LED_OFF);
+      #endif
+      #if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
         #ifdef ENABLE_WIFI
           do_send_status_message_about_shutdown_to_aprsis();
         #endif
-        axp.shutdown();
+        //axp.shutdown(); <-we need fix this
       #endif
     }
   }
@@ -1311,19 +1331,23 @@ String getSatAndBatInfo() {
   } else {
     line5 = line5 + " B:" + String(BattVolts, 2) + "V";
   }
-#else
-  line5 = line5 + " P:" + String(InpVolts, 2) + "V";
-#endif
-#ifdef T_BEAM_V1_0
   String charge = "";
   if (b_c_out > 0) {
     charge = "-" + String(b_c_out);
   } else if (b_c_in > 0) {
       charge = String(b_c_in);
   } else {
-    charge = "-" + String((int ) axp.getVbusCurrent());
+    charge = String((int ) axp.getVbusCurrent());
   }
   line5 = line5 + "/" + charge + "mA";
+#elif T_BEAM_V1_2
+  if (InpVolts > 1.0) {
+    line5 = line5 + " P:" + String(InpVolts, 2) + "V";
+  } else {
+    line5 = line5 + " B:" + String(BattVolts, 2) + "V";
+  }
+#else
+  line5 = line5 + " P:" + String(InpVolts, 2) + "V";
 #endif
 #if defined(ENABLE_BLUETOOTH) && defined(KISS_PROTOCOL)
   if (line5.length() < 21-3 && enable_bluetooth && SerialBT.hasClient()) {
@@ -1429,11 +1453,15 @@ void fillDisplayLines3to5(int force) {
   if (oled_line3and4_format == 0) {
     if (show_locator) {
       OledLine3 = aprsLatLonAsMaidenheadGridLocator + " " + aprsPresetShown;
-      #ifdef T_BEAM_V1_0
+      #if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
         // field for extended use, i.e. temp, pressure, humidity
         if (aprsLatLonAsMaidenheadGridLocator.length() + 1 + 1 + + 12 <= 21) {
+	  #ifdef T_BEAM_V1_0
+            float t_AXP = axp.getTemp();
+          #elif T_BEAM_V1_2
+	    float t_AXP = axp.getTemperature();
+          #endif
           char sensor_data[13] = { 0 } ; // room for 12 + \0 == 13
-          float t_AXP = axp.getTemp();
           if (t_AXP < -9.9) t_AXP = -9.9; else if (t_AXP > 99.9) t_AXP = 99.9;
           sprintf(sensor_data, " tAXP:%.1f%cC", t_AXP, '\xF7');
           OledLine3 = OledLine3 + String(sensor_data);
@@ -1501,8 +1529,12 @@ void fillDisplayLines3to5(int force) {
     if (show_locator) {
       // field for extended use, i.e. temp, pressure, humidity
       char sensor_data[12] = { 0 } ; // room for 11 + \0 == 12
-      #ifdef T_BEAM_V1_0
-        float t_AXP = axp.getTemp();
+      #if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
+        #ifdef T_BEAM_V1_0
+          float t_AXP = axp.getTemp();
+        #elif T_BEAM_V1_2
+          float t_AXP = axp.getTemperature();
+        #endif
         if (t_AXP < -9.9) t_AXP = -9.9; else if (t_AXP > 99.9) t_AXP = 99.9;
         sprintf(sensor_data, "tAXP:%.1f%cC", t_AXP, '\xF7');
       #endif
@@ -1708,7 +1740,12 @@ uint32_t next_time_to_send_telemetry_EqnsParmUnitBITS = 0L;
   // We may add axp temperature either if we have no battery (B V, B C out, B C in 0),
   // or if no USB is plugeed in (B C in will be 0). -> We could use the position
   // of B C in. We decided this on boot and remember,
-  boolean may_add_temperature = (!axp.isVBUSPlug() || axp.getBattVoltage() < 1);
+  boolean may_add_temperature = (!axp.isVBUSPlug() || (float ) axp.getBattVoltage() < 1000.0);
+#elif T_BEAM_V1_2
+  //boolean may_add_temperature = (!axp.isVbusInsertOnSource() || (float ) axp.getBattVoltage() < 1000.0);
+  // until we can't get current load (axp.xxxCurrent() is not available by the 2101 driver),
+  // we always have a free field for adding a temperature measurement
+  boolean may_add_temperature = true;
 #endif
 
 #define ALSO_SEND_Telemetry_BITS 0	// Set this to 1 if you need to send also the "digital BITS packet"
@@ -1750,7 +1787,7 @@ void sendTelemetryFrame() {
       s = String("EQNS.");
       //s = s + "0,5.1,3000";
       s = s + "0,33.8,0";
-      #ifdef T_BEAM_V1_0
+      #if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
         //s = s + ",0,10,0" + ",0,10,0" + ",0,28,3000" + ",0,10,0";
         s = s + ",0,10,0" + ",0,16.9,0" + ",0,10,0";
         if (may_add_temperature)
@@ -1766,7 +1803,7 @@ void sendTelemetryFrame() {
       s = String("PARM.");
       //s = s + "B Volt";
       s = s + "P V";
-      #ifdef T_BEAM_V1_0
+      #if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
         //s = s + ",B In" + ",B Out" + ",AC V" + ",AC C";
         s = s + ",P C" + ",B V" + ",BCout";
         if (may_add_temperature)
@@ -1783,7 +1820,7 @@ void sendTelemetryFrame() {
       // Item lengths are strict. Look at spec!
       s = String("UNIT.");
       s = s + "mV";
-      #ifdef T_BEAM_V1_0
+      #if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
         //s = s + ",mA" + ",mA" + ",mV" + ",mA";
         s = s + ",mA" + ",mV" + ",mA";
         if (may_add_temperature)
@@ -1927,20 +1964,27 @@ void sendTelemetryFrame() {
   // min(): because we obviously measured 4.3.11. Result is 257 and sent value 2.
   // Working with uint8_t is a good decision, because due to spec, the value must not
   // be greater than 255, because it's the numeric representation of an 8 bit value.
-  #ifdef T_BEAM_V1_0
+  #if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
     // No, batteries or external power may not be present -> do not start at 3000 mW
-    //uint8_t dc_volt = min((int ) (((axp.getVbusVoltage() - 3000) / 28), 255);
-    uint8_t dc_volt = min((int ) (axp.getVbusVoltage() / 33.8), 255);
-    uint8_t dc_c = min((int ) (axp.getVbusCurrent() / 10), 255);
-    //uint8_t b_volt = min((int ) (((axp.getBattVoltage() - 3000) / 5.1), 255);
-    uint8_t b_volt = min((int ) (axp.getBattVoltage() / 16.9), 255);
-    uint8_t b_c_out = min((int ) (axp.getBattDischargeCurrent() / 10), 255);
-    uint8_t b_c_in = may_add_temperature ? 0 : min((int ) (axp.getBattChargeCurrent() / 10), 255);
-    uint8_t axp_temperature = may_add_temperature ?  max(min((int ) ((axp.getTemp() + 5) / 0.25), 255), 0) : 0;
+    //uint8_t dc_volt = max(0, min((int ) (((((float ) axp.getVbusVoltage()) - 3000.0) / 28), 255)));
+    uint8_t dc_volt = max(0, min((int ) (((float ) axp.getVbusVoltage()) / 33.8), 255));
+    //uint8_t b_volt = max(0, min((int ) (((((float ) axp.getBattVoltage()) - 3000.0) / 5.1), 255)));
+    uint8_t b_volt = max(0, min((int ) (((float ) axp.getBattVoltage()) / 16.9), 255));
+    #ifdef T_BEAM_V1_0
+      uint8_t dc_c = max(0, min((int ) (axp.getVbusCurrent() / 10), 255));
+      uint8_t b_c_out = max(0, min((int ) (axp.getBattDischargeCurrent() / 10), 255));
+      uint8_t b_c_in = may_add_temperature ? 0 : min((int ) (axp.getBattChargeCurrent() / 10), 255);
+      uint8_t axp_temperature = may_add_temperature ? max(min((int ) ((axp.getTemp() + 5) / 0.25), 255), 0) : 0;
+    #elif T_BEAM_V1_2
+      uint8_t dc_c = 0;
+      uint8_t b_c_out = 0;
+      uint8_t b_c_in = 0;
+      uint8_t axp_temperature = max(min((int ) ((axp.getTemperature() + 5) / 0.25), 255), 0);
+    #endif
   #else
     batt_read();
-    //uint8_t b_volt = min((int ) ((InpVolts * 1000) - 3000 / 5.1), 255);
-    uint8_t dc_volt = min((int ) (InpVolts * 1000 / 33.8), 255);
+    //uint8_t b_volt = max(0, min((int ) ((InpVolts * 1000) - 3000 / 5.1), 255));
+    uint8_t dc_volt = max(0, min((int ) (InpVolts * 1000 / 33.8), 255));
   #endif
 
 
@@ -1951,7 +1995,7 @@ void sendTelemetryFrame() {
   // We break with this standard here, because we don't like waste bandwith
   char buf[5]; // ",000" + \0 == 5
   sprintf(buf, ",%03u", dc_volt); telemetryData += String(buf);
-  #ifdef T_BEAM_V1_0
+  #if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
     sprintf(buf, ",%03u", dc_c); telemetryData += String(buf);
     sprintf(buf, ",%03u", b_volt); telemetryData += String(buf);
     sprintf(buf, ",%03u", b_c_out); telemetryData += String(buf);
@@ -3252,18 +3296,40 @@ void setup_phase2_soft_reconfiguration(boolean runtime_reconfiguration) {
     Serial.printf("APRS Callsign: %s\r\n", Tcall.c_str());
   }
 
-  #ifdef T_BEAM_V1_0
+  #if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
     // switch LoRa chip on or off
-    axp.setPowerOutPut(AXP192_LDO2, (lora_rx_enabled || lora_digipeating_mode > 0) ? AXP202_ON : AXP202_OFF);
+    #ifdef T_BEAM_V1_0
+      axp.setPowerOutPut(AXP192_LDO2, (lora_rx_enabled || lora_digipeating_mode > 0) ? AXP202_ON : AXP202_OFF);
+    #elif T_BEAM_V1_2
+      if (lora_rx_enabled || lora_digipeating_mode > 0) {
+        axp.setALDO2Voltage(3300);
+        axp.enableALDO2();                            // switch LoRa chip on
+      } else {
+        axp.disableALDO2();                           // switch LoRa chip off
+      }
+    #endif
 
     if (gps_state){
-      axp.setPowerOutPut(AXP192_LDO3, AXP202_ON);                           // switch on GPS
+      #ifdef T_BEAM_V1_0
+        axp.setPowerOutPut(AXP192_LDO3, AXP202_ON);                           // switch on GPS
+      #elif T_BEAM_V1_2
+        axp.setALDO3Voltage(3300);
+        axp.enableALDO3();                                                    // switch on GPS
+      #endif
     } else {
-      axp.setPowerOutPut(AXP192_LDO3, AXP202_OFF);                          // switch off GPS
+      #ifdef T_BEAM_V1_0
+        axp.setPowerOutPut(AXP192_LDO3, AXP202_OFF);                          // switch off GPS
+      #elif T_BEAM_V1_2
+        axp.disableALDO3();                                                   // switch off GPS
+      #endif
     }
     Serial.printf("GPS powered %s\r\n", gps_state ? "on" : "off");
 
-    //axp.setPowerOutPut(AXP192_EXTEN, AXP202_ON);                          // switch this on if you need it
+    //#ifdef T_BEAM_V1_0
+    //  axp.setPowerOutPut(AXP192_EXTEN, AXP202_ON);                          // switch this on if you need it
+    //#elif T_BEAM_V1_2
+    // axp.enableXXX();                                                       // switch this on if you need it
+    //#endif
   #else
     gps_state = false;
   #endif
@@ -3434,7 +3500,7 @@ void setup()
 #endif // ENABLE_PEFERENCES
 
   pinMode(TXLED, OUTPUT);
-  #ifdef T_BEAM_V1_0
+  #if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
     pinMode(BUTTON, INPUT);
   #elif T_BEAM_V0_7
     pinMode(BUTTON, INPUT);
@@ -3445,6 +3511,7 @@ void setup()
 
   #ifdef T_BEAM_V1_0
     if (!axp.begin(Wire, AXP192_SLAVE_ADDRESS)) {
+      ;
     }
     axp.setLowTemp(0xFF);                                                 //SP6VWX Set low charging temperature
     axp.setPowerOutPut(AXP192_DCDC2, AXP202_ON);
@@ -3456,6 +3523,25 @@ void setup()
     axp.adc2Enable(0x80, true);
     axp.setChgLEDMode(AXP20X_LED_OFF);
     axp.setPowerOutPut(AXP192_DCDC1, AXP202_ON);                          // oled do not turn off
+  #elif T_BEAM_V1_2
+    if (!axp.begin(Wire, AXP2101_SLAVE_ADDRESS, I2C_SDA, I2C_SCL)) {
+      ;
+    }
+    axp.setDC1Voltage(3300);
+    axp.enableDC1();                                                        // oled do not turn off
+    axp.setDC2Voltage(3300);
+    axp.enableDC2();
+    // Enable ADC to measure battery current, USB voltage etc.
+    axp.enableGeneralAdcChannel();
+    axp.enableTemperatureMeasure();
+    axp.enableBattDetection();
+    axp.enableSystemVoltageMeasure();
+    axp.enableVbusVoltageMeasure();
+    axp.enableBattVoltageMeasure();
+    axp.enableTSPinMeasure();
+    axp.setChargingLedMode(XPOWERS_CHG_LED_OFF);
+    axp.setChargeTargetVoltage(XPOWERS_AXP2101_CHG_VOL_4V2);
+    axp.setChargerConstantCurr(XPOWERS_AXP2101_CHG_CUR_500MA);
   #endif
 
   // can reduce cpu power consumtion up to 20 %
@@ -3470,7 +3556,7 @@ void setup()
 
   #ifdef ENABLE_PREFERENCES
     if (clear_preferences == 2){
-      //#ifdef T_BEAM_V1_0
+      //#if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
         if(digitalRead(BUTTON)==LOW){
           clear_preferences = 3;
           preferences.clear();
@@ -3496,7 +3582,7 @@ void setup()
     //adc1_config_width(ADC_WIDTH_BIT_12);
     //adc1_config_channel_atten(ADC1_CHANNEL_7,ADC_ATTEN_DB_11);
   #endif
-  #ifndef T_BEAM_V1_0
+  #if !defined(T_BEAM_V1_0) && !defined(T_BEAM_V1_2)
     adc1_config_width(ADC_WIDTH_BIT_12);
     adc1_config_channel_atten(ADC1_CHANNEL_7,ADC_ATTEN_DB_6);
   #endif
@@ -4549,7 +4635,7 @@ void handle_usb_serial_input(void) {
 #endif
             Serial.println("  trace <on|off>");
             Serial.println("  reboot");
-#ifdef T_BEAM_V1_0
+#if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
             Serial.println("  shutdown");
 #endif
 #ifdef	ENABLE_WIFI
@@ -4566,7 +4652,7 @@ void handle_usb_serial_input(void) {
 #endif
             delay(100);
             ESP.restart();
-#ifdef T_BEAM_V1_0
+#if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
           } else if (cmd == "shutdown") {
             Serial.println("*** shutdown: halting!");
             #if defined(ENABLE_SYSLOG) && defined(ENABLE_WIFI)
@@ -4719,7 +4805,7 @@ void handle_usb_serial_input(void) {
               loraSend(txPower, lora_freq, lora_speed, 0, inputBuf);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
               esp_task_wdt_reset();
             }
-            if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies > 1 && lora_digipeating_mode > 1 && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq) {
+            if (((tx_own_beacon_from_this_device_or_fromKiss__to_frequencies > 1 && lora_digipeating_mode > 1) || tx_own_beacon_from_this_device_or_fromKiss__to_frequencies == 4) && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq) {
               loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, 0, inputBuf);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
               esp_task_wdt_reset();
             }
@@ -5078,9 +5164,15 @@ debug_bestHdop = bestHdop;
            // ^kiss client has not recently sent a position gain (sb_max_interval plus 10 seconds grace) and kiss client sent no other data
          ((time_last_frame_via_kiss_received + sb_max_interval * 2 + 10*1000L) < millis())) {
             // ^ kiss client sent no positions and stoped sending other data for 2*sb_max_interval (plus 10 seconds grace)
-#ifdef T_BEAM_V1_0
-      if (!gps_state && gps_state_before_autochange)
-        axp.setPowerOutPut(AXP192_LDO3, AXP202_ON);
+#if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
+      if (!gps_state && gps_state_before_autochange) {
+        #ifdef T_BEAM_V1_0
+          axp.setPowerOutPut(AXP192_LDO3, AXP202_ON);
+        #elif T_BEAM_V1_2
+          axp.setALDO3Voltage(3300);
+          axp.enableALDO3();
+        #endif
+      }
 #endif
       gps_state = gps_state_before_autochange;
       dont_send_own_position_packets = false;
@@ -5107,7 +5199,7 @@ debug_bestHdop = bestHdop;
     next_fixed_beacon = millis() + fix_beacon_interval;
   }
 
-  #ifdef T_BEAM_V1_0
+  #if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
     if(shutdown_active){
       if(InpVolts> 4){
         shutdown_usb_status_bef = true;
@@ -5122,7 +5214,11 @@ debug_bestHdop = bestHdop;
 
       if(shutdown_countdown_timer_enable){
         if(millis() >= shutdown_countdown_timer){
-          axp.setChgLEDMode(AXP20X_LED_OFF);
+          #ifdef T_BEAM_V1_0
+            axp.setChgLEDMode(AXP20X_LED_OFF);
+          #elif T_BEAM_V1_2
+            axp.setChargingLedMode(XPOWERS_CHG_LED_OFF);
+          #endif
 #ifdef	ENABLE_WIFI
           do_send_status_message_about_shutdown_to_aprsis();
 #endif
@@ -5156,10 +5252,15 @@ debug_bestHdop = bestHdop;
             if (!dont_send_own_position_packets) {
               gps_state_before_autochange = gps_state;
               if (gps_allow_sleep_while_kiss) {
-#ifdef T_BEAM_V1_0
-                if (gps_state)
-                  axp.setPowerOutPut(AXP192_LDO3, AXP202_OFF);                           // switch off GPS
-#endif
+                #if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
+                  if (gps_state) {
+                    #ifdef T_BEAM_V1_0
+                      axp.setPowerOutPut(AXP192_LDO3, AXP202_OFF);                           // switch off GPS
+                    #elif T_BEAM_V1_2
+                      axp.disableALDO3();
+                    #endif
+                }
+                #endif
                 gps_state = false;
               }
               dont_send_own_position_packets = true;
@@ -5247,7 +5348,7 @@ debug_bestHdop = bestHdop;
         if (lora_tx_enabled) {
           if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies % 2)
             loraSend(txPower, lora_freq, lora_speed, 0, String(data));  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
-          if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies > 1 && lora_digipeating_mode > 1 && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq)
+          if (((tx_own_beacon_from_this_device_or_fromKiss__to_frequencies > 1 && lora_digipeating_mode > 1) || tx_own_beacon_from_this_device_or_fromKiss__to_frequencies == 4) && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq)
             loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, 0, String(data));  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
           enableOled(); // enable OLED
           writedisplaytext("((KISSTX))","",String(data),"","","");
@@ -5268,9 +5369,11 @@ out:
    sema_lora_chip = true;
 #endif
    if (rf95.waitAvailableTimeout(100)) {
-    #ifdef T_BEAM_V1_0
-      #ifdef ENABLE_LED_SIGNALING
+    #ifdef ENABLE_LED_SIGNALING
+      #ifdef T_BEAM_V1_0
         axp.setChgLEDMode(AXP20X_LED_LOW_LEVEL);
+      #elif T_BEAM_V1_2
+        axp.setChargingLedMode(XPOWERS_CHG_LED_BLINK_1HZ);
       #endif
     #endif
     #ifdef BUZZER
@@ -5484,18 +5587,22 @@ out:
     }
 call_invalid_or_blacklisted:
 invalid_packet:
-    #ifdef T_BEAM_V1_0
-      #ifdef ENABLE_LED_SIGNALING
+    #ifdef ENABLE_LED_SIGNALING
+      #ifdef T_BEAM_V1_0
         axp.setChgLEDMode(AXP20X_LED_OFF);
+      #elif T_BEAM_V1_2
+        axp.setChargingLedMode(XPOWERS_CHG_LED_OFF);
+      #else
+        ; // make compiler happy
       #endif
     #else
       ; // make compiler happy
     #endif
    } else {
 #ifdef IF_SEMAS_WOULD_WORK
-    xSemaphoreGive(sema_lora_chip);
+     xSemaphoreGive(sema_lora_chip);
 #else
-    sema_lora_chip = false;
+     sema_lora_chip = false;
 #endif
    }
   }
@@ -5725,20 +5832,32 @@ behind_position_tx:
       if (millis() - last_debug_send_time > 1000*5) {
         last_debug_send_time = millis();
         String debug_message = "";
-        #ifdef T_BEAM_V1_0
+        #if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
           debug_message += "Bat V: " + String(axp.getBattVoltage());
           debug_message += ", ";
-          debug_message += "Bat IN A: " + String(axp.getBattChargeCurrent());
-          debug_message += ", ";
-          debug_message += "Bat OUT A: " + String(axp.getBattDischargeCurrent());
-          debug_message += ", ";
-          debug_message += "USB Plugged: " + String(axp.isVBUSPlug());
+          #ifdef T_BEAM_V1_0
+            debug_message += "Bat IN A: " + String(axp.getBattChargeCurrent());
+            debug_message += ", ";
+            debug_message += "Bat OUT A: " + String(axp.getBattDischargeCurrent());
+            debug_message += ", ";
+          #endif
+          #ifdef T_BEAM_V1_0
+            debug_message += "USB Plugged: " + String(axp.isVBUSPlug());
+          #elif T_BEAM_V1_2
+            debug_message += "USB Plugged: " + String(axp.isVbusInsertOnSource());
+          #endif
           debug_message += ", ";
           debug_message += "USB V: " + String(axp.getVbusVoltage());
           debug_message += ", ";
-          debug_message += "USB A: " + String(axp.getVbusCurrent());
-          debug_message += ", ";
-          debug_message += "Temp C: " + String(axp.getTemp());
+          #ifdef T_BEAM_V1_0
+            debug_message += "USB A: " + String(axp.getVbusCurrent());
+            debug_message += ", ";
+          #endif
+          #ifdef T_BEAM_V1_0
+            debug_message += "Temp C: " + String(axp.getTemp());
+          #elif T_BEAM_V1_2
+            debug_message += "Temp C: " + String(axp.getTemperature());
+          #endif
         #else
           debug_message += "USB V: " + String(InpVolts);
         #endif
