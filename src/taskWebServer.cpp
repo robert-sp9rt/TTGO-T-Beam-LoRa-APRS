@@ -169,18 +169,28 @@ WiFiClient aprsis_client;
 void sendCacheHeader() { server.sendHeader("Cache-Control", "max-age=3600"); }
 void sendGzipHeader() { server.sendHeader("Content-Encoding", "gzip"); }
 
-String jsonEscape(String s){
-    const char *p = s.c_str();
+
+String htmlFreetextEscape(const char *s) {
+    const char *p = s;
     String s_out;
 
     for (; *p; p++) {
       char buf[7] = ""; // room for "<0x01>" + \0 == 7
       switch (*p) {
-      case '\\':
-        strcpy(buf, "\\\\");
-        break;
       case '\"':
-        strcpy(buf, "\\\"");
+        strcpy(buf, "&quot;");
+        break;
+      case '<':
+        strcpy(buf, "&lt;");
+        break;
+      case '>':
+        strcpy(buf, "&gt;");
+        break;
+      case '&':
+        strcpy(buf, "&amp;");
+        break;
+      case ' ':
+        strcpy(buf, "&nbsp;");
         break;
       default:
         if (*p < 0x20 || *p == '\x7f') {
@@ -194,8 +204,29 @@ String jsonEscape(String s){
     return s_out;
 }
 
+String jsonEscape(const char *s){
+    const char *p = s;
+    String s_out;
+
+    for (; *p; p++) {
+      char buf[3] = ""; // room for 2x'\' + \0 == 7
+      switch (*p) {
+      case '\\':
+        strcpy(buf, "\\\\");
+        break;
+      case '\"':
+        strcpy(buf, "\\\"");
+        break;
+      default:
+        sprintf(buf, "%c", *p);
+      }
+      s_out += String(buf);
+    }
+    return s_out;
+}
+
 String jsonLineFromPreferenceString(const char *preferenceName, bool last=false){
-  return String("\"") + preferenceName + "\":\"" + jsonEscape(preferences.getString(preferenceName, "")) + (last ?  + R"(")" :  + R"(",)");
+  return String("\"") + preferenceName + "\":\"" + jsonEscape(preferences.getString(preferenceName, "").c_str()) + (last ?  + R"(")" :  + R"(",)");
 }
 String jsonLineFromPreferenceBool(const char *preferenceName, bool last=false){
   return String("\"") + preferenceName + "\":" + (preferences.getBool(preferenceName) ? "true" : "false") + (last ?  + R"()" :  + R"(,)");
@@ -411,8 +442,8 @@ void refill_preferences_as_jsonData()
 {
   String s_tmp;
   String s = "{";
-  s = s + "\n  " + String("\"") + PREF_WIFI_PASSWORD + "\": \"" + jsonEscape((preferences.getString(PREF_WIFI_PASSWORD, "").isEmpty() ? String("") : "*")) + R"(",)";
-  s = s + "\n  " +  String("\"") + PREF_AP_PASSWORD + "\": \"" + jsonEscape((preferences.getString(PREF_AP_PASSWORD, "").isEmpty() ? String("") : "*")) + R"(",)";
+  s = s + "\n  " + String("\"") + PREF_WIFI_PASSWORD + "\": \"" + jsonEscape((preferences.getString(PREF_WIFI_PASSWORD, "").isEmpty() ? "" : "*")) + R"(",)";
+  s = s + "\n  " +  String("\"") + PREF_AP_PASSWORD + "\": \"" + jsonEscape((preferences.getString(PREF_AP_PASSWORD, "").isEmpty() ? "" : "*")) + R"(",)";
   s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_WIFI_ENABLE);
   s = s + "\n  " +  jsonLineFromPreferenceString(PREF_WIFI_SSID);
   s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_WIFI_STA_ALLOW_FAILBACK_TO_MODE_AP_AFTER_ONCE_CONNECTED);
@@ -547,9 +578,9 @@ void fill_wifi_config_as_jsonData() {
   if (apcnt) {
     for (pos = 0 ; pos < apcnt; pos++) {
       s += "    {\n      ";
-      s = s + "\"SSID\": \"" + jsonEscape(String(APs[pos].ssid)) + "\"";
+      s = s + "\"SSID\": \"" + jsonEscape(APs[pos].ssid) + "\"";
       s += ",\n      ";
-      s = s + "\"password\": \"" + jsonEscape(String(APs[pos].pw)) + "\"";
+      s = s + "\"password\": \"" + jsonEscape(APs[pos].pw) + "\"";
       if (!pos) {
         s += ",\n      ";
         s = s + "\"prio\": 1";
@@ -561,13 +592,13 @@ void fill_wifi_config_as_jsonData() {
     }
   } else {
     s += "    {\n      ";
-    s = s + "\"SSID\": \"" + jsonEscape(preferences.getString(PREF_WIFI_PASSWORD, "")) + "\"";
+    s = s + "\"SSID\": \"" + jsonEscape(preferences.getString(PREF_WIFI_PASSWORD, "").c_str()) + "\"";
     s += ",\n      ";
-    s = s + "\"password\": \"" + jsonEscape(preferences.getString(PREF_WIFI_PASSWORD, "")) + "\"";
+    s = s + "\"password\": \"" + jsonEscape(preferences.getString(PREF_WIFI_PASSWORD, "").c_str()) + "\"";
     s += "\n    }\n";
   }
   s += "  ],\n\n";
-  s = s + "  \"SelfAP_PW\": \"" + jsonEscape(preferences.getString(PREF_AP_PASSWORD)) + "\"";
+  s = s + "  \"SelfAP_PW\": \"" + jsonEscape(preferences.getString(PREF_AP_PASSWORD, "").c_str()) + "\"";
 
   s += "\n}\n";
 
@@ -610,7 +641,7 @@ void handle_ReceivedList() {
     strftime(buf, 64, "%Y-%m-%d %H:%M:%S", &element->rxTime);
     auto packet_data = received.createNestedObject();
     packet_data["time"] = String(buf);
-    packet_data["packet"] = element->packet->c_str();
+    packet_data["packet"] = htmlFreetextEscape(element->packet->c_str());
     packet_data["rssi"] = element->RSSI;
     packet_data["snr"] = element->SNR;
   }
@@ -631,7 +662,7 @@ void handle_ReceivedList() {
       jsonData += ",{";
     }
     jsonData += jsonLineFromString("time", buf);
-    jsonData += jsonLineFromString("packet", element->packet->c_str());
+    jsonData += jsonLineFromString("packet", htmlFreetextEscape(element->packet->c_str()).c_str());
     jsonData += jsonLineFromInt("rssi", element->RSSI);
     jsonData += jsonLineFromInt("snr", element->SNR, true);
     jsonData += "}";

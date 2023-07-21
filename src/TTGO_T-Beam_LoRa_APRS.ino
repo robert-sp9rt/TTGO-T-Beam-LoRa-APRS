@@ -176,6 +176,7 @@ String aprsLonPresetNiceNotation;
 String aprsLatLonAsMaidenheadGridLocator;
 String aprsLatLonDAO = "";
 String aprsLatLonPresetCOMP = "";
+boolean aprsLatLonInvalidPosition = true;
 RawDegrees bestRawLat;
 RawDegrees bestRawLng;
 double bestDoubleLat;
@@ -669,16 +670,21 @@ out_relay_path:
     outString += String(buf);
   }
 
-  // position_ambiguity is not defined for compressed positions.
-  // But we test it, in order to see what happens.
-  // Else we could send in non-compressed mode, but will loose altitude or course/speed info.
-  // This is ok, because if you like to hide your position for privacy reasons,
-  // course/speed and altituded are also values you like to protect.
-  //if (!(sp_flags & SP_POS_FIXED) && gps_state && gps_isValid &
-       //(position_ambiguity < -4 || position_ambiguity >= 0) &&
-       //aprsLatLonPresetCOMP.length()) {
-  //if (position_ambiguity >= 0) {
-  if (position_ambiguity == 0 && aprsLatLonPresetCOMP.length()) {
+  if (aprsLatLonInvalidPosition) {
+    // aprs spec: default null position.
+    // The null position should be include the \. symbol (unknown/indeterminate position).
+    outString += "0000.00N\\00000.00W.";
+    may_add_dao_extension = false;
+  } else if (position_ambiguity == 0 && aprsLatLonPresetCOMP.length()) {
+    // position_ambiguity is not defined for compressed positions.
+    // But we test it, in order to see what happens.
+    // Else we could send in non-compressed mode, but will loose altitude or course/speed info.
+    // This is ok, because if you like to hide your position for privacy reasons,
+    // course/speed and altituded are also values you like to protect.
+    //if (!(sp_flags & SP_POS_FIXED) && gps_state && gps_isValid &
+         //(position_ambiguity < -4 || position_ambiguity >= 0) &&
+         //aprsLatLonPresetCOMP.length()) {
+    //if (position_ambiguity >= 0) {
     char helper_base91[] = {"0000\0"};
 
     outString += aprsSymbolTable;
@@ -749,13 +755,8 @@ out_relay_path:
 
   } else {  // not compressed, i.e. fixed position
 
-    if ((aprsLatPreset == "0000.00N" || aprsLatPreset == "0000.00S") && (aprsLonPreset == "00000.00W" || aprsLonPreset == "00000.00E")) {
-      // aprs spec: default null position.
-      // The null position should be include the \. symbol (unknown/indeterminate position).
-      outString += "0000.00N\00000.00W.";
-      may_add_dao_extension = false;
-    } else if (position_ambiguity > 0) {
-      char buf[10]; // room for 00000.00W + \0 == 10
+    if (position_ambiguity > 0) {
+      char buf[10]; // room for 00000.00E + \0 == 10
       int n;
       int pos;
       // Only change mm.hh in dd[d]mm.hh, due to spec. Not degrees.
@@ -839,6 +840,14 @@ out_relay_path:
       outString += " Batt=";
       outString += String(BattVolts, 2);
       outString += ("V");
+      #ifdef T_BEAM_V1_2
+        outString = outString + "/" + String(axp.getBatteryPercent()) + "%";
+        if (axp.isCharging()) {
+          outString += "+"; // is charging -> indicate with "+"
+        } else if  (!axp.isVbusIn()) {
+          outString += "-"; // not charging and no vbus -> is discharging -> indicate with "-"
+        }
+      #endif
     }
     if (InpVolts > 1.0) {
       outString += " P=";
@@ -1341,10 +1350,18 @@ String getSatAndBatInfo() {
   }
   line5 = line5 + "/" + charge + "mA";
 #elif T_BEAM_V1_2
-  if (InpVolts > 1.0) {
+  if (axp.isVbusIn()) {
     line5 = line5 + " P:" + String(InpVolts, 2) + "V";
   } else {
     line5 = line5 + " B:" + String(BattVolts, 2) + "V";
+  }
+  if (axp.isBatteryConnect()) {
+    line5 = line5 + "/" + String(axp.getBatteryPercent()) + "%";
+    if (axp.isCharging()) {
+      line5 += "+"; // is charging -> indicate with "+"
+    } else if (!axp.isVbusIn()) {
+      line5 += "-"; // not charging and no vbus -> is discharging -> indicate with "-"
+    }
   }
 #else
   line5 = line5 + " P:" + String(InpVolts, 2) + "V";
@@ -2253,8 +2270,8 @@ boolean readFile(fs::FS &fs, const char *filename) {
     if ( (JSONBuffer.containsKey("SelfAP_PW") && (p = JSONBuffer["SelfAP_PW"])) ||
          (JSONBuffer.containsKey("ap_password") && (p = JSONBuffer["ap_password"])) ) {
         String ap_password = String(p);
-        if (ap_password.length() && ap_password.length() > 7) {
-          wifi_ModeAP_PASS = ap_password;
+        if (ap_password.length() > 7) {
+          wifi_ModeAP_PASS = String(ap_password);
           Serial.printf("readFile: wifi.cfg, valid Self-AP PW to be used %s\r\n", wifi_ModeAP_PASS.c_str());
         }
     }
@@ -2435,8 +2452,8 @@ int storeLatLonPreset(String _sLat, String _sLon, int precision) {
   char helper_base91[] = {"0\0"};
   char nswe;
   float f;
-  double fLon = 0;
-  double fLat = 0;
+  double fLon = 0.0;
+  double fLat = 0.0;
 
   p = sLat.c_str();
   // some assurance
@@ -2451,18 +2468,23 @@ int storeLatLonPreset(String _sLat, String _sLon, int precision) {
     for (int i = 0; q[i]; i++) {
       if (i == 2) {
         if (p[2] != '-' || q[2] != '-') {
-          return storeLatLonPreset("0000.00N", "00000.00W", 0);
+          return storeLatLonPreset("00-00.00N", "000-00.0000W", 0);
         }
       } else if (i == 5) {
         if ((p[5] != '.' || q[5] != '.')) {
-          return storeLatLonPreset("0000.00N", "00000.00W", 0);
+          return storeLatLonPreset("00-00.00N", "000-00.0000W", 0);
         }
       } else if (p[i+1] && q[i+1] && (!isdigit(p[i]) || !isdigit(q[i]))) {
-        return storeLatLonPreset("0000.00N", "00000.00W", 0);
+        return storeLatLonPreset("00-00.00N", "000-00.0000W", 0);
       }
     }
   } else {
-    return storeLatLonPreset("0000.00N", "00000.00W", 0);
+    return storeLatLonPreset("00-00.00N", "000-00.0000W", 0);
+  }
+
+  if (aprsLatLonInvalidPosition) {
+    // APRS special notation 00000.00W means, no valid position; 00000.00E would be a correct position
+    aprsLatLonInvalidPosition = (sLon == "000-00.0000W" && sLat == "00-00.0000N");
   }
 
   // We have stored the manual position string in a heigher precision (in case resolution more precise than 18.52m is required; i.e. for base-91 location encoding, or DAO extenstion).
@@ -2477,24 +2499,25 @@ int storeLatLonPreset(String _sLat, String _sLon, int precision) {
   sprintf(buf, "%.2s%05.2f%c", p, (f > 59.99 ? 59.99 : f), nswe);
   tmp_aprsLatPreset = String(buf);
 
-  if (sLat.length() > 9 && (precision == 1 || precision == 2)) {
+  if (!aprsLatLonInvalidPosition && sLat.length() > 9 && (precision == 1 || precision == 2)) {
+    float fp = f;
     if (precision == 1) {
-      if (f > 59.999) f=59.999;
+      if (fp > 59.999) fp=59.999;
     } else {
-      if (f > 59.9999) f=59.9999;
+      if (fp > 59.9999) fp=59.9999;
     }
     if (precision == 1) {
-      sprintf(buf, "%.2s%06.3f", p, f);
+      sprintf(buf, "%.2s%06.3f", p, fp);
       tmp_aprsLatLonDAO = String("!W") + String(buf[7]);
     } else {
-      sprintf(buf, "%.2s%07.4f", p, f);
+      sprintf(buf, "%.2s%07.4f", p, fp);
       ax25_base91enc(helper_base91, 1, atoi(buf+7)*0.91);
       tmp_aprsLatLonDAO = String("!w") + helper_base91[0];
     }
     buf[7] = nswe; buf[8] = 0;;
     tmp_aprsLatPresetDAO = String(buf);
     // "NiceNotation" may be used for presenting at oled. Four decimals would be too hard to read. We use 3 decimals for both, precision 1 and precision 2.
-    sprintf(buf, "%.2s-%06.3f%c", p, f, nswe);
+    sprintf(buf, "%.2s-%06.3f%c", p, (f > 59.999 ? 59.999 : f), nswe);
     tmp_aprsLatPresetNiceNotation = String(buf);
   } else {
     tmp_aprsLatPresetDAO = tmp_aprsLatPreset;
@@ -2502,7 +2525,7 @@ int storeLatLonPreset(String _sLat, String _sLon, int precision) {
     sprintf(buf, "%.2s-%05.2f%c", p, (f > 59.99 ? 59.99 : f), nswe);
     tmp_aprsLatPresetNiceNotation = String(buf);
   }
-  if (aprsLatLonPresetCOMP.isEmpty()) {
+  if (!aprsLatLonInvalidPosition && aprsLatLonPresetCOMP.isEmpty()) {
     sprintf(buf, "%.2s", p);
     fLat = atof(buf) + f/60.0;
     if (nswe == 'S')
@@ -2520,17 +2543,18 @@ int storeLatLonPreset(String _sLat, String _sLon, int precision) {
   sprintf(buf, "%.3s%05.2f%c", p, (f > 59.99 ? 59.99 : f), nswe);
   tmp_aprsLonPreset = String(buf);
 
-  if (sLon.length() > 10 && (precision == 1 || precision == 2)) {
+  if (!aprsLatLonInvalidPosition && sLon.length() > 10 && (precision == 1 || precision == 2)) {
+    float fp = f;
     if (precision == 1) {
-      if (f > 59.999) f=59.999;
+      if (fp > 59.999) fp=59.999;
     } else {
-      if (f > 59.9999) f=59.9999;
+      if (fp > 59.9999) fp=59.9999;
     }
     if (precision == 1) {
-      sprintf(buf, "%.3s%06.3f", p, f);
+      sprintf(buf, "%.3s%06.3f", p, fp);
       tmp_aprsLatLonDAO = tmp_aprsLatLonDAO + String(buf[8]) + "!";
     } else {
-      sprintf(buf, "%.3s%07.4f", p, f);
+      sprintf(buf, "%.3s%07.4f", p, fp);
       ax25_base91enc(helper_base91, 1, atoi(buf+7)*0.91);
       tmp_aprsLatLonDAO = tmp_aprsLatLonDAO + helper_base91[0] + "!";
     }
@@ -2538,7 +2562,7 @@ int storeLatLonPreset(String _sLat, String _sLon, int precision) {
     tmp_aprsLonPresetDAO = String(buf);
     // "NiceNotation" may be used for presenting at oled. Four decimals would be too hard to read. We use 3 decimals (see precision 1 above).
     // Furthermore, we don't have enough space on oled anyway for one additional character.
-    sprintf(buf, "%.3s-%06.3f%c", p, f, nswe);
+    sprintf(buf, "%.3s-%06.3f%c", p, (f > 59.999 ? 59.999 : f), nswe);
     tmp_aprsLonPresetNiceNotation = String(buf);
     tmp_aprsLatLonAsMaidenheadGridLocator = compute_maidenhead_grid_locator(tmp_aprsLatPresetNiceNotation, tmp_aprsLonPresetNiceNotation, 0);
   } else {
@@ -2548,7 +2572,7 @@ int storeLatLonPreset(String _sLat, String _sLon, int precision) {
     tmp_aprsLonPresetNiceNotation = String(buf);
     tmp_aprsLatLonAsMaidenheadGridLocator = compute_maidenhead_grid_locator(tmp_aprsLatPresetNiceNotation, tmp_aprsLonPresetNiceNotation, 1);
   }
-  if (aprsLatLonPresetCOMP.isEmpty()) {
+  if (!aprsLatLonInvalidPosition && aprsLatLonPresetCOMP.isEmpty()) {
     sprintf(buf, "%.3s", p);
     fLon = atof(buf) + f/60.0;
     if (nswe == 'W')
@@ -2572,7 +2596,7 @@ int storeLatLonPreset(String _sLat, String _sLon, int precision) {
   aprsLatLonAsMaidenheadGridLocator = String(tmp_aprsLatLonAsMaidenheadGridLocator);
   // Only when called from a function called from setup_phase2_soft_reconfiguration (after boot oder config save) with preset position (indicator: aprsLatLonPresetCOMP is empty).
   // Else: store_compressed_position() is explicitely called right after this function
-  if (aprsLatLonPresetCOMP.isEmpty())
+  if (!aprsLatLonInvalidPosition && aprsLatLonPresetCOMP.isEmpty())
     store_compressed_position(fLat, fLon);
 
   return 0;
@@ -2591,6 +2615,7 @@ void init_and_validate_aprs_position_and_icon() {
     latlon_precision = 0;
   }
 
+  aprsLatLonInvalidPosition = true;
   aprsLatPresetFromPreferences.toUpperCase(); aprsLatPresetFromPreferences.replace(",", "."); aprsLatPresetFromPreferences.trim();
   aprsLonPresetFromPreferences.toUpperCase(); aprsLonPresetFromPreferences.replace(",", "."); aprsLonPresetFromPreferences.trim();
   if ( aprsLatPresetFromPreferences.length() == 11 &&
@@ -2613,7 +2638,9 @@ void init_and_validate_aprs_position_and_icon() {
       aprsLonPreset.length() != 9 || !(aprsLonPreset.endsWith("E") || aprsLonPreset.endsWith("W")) || aprsLonPreset.c_str()[5] != '.' ||
       aprsLatPresetDAO.length() != 8 || !(aprsLatPresetDAO.endsWith("N") || aprsLatPresetDAO.endsWith("S")) || aprsLatPresetDAO.c_str()[4] != '.' ||
       aprsLonPresetDAO.length() != 9 || !(aprsLonPresetDAO.endsWith("E") || aprsLonPresetDAO.endsWith("W")) || aprsLonPresetDAO.c_str()[5] != '.') {
-    storeLatLonPreset("0000.00N", "00000.00W", 0);
+    aprsLatLonPresetCOMP = "";
+    aprsLatLonInvalidPosition = true;
+    storeLatLonPreset("00-00.00N", "000-00.0000W", 0);
   }
 
   if (aprsSymbolTable.length() != 1)
@@ -3345,11 +3372,11 @@ void setup_phase2_soft_reconfiguration(boolean runtime_reconfiguration) {
 
   // LoRa Chip config
   // if we are fill-in or wide2 digi, we listen only on configured main frequency
-  lora_speed_rx_curr = (rx_on_frequencies  != 2 || lora_digipeating_mode > 1) ? lora_speed : lora_speed_cross_digi;
+  lora_speed_rx_curr = (rx_on_frequencies != 2 || lora_digipeating_mode > 1) ? lora_speed : lora_speed_cross_digi;
   lora_set_speed(lora_speed_rx_curr);
   Serial.printf("LoRa Speed:\t%lu\r\n", lora_speed_rx_curr);
 
-  lora_freq_rx_curr = (rx_on_frequencies  != 2 || lora_digipeating_mode > 1) ? lora_freq : lora_freq_cross_digi;
+  lora_freq_rx_curr = (rx_on_frequencies != 2 || lora_digipeating_mode > 1) ? lora_freq : lora_freq_cross_digi;
   rf95.setFrequency(lora_freq_rx_curr);
   Serial.printf("LoRa FREQ:\t%f\r\n", lora_freq_rx_curr);
 
@@ -3527,6 +3554,7 @@ void setup()
     if (!axp.begin(Wire, AXP2101_SLAVE_ADDRESS, I2C_SDA, I2C_SCL)) {
       ;
     }
+    axp.disableTSPinMeasure();
     axp.setDC1Voltage(3300);
     axp.enableDC1();                                                        // oled do not turn off
     axp.setDC2Voltage(3300);
@@ -3538,10 +3566,16 @@ void setup()
     axp.enableSystemVoltageMeasure();
     axp.enableVbusVoltageMeasure();
     axp.enableBattVoltageMeasure();
-    axp.enableTSPinMeasure();
     axp.setChargingLedMode(XPOWERS_CHG_LED_OFF);
+    // set the charging voltage
     axp.setChargeTargetVoltage(XPOWERS_AXP2101_CHG_VOL_4V2);
+    // set the charging current
     axp.setChargerConstantCurr(XPOWERS_AXP2101_CHG_CUR_500MA);
+    // Battery-friendly settings:
+    // Set the precharge current
+    axp.setPrechargeCurr(XPOWERS_AXP2101_PRECHARGE_200MA);
+    // Set the charging termination current
+    axp.setChargerTerminationCurr(XPOWERS_AXP2101_CHG_ITERM_25MA);
   #endif
 
   // can reduce cpu power consumtion up to 20 %
@@ -5201,7 +5235,7 @@ debug_bestHdop = bestHdop;
 
   #if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
     if(shutdown_active){
-      if(InpVolts> 4){
+      if(InpVolts > 4){
         shutdown_usb_status_bef = true;
         shutdown_countdown_timer_enable = false;
       }
