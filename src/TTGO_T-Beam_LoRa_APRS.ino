@@ -517,6 +517,23 @@ volatile boolean sema_lora_chip = false;
 
 // + FUNCTIONS-----------------------------------------------------------+//
 
+// This is a reimplementation of the buggy getLocalTime() library call of esp32
+// which caused 5s delay on each call of getLocalTime(), if no gps- or ntp-
+// time was obtained since boot. getLocalTime() has an optional argument to
+// reduce this delay, but even then each call has a delay of 10ms.
+// Also, posix recommends to call time with nullpointer instead of storing
+// the time to the address of the argument. On linux, see man (2) time.
+bool getLocalTimeTheBetterWay(struct tm * info)
+{
+  time_t now = time(0);
+  if (now != ~0 && now) {
+    localtime_r(&now, info);
+    if (info->tm_year > 99)
+      return true;
+  }
+  return false;
+}
+
 void do_serial_println(const String &msg)
 {
   if (usb_serial_data_type & 1) {
@@ -656,7 +673,7 @@ out_relay_path:
     char *p;
 
     // Objects always have a length of 9 and a timestamp
-    if (getLocalTime(&timeinfo)) {
+    if (getLocalTimeTheBetterWay(&timeinfo)) {
       strftime(buf_time, sizeof(buf_time), "%H%M%Sz", &timeinfo);
     } else {
       strcpy(buf_time, "000000");
@@ -1198,7 +1215,7 @@ void timer_once_a_second() {
 
   t_next_run = millis() + 1000;
   // update gps time string once a second
-  if (getLocalTime(&timeinfo)) {
+  if (getLocalTimeTheBetterWay(&timeinfo)) {
     strftime(gps_time_s, sizeof(gps_time_s), "%H:%M:%S", &timeinfo);
   }
 
@@ -1673,7 +1690,7 @@ void sendToWebList(const String& TNC2FormatedFrame, const int RSSI, const int SN
     receivedPacketData->packet->trim();
     receivedPacketData->RSSI = RSSI;
     receivedPacketData->SNR = SNR;
-    getLocalTime(&receivedPacketData->rxTime);
+    getLocalTimeTheBetterWay(&receivedPacketData->rxTime);
 
     if (xQueueSend(webListReceivedQueue, &receivedPacketData, (1000 / portTICK_PERIOD_MS)) != pdPASS){
       // remove buffer on error
@@ -1911,7 +1928,7 @@ void sendTelemetryFrame() {
     // For convenience, we store in pos 0 the month. If we use letters A-Z, a-z and and numbers 0-9, we could adress 62 days (exactly 2 months), before we start from new.
     // Pos 1 and 2: encodes the time. -> We get a resolution of min 23s, which is more than we need in typical usecases: 24*60*60.0/((26*2+10)**2) = 22.476s
     struct tm timeinfo{};
-    if (getLocalTime(&timeinfo)) {
+    if (getLocalTimeTheBetterWay(&timeinfo)) {
       char buf[4];
       int t = (timeinfo.tm_mon % 2) * 31 + ((timeinfo.tm_mday - 1) % 31);
       buf[0] = encode_int_in_char(t);
@@ -1940,7 +1957,7 @@ void sendTelemetryFrame() {
     // to have the overflow in mid of the week instead of saturday evening. We start our
     // week at thursday instead of sunday -> (tm_wday += 4).
     struct tm timeinfo{};
-    if (getLocalTime(&timeinfo)) {
+    if (getLocalTimeTheBetterWay(&timeinfo)) {
       char buf[4];
       // resolution 6 packets in an hour.
       int t = (24*60*((timeinfo.tm_wday + 4) % 7) + 60*timeinfo.tm_hour + timeinfo.tm_min) / 10.0;

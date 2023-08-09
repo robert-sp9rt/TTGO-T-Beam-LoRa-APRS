@@ -22,6 +22,8 @@ extern const char web_style_css_end[] asm("_binary_data_embed_style_css_out_end"
 extern const char web_js_js[] asm("_binary_data_embed_js_js_out_start");
 extern const char web_js_js_end[] asm("_binary_data_embed_js_js_out_end");
 
+bool getLocalTimeTheBetterWay(struct tm * info);
+
 // Variable needed to send beacon from html page
 extern bool manBeacon;
 
@@ -1400,10 +1402,22 @@ void restart_AP_or_STA(void) {
       ntp_server = "pool.ntp.org";
     preferences.putString(PREF_NTP_SERVER, ntp_server);
   }
-  configTime(0, 0, ntp_server.c_str());
+
+  // configTime() stores the memory address of ntp-server.
+  // Thus the variable needs to be static, else ntp will later will see garbage.
+  // This forbids the use of ntp_server.c_str().
+  // Now, we use there a static char array, instead of a more
+  // inefficient String buffer. configTime() expects a char array anyway.
+  // For more fun with bad concepts, see https://github.com/opendata-stuttgart/sensors-software/issues/471
+  { static char buf[64];
+    *buf = 0;
+    strncpy(buf, ntp_server.c_str(), sizeof(buf) -1);
+    buf[sizeof(buf)-1] = 0;
+    configTime(0, 0, buf);
+  }
   #ifdef ENABLE_SYSLOG
     struct tm timeinfo{};
-    if(!getLocalTime(&timeinfo)){
+    if(!getLocalTimeTheBetterWay(&timeinfo)){
       syslog_log(LOG_WARNING, "NTP: Failed to obtain time");
     } else {
       char buf[64];
@@ -1444,7 +1458,7 @@ void do_send_status_message_about_shutdown_or_reboot_to_aprsis(int why) {
     String outString = aprsis_callsign + ">" + MY_APRS_DEST_IDENTIFYER + ":>APRSIS-Conn: ";
     char buf[19];// Room for len(20220917 01:02:03z) + 1 /* \0 */  -> 19
     struct tm timeinfo{};
-    if (getLocalTime(&timeinfo)) {
+    if (getLocalTimeTheBetterWay(&timeinfo)) {
       strftime(buf, sizeof(buf), "%Y%m%d %H:%M:%Sz", &timeinfo);
       //sprintf(buf, "%X%2.2d %2.2d:%2.2d:%2.2dz", timeinfo.tm_mon+1, timeinfo.tm_mday, timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
     } else {
@@ -1488,7 +1502,7 @@ void do_send_status_message_about_connect_to_aprsis(void) {
   String outString = aprsis_callsign + ">" + MY_APRS_DEST_IDENTIFYER + ":>APRSIS-Conn: ";
   char buf[19];// Room for len(20220917 01:02:03z) + 1 /* \0 */  -> 19
   struct tm timeinfo{};
-  if (getLocalTime(&timeinfo)) {
+  if (getLocalTimeTheBetterWay(&timeinfo)) {
     strftime(buf, sizeof(buf), "%Y%m%d %H:%M:%Sz", &timeinfo);
     //sprintf(buf, "%X%2.2d %2.2d:%2.2d:%2.2dz", timeinfo.tm_mon+1, timeinfo.tm_mday, timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
   } else {
