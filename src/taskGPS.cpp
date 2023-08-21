@@ -6,6 +6,8 @@
 
 SFE_UBLOX_GPS myGPS;
 
+extern uint8_t usb_serial_data_type;
+
 #ifdef ENABLE_WIFI
   #include "wifi_clients.h"
   #define MAX_GPS_WIFI_CLIENTS 6
@@ -57,23 +59,25 @@ bool gpsInitialized = false;
     while (gpsSerial.available() > 0) {
       char gpsChar = (char)gpsSerial.read();
       gps.encode(gpsChar);
-      #ifdef ENABLE_WIFI
         if (gpsChar == '$') {
           gpsDataBuffer = String(gpsChar);
         } else {
           gpsDataBuffer += String(gpsChar);
 
           if (gpsChar == '\n') {
+	    if (usb_serial_data_type == 4)
+	      Serial.println(gpsDataBuffer);
+      #ifdef ENABLE_WIFI
             iterateWifiClients([](WiFiClient *client, int clientIdx, const String *data){
               if (client->connected()){
                 client->print(*data);
                 client->flush();
               }
             }, &gpsDataBuffer, gps_clients, MAX_GPS_WIFI_CLIENTS);
+      #endif
             gpsDataBuffer = "";
           }
         }
-      #endif
     }
     vTaskDelay(100 / portTICK_PERIOD_MS);
   }

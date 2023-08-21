@@ -526,7 +526,7 @@ volatile boolean sema_lora_chip = false;
 bool getLocalTimeTheBetterWay(struct tm * info)
 {
   time_t now = time(0);
-  if (now != ~0 && now) {
+  if (now && now != ~((time_t ) 0)) {
     localtime_r(&now, info);
     if (info->tm_year > 99)
       return true;

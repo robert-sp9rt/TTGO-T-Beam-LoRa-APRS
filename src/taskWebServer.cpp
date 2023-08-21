@@ -1358,8 +1358,6 @@ void restart_AP_or_STA(void) {
   } else if (WiFi.getMode() == WIFI_MODE_STA) {
 
     do_serial_println("WiFi: Status: " + String((int ) WiFi.status()) + ". Will run as mode STA (remote SSID: '" +  used_wifi_ModeSTA_SSID + "')");
-    // Save some battery
-    //WiFi.setSleep(true);
     esp_wifi_set_ps(WIFI_PS_MAX_MODEM);
     oled_wifi_SSID_curr = used_wifi_ModeSTA_SSID;
     oled_wifi_PASS_curr = used_wifi_ModeSTA_PASS;
@@ -1623,6 +1621,9 @@ int connect_to_aprsis(void) {
 
   // avoid sending old data
   to_aprsis_data = "";
+
+  // WiFi powermanagement. Disable sleep -> better network performance
+  WiFi.setSleep(false);
 
   return 0;
 }
@@ -1964,6 +1965,7 @@ void send_to_aprsis()
       #elif T_BEAM_V1_2
         axp.disableALDO2();
       #endif
+      WiFi.setSleep(false);
       Serial.printf("Firmware: Update: %s\r\n", upload.filename.c_str());
       if (!Update.begin(UPDATE_SIZE_UNKNOWN)) { //start with max available size
         #if defined(ENABLE_SYSLOG)
@@ -2173,6 +2175,7 @@ void send_to_aprsis()
               if ((ret = connect_to_aprsis()) < 0) {
                 log_msg = String("APRS-IS: on_Err: '") + aprsis_status + String("' [") + aprsis_client.remoteIP().toString() + String("], tries ") +  String(aprsis_connect_tries);
                 aprsis_client.stop();
+		WiFi.setSleep(true);
                 // Known problems which usually resolve by reboot:
                 if (ret == -5 /* login denied, until reboot. Reason unknown */ ||
                      (ret == -1 /* sometimes after boot it can't connect. DNS- or IP-stack Problem? */ && lora_digipeating_mode > 1) /* we are a digi */ ) {
@@ -2237,6 +2240,8 @@ void send_to_aprsis()
           }
 
         } else {
+
+	  WiFi.setSleep(true);
 
           if (aprsis_status != "Error: no internet") {
             aprsis_status = "Error: no internet";
