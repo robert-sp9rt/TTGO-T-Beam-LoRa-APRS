@@ -19,7 +19,7 @@
         </div>
         <article>
             <form action="/save_wifi_cfg" method="post">
-                <div class="grid-container quarters">
+                <div class="grid-container full">
                     <div>
                         <label for="wifi_en">Enable Wifi</label>
                         <select id="wifi_en" name="wifi_en">
@@ -29,41 +29,14 @@
                         </select>
                     </div>
                 </div>
-                <div class="grid-container quarters">
-                    <div id="wifi_list">
-                        <label for="wifi_ssid">Network</label>
-                        <input type="button" value="Scan WiFi" id="scan_wifi_btn" onclick="scanWifi();">
-                    </div>
-                </div>
-                <div class="grid-container quarters">
-                    <div>
-                        <label for="wifi_ssid">WiFi SSID</label>
-                        <input class="u-full-width" type="text" name="wifi_ssid" placeholder="Your Wifi SSID" title="Your Wifi SSID" id="wifi_ssid">
-                    </div>
-                    <div>
-                        <label for="wifi_password">WiFi Password</label>
-                        <input class="u-full-width" type="password" name="wifi_password" id="wifi_password" placeholder="Your WiFi Password" title="Your WiFi Password, 8 characters minimum">
-                    </div>
-                </div>
-                <div class="grid-container quarters">
-                    <div>
-                        <label for="wifi_pwrSTA">TXPWR as STA</label>
-                        <select id="wifi_pwrSTA" name="wifi_pwrSTA">
-                            <option value="80">Max (20dBm, 100mW, suggested)</option>
-                            <option value="8">Min (2dBm, 2mW)</option>
-                            <option value="44">Low (11dBm, 12mW)</option>
-                            <option value="60">Mid (15dBm, 32mW)</option>
-                            <option value="72">High (18dBm, 63mW)</option>
-                        </select>
-                    </div>
-                </div>
-                <div class="grid-container quarters">
+				<div class="grid-container full">
+					<h5 class="u-full-width">AP settings</h5>
+				</div>
+                <div class="grid-container halves">
                     <div>
                         <label for="ap_password">AUTO AP Password</label>
-                        <input class="u-full-width" type="password" name="ap_password" id="ap_password" placeholder="AUTO AP Password" title="AUTO AP Password, 8 characters minimum">
+                        <input type="password" name="ap_password" id="ap_password" placeholder="AUTO AP Password" title="AUTO AP Password, 8 characters minimum">
                     </div>
-                </div>
-                <div class="grid-container quarters">
                     <div>
                         <label for="wifi_pwrAP">TXPWR as AP</label>
                         <select id="wifi_pwrAP" name="wifi_pwrAP">
@@ -75,18 +48,46 @@
                         </select>
                     </div>
                 </div>
-                <div class="grid-container quarters">
+				<div class="grid-container full">
+					<h5 class="u-full-width">STA settings</h5>
+				</div>
+                <div class="grid-container full">
+                    <div id="wifi_list">
+                        <label for="wifi_ssid">Network</label>
+                        <input type="button" value="Scan WiFi" id="scan_wifi_btn" onclick="scanWifi();">
+                    </div>
+                </div>
+                <div class="grid-container thirds">
+                    <div>
+                        <label for="wifi_ssid">WiFi SSID</label>
+                        <input type="text" name="wifi_ssid" placeholder="Your Wifi SSID" title="Your Wifi SSID" id="wifi_ssid">
+                    </div>
+                    <div>
+                        <label for="wifi_password">WiFi Password</label>
+                        <input type="password" name="wifi_password" id="wifi_password" placeholder="Your WiFi Password" title="Your WiFi Password, 8 characters minimum">
+                    </div>
+                    <div>
+                        <label for="wifi_pwrSTA">TXPWR as STA</label>
+                        <select id="wifi_pwrSTA" name="wifi_pwrSTA">
+                            <option value="80">Max (20dBm, 100mW, suggested)</option>
+                            <option value="8">Min (2dBm, 2mW)</option>
+                            <option value="44">Low (11dBm, 12mW)</option>
+                            <option value="60">Mid (15dBm, 32mW)</option>
+                            <option value="72">High (18dBm, 63mW)</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="grid-container halves">
                     <div>
                         <label for="ntp_server">NTP Server</label>
                         <input type="text" name="ntp_server" id="ntp_server" placeholder="pool.ntp.org" title="NTP Server name or IP Address. I.e. pool.ntp.org. If your igate is in the HAMNET, use ntp.hc.r1.ampr.org.">
-                      </div>
+                    </div>
                     <div>
                         <label for="syslog_server">Syslog Server</label>
                         <input type="text" name="syslog_server" id="syslog_server" placeholder="" title="Syslog Server name or IP Address. Leave empty to switch off. If unsure, you may use the broadcast address 255.255.255.255. Syslog needs do be compiled in (it's by default now)">
-                      </div>
+                    </div>
                 </div>
-                </div>
-                <div class="grid-container quarters">
+                <div class="grid-container thirds">
                     <div>
                         <label for="wifi_failAP">Allow failback to Mode AP</label>
                         <input name="wifi_failAP" id="wifi_failAP" type="checkbox" value="1" title="
@@ -187,12 +188,12 @@ You like to enable, if you use your tracker portable and it should automatically
                           <option value="9">!I.e. To RF* and RF would not make any sense!<option>
                         </select>
                     </div>
-                </div>
-                <div class="grid-container halves">
-                    More info for SNR/RSSI path encoding see documentation section below
                     <div>
                         <label for="snraprsis">SNR/RSSI-encoding on kiss: compatible to APRS-IS?</label>
                         <input name="snraprsis" id="snraprsis" type="checkbox" value=1 title="Add snr+rssi at last digipeater, without digipeated flag. Use this for APRS-IS connections. If you have connected a digipeater software to kiss, this option has to be switched off">
+                        <div>
+                            More info for SNR/RSSI path encoding see documentation section below
+                        </div>
                     </div>
                 </div>
                 <div class="grid-container full">
@@ -244,13 +245,13 @@ You like to enable, if you use your tracker portable and it should automatically
                         <input name="aprs_batt" id="aprs_batt" type="checkbox" value="1" title=" show battery voltage after personal comment">
                     </div>
                     <div>
-                            *) requires reboot only if connection to aprs-is enabled
+                        *) requires reboot only if connection to aprs-is enabled
                     </div>
-                    </div>
-                    <div class="grid-container full">
-                        <h5 class="u-full-width">Telemetry Settings</h5>
-                    </div>
-                    <div class="grid-container quarters">
+                </div>
+                <div class="grid-container full">
+                    <h5 class="u-full-width">Telemetry Settings</h5>
+                </div>
+                <div class="grid-container thirds">
                     <div>
                         <label for="tnc_tel">Enable Self Telemetry</label>
                         <input name="tnc_tel" id="tnc_tel" type="checkbox" value="1" title="send self telemetry data">
@@ -285,7 +286,7 @@ You like to enable, if you use your tracker portable and it should automatically
                 <div class="grid-container full">
                     <h5 class="u-full-width">Fixed Beaconing Settings</h5>
                 </div>
-                <div class="grid-container quarters">
+                <div class="grid-container thirds">
                     <div>
                         <label for="aprs_fixed_beac">Fixed Beacon</label>
                         <input name="aprs_fixed_beac" id="aprs_fixed_beac" type="checkbox" value="1" title="enable fixed beacon when GPS is disabled or no fix">
@@ -294,16 +295,16 @@ You like to enable, if you use your tracker portable and it should automatically
                         <label for="aprs_fb_interv">Fixed Beacon Interval [s]</label>
                         <input name="aprs_fb_interv" id="aprs_fb_interv" type="number" min="120" title="time between sending a beacon if Fixed Beacon option is selected. 1800 or 3600 is recommended for users; 900 or 1800 for digis. Min 120. This beacon value is also used if GPS is lost when smart-beacooning. If it is >= sb_max_intervall, this value is used.">
                     </div>
+                </div>
+                <div class="grid-container thirds">
                     <div>
                         <label for="aprs_lat_p">Latitude</label>
-                        <input class="u-full-width" type="text" minlength="0" name="aprs_lat_p" id="aprs_lat_p" title="latitude for fixed beacon, APRS format for example: 5215.00N (this is ddmm.mmN). 'dd.nnnnN', '-dd.nnnn', 'dd mm[.nnn]' and 'dd mm ss' and 'dd mm' ss&quot;' and 'dd-mm[.nn]N' are also supported. If position is south, you can prefix '-' instead of writing 'S' behind the coordinate. '-nnS' does not make sense. If you like to add a locator, add it here and leave longitude field blank. APRS spec defindes a special notation for null-position: 0000.00N 00000.00W (W, not E). If GPS is enabled and a valid position has been received, that one will be used instead of the configured one, until the next system reboot">
+                        <input type="text" minlength="0" name="aprs_lat_p" id="aprs_lat_p" title="latitude for fixed beacon, APRS format for example: 5215.00N (this is ddmm.mmN). 'dd.nnnnN', '-dd.nnnn', 'dd mm[.nnn]' and 'dd mm ss' and 'dd mm' ss&quot;' and 'dd-mm[.nn]N' are also supported. If position is south, you can prefix '-' instead of writing 'S' behind the coordinate. '-nnS' does not make sense. If you like to add a locator, add it here and leave longitude field blank. APRS spec defindes a special notation for null-position: 0000.00N 00000.00W (W, not E). If GPS is enabled and a valid position has been received, that one will be used instead of the configured one, until the next system reboot">
                     </div>
                     <div>
                         <label for="aprs_lon_p">Longitude</label>
-                        <input class="u-full-width" type="text" minlength="0" name="aprs_lon_p" id="aprs_lon_p" title="longtitude for fixed beacon, APRS format for example 02050.59Ei (this is ddd.mmE). 'ddd.nnnnE', '-ddd.nnnn',  'ddd mm[.nnn]' and 'ddd mm ss' and 'ddd mm' ss&quot;' and 'ddd-mm[.nn]E' are also supported. If position is west, you can prefix '-' instead of writing 'W' behind the coordinate. '-nnW' does not make sense.. If you like to add a locator, add it to the latitude field and leave this field blank. APRS spec defindes a special notation for null-position: 0000.00N 00000.00W (W, not E). If GPS is enabled and a valid position has been received, that one will be used instead of the configured one, until the next system reboot">
+                        <input type="text" minlength="0" name="aprs_lon_p" id="aprs_lon_p" title="longtitude for fixed beacon, APRS format for example 02050.59Ei (this is ddd.mmE). 'ddd.nnnnE', '-ddd.nnnn',  'ddd mm[.nnn]' and 'ddd mm ss' and 'ddd mm' ss&quot;' and 'ddd-mm[.nn]E' are also supported. If position is west, you can prefix '-' instead of writing 'W' behind the coordinate. '-nnW' does not make sense.. If you like to add a locator, add it to the latitude field and leave this field blank. APRS spec defindes a special notation for null-position: 0000.00N 00000.00W (W, not E). If GPS is enabled and a valid position has been received, that one will be used instead of the configured one, until the next system reboot">
                     </div>
-                </div>
-                <div class="grid-container quarters">
                     <div>
                         <label for="aprs_llfgps">Use lat/lon of current GPS position</label>
                         <input name="aprs_llfgps" id="aprs_llfgps" type="checkbox" value="1" title="Use lat/lon of current GPS position. Overwrites Latitude / Longitude settings above. Requires valid GPS position.">
@@ -312,7 +313,7 @@ You like to enable, if you use your tracker portable and it should automatically
                 <div class="grid-container full">
                     <h5 class="u-full-width">Position format and precision / ambiguity</h5>
                 </div>
-                <div class="grid-container quarters">
+                <div class="grid-container full">
                     <div>
                         <label for="pos_amb">Position precision *</label>
                         <select id="pos_amb" name="pos_amb" title="Position precision / Ambiguity
@@ -341,24 +342,22 @@ III: Values above are referring to latitude; distance between two latitudes is a
                 <div class="grid-container quarters">
                     <div>
                         <label for="sb_min_interv">Min interval [s]</label>
-                        <input name="sb_min_interv" id="sb_min_interv" type="number" min="10" title="Minimal time for Smart Beaconing. 60 is recommended. Min 10.">
+                        <input class="u-full-width" name="sb_min_interv" id="sb_min_interv" type="number" min="10" title="Minimal time for Smart Beaconing. 60 is recommended. Min 10.">
                     </div>
                     <div>
                         <label for="sb_max_interv">Max interval [s]</label>
-                        <input name="sb_max_interv" id="sb_max_interv" type="number" min="90" title="Maximal time for Smart Beaconing. 1800 is recommended. Min 90.">
+                        <input class="u-full-width" name="sb_max_interv" id="sb_max_interv" type="number" min="90" title="Maximal time for Smart Beaconing. 1800 is recommended. Min 90.">
                     </div>
-                </div>
-                <div class="grid-container quarters">
                     <div>
                         <label for="sb_min_speed">Min speed [km/h]</label>
-                        <input name="sb_min_speed" id="sb_min_speed" type="number" min="0" title="Minimal speed for Smart Beaconing. Min 0.">
+                        <input class="u-full-width" name="sb_min_speed" id="sb_min_speed" type="number" min="0" title="Minimal speed for Smart Beaconing. Min 0.">
                     </div>
                     <div>
                         <label for="sb_max_speed">Max speed [km/h]</label>
-                        <input name="sb_max_speed" id="sb_max_speed" type="number" min="1" title="Maximal speed for Smart Beaconing. Min 1.">
+                        <input class="u-full-width" name="sb_max_speed" id="sb_max_speed" type="number" min="1" title="Maximal speed for Smart Beaconing. Min 1.">
                     </div>
                 </div>
-                <div class="grid-container quarters">
+                <div class="grid-container thirds">
                     <div>
                         <label for="sb_angle">Course change [degrees]</label>
                         <input name="sb_angle" id="sb_angle" type="number" min="5" max="360" title="Angle of course change to speed up beacon transmission. Recommended value: 28. Range 0 to 360.">
@@ -390,7 +389,7 @@ III: Values above are referring to latitude; distance between two latitudes is a
                     </div>
                 </div>
                 <div class="grid-container full">
-                    <h6 class="u-full-width">Additional settings for secondary frequency:<br/>EXPERIMANTAL - USE WITH CARE!</h6>
+                    <h6 class="u-full-width">Additional settings for secondary frequency:<br/>EXPERIMENTAL - USE WITH CARE!</h6>
                 </div>
                 <div class="grid-container halves">
                     <div>
@@ -403,7 +402,7 @@ III: Values above are referring to latitude; distance between two latitudes is a
                         <input name="txPower_x" id="txPower_x" type="number" min="0" max="23" title="LoRa TX Power on secondary frequency. Range 0 to 23dBm">
                     </div>
                 </div>
-                <div class="grid-container halves">
+                <div class="grid-container full">
                     <div>
                         <label for="lora_speed_x">Speed on secondary frequency</label>
                         <select id="lora_speed_x" name="lora_speed_x">
@@ -432,9 +431,9 @@ III: Values above are referring to latitude; distance between two latitudes is a
                     </div>
                 </div>
                 <div class="grid-container full">
-                    <h6 class="u-full-width">Additional settings for mode repater:<br/>EXPERIMANTAL - USE WITH CARE!</h6>
+                    <h6 class="u-full-width">Additional settings for mode repater:<br/>EXPERIMENTAL - USE WITH CARE!</h6>
                 </div>
-                <div class="grid-container halves">
+                <div class="grid-container full">
                     <div>
                         <label for="lora_dig_mode">LoRa Repater Mode</label>
                         <select id="lora_dig_mode" name="lora_dig_mode">
@@ -449,18 +448,16 @@ III: Values above are referring to latitude; distance between two latitudes is a
                     <div>
                         <label for="lora_dig_x_m">Digipeat heard stations from MAIN frequency to which frequencies</label>
                         (If LoRa Repeater Mode has not been set to off)
-                        <select id="lora_dig_x_m" name="lora_dig_x_m">
+                        <select class="u-full-width" id="lora_dig_x_m" name="lora_dig_x_m">
                             <option value="0">Repeat only to main frequency (default)</option>
                             <option value="1">Repeat to both frequencies</option>
                             <option value="2">Repeat only to cross-digi frequency</option>
                         </select>
                     </div>
-                </div>
-                <div class="grid-container halves">
                     <div>
                       <label for="tx_qrg_bc">TX our beacon from this device or from-kiss to frequencies</label>
                       (Only honored, if we are configured as WIDE1 or WIDE2 digi)
-                      <select id="tx_qrg_bc" name="tx_qrg_bc">
+                      <select class="u-full-width" id="tx_qrg_bc" name="tx_qrg_bc">
                         <option value="1">TX on main frequency</option>
                         <option value="2">TX on secondary frequency</option>
                         <option value="3">TX on both frequencies</option>
@@ -583,7 +580,7 @@ III: Values above are referring to latitude; distance between two latitudes is a
                     <input name="shutdown_dt" id="shutdown_dt" type="number" min="3" max="3600" title="auto shutdown delay in seconds. Range 3 to 3600.">
                 </div>
             </div>
-            <div class="grid-container quarters">
+            <div class="grid-container thirds">
                 <div>
                     <label for="sh_rxtime">Display show RX time [s]</label>
                     <input name="sh_rxtime" id="sh_rxtime" type="number" min="0" max="45" title="show RX packet for seconds, refresh rate for OLED. Range 0 to 45.">
@@ -603,7 +600,7 @@ III: Values above are referring to latitude; distance between two latitudes is a
                   </select>
                 </div>
             </div>
-            <div class="grid-container quarters">
+            <div class="grid-container thirds">
                 <div>
                   <label for="oledl3l4fmt">OLED Line3 and Line4 Format</label>
                   <select id="oledl3l4fmt" name="oledl3l4fmt" title="A: (default): Original format, L3: Lat/Lon; L4: speed, course, altitude. Lat/Lon in APRS format. Good for learning how aprs works.
@@ -669,40 +666,6 @@ Hard readable lengths / too long for our display:
                   </select>
                 </div>
             </div>
-            <div class="grid-container halves">
-                <div>
-                  <label for="UptimeMinutes">Uptime of Device [min]</label>
-                  <input type="text" name="UptimeMinutes" id="UptimeMinutes" readonly title="uptime device in minutes">
-                </div>
-                <div>
-                  <label for="curPos">Current Position</label>
-                  <input type="text" name="curPos" id="curPos" readonly title="Current Position of device [P if fixed mode; p, if gps is invalid and used as temporary preset]">
-                </div>
-                <div>
-                  <label for="OledLine5">Satellite & Batt Info</label>
-                  <input type="text" name="OledLine5" id="OledLine5" readonly title="Satellite (#Sats/HDOP) [more sats are good, lowest HDOP is best. Should be < 8], and Batt Info [B means Battery; P means external pwr. Positive current is battery-charge-current, while prefixed with 'B', and battery voltage shown.]">
-                </div>
-            </div>
-            <div class="grid-container halves">
-                <div>
-                  <label for="OledLine1">OledLine1</label>
-                  <input type="text" name="OledLine1" id="OledLine1" readonly title="OledLine1">
-                </div>
-                <div>
-                  <label for="OledLine2">OledLine2</label>
-                  <input type="text" name="OledLine2" id="OledLine2" readonly title="OledLine2">
-                </div>
-            </div>
-            <div class="grid-container halves">
-                <div>
-                  <label for="OledLine3">OledLine3</label>
-                  <input type="text" name="OledLine3" id="OledLine3" readonly title="OledLine3">
-                </div>
-                <div>
-                  <label for="OledLine4">OledLine4</label>
-                  <input type="text" name="OledLine4" id="OledLine4" readonly title="OledLine4">
-                </div>
-            </div>
             <div class="grid-container full">
                 <div>
                     <input class="button-primary u-full-width" type="submit" value="Save" title="save settings, remember reboot tracker after save">
@@ -713,10 +676,49 @@ Hard readable lengths / too long for our display:
     </section>
     <section>
         <div class="grid-container full">
+            <h2 class="u-full-width">Device Info</h2>
+        </div>
+        <div class="grid-container halves">
+            <div>
+              <label for="UptimeMinutes">Uptime of Device [min]</label>
+              <input type="text" name="UptimeMinutes" id="UptimeMinutes" readonly title="uptime device in minutes">
+            </div>
+            <div>
+              <label for="curPos">Current Position</label>
+              <input type="text" name="curPos" id="curPos" readonly title="Current Position of device [P if fixed mode; p, if gps is invalid and used as temporary preset]">
+            </div>
+            <div>
+              <label for="OledLine5">Satellite & Batt Info</label>
+              <input type="text" name="OledLine5" id="OledLine5" readonly title="Satellite (#Sats/HDOP) [more sats are good, lowest HDOP is best. Should be < 8], and Batt Info [B means Battery; P means external pwr. Positive current is battery-charge-current, while prefixed with 'B', and battery voltage shown.]">
+            </div>
+        </div>
+        <div class="grid-container halves">
+            <div>
+              <label for="OledLine1">OledLine1</label>
+              <input type="text" name="OledLine1" id="OledLine1" readonly title="OledLine1">
+            </div>
+            <div>
+              <label for="OledLine2">OledLine2</label>
+              <input type="text" name="OledLine2" id="OledLine2" readonly title="OledLine2">
+            </div>
+        </div>
+        <div class="grid-container halves">
+            <div>
+              <label for="OledLine3">OledLine3</label>
+              <input type="text" name="OledLine3" id="OledLine3" readonly title="OledLine3">
+            </div>
+            <div>
+              <label for="OledLine4">OledLine4</label>
+              <input type="text" name="OledLine4" id="OledLine4" readonly title="OledLine4">
+            </div>
+        </div>
+    </section>
+    <section>
+        <div class="grid-container full">
             <h2 class="u-full-width">Received</h2>
         </div>
-        <article>
-            <table class="u-full-width">
+        <article style="overflow-x:auto;">
+            <table>
                 <thead>
                 <tr>
                     <th>Time (UTC)</th>
