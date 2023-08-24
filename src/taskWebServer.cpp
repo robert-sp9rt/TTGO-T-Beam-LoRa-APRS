@@ -1597,7 +1597,7 @@ int connect_to_aprsis(void) {
   aprsis_client.print(String(buffer) + "\r\n");
 
   t_start = millis();
-  while (!aprsis_client.available() && (millis()-t_start) < 25000L) { vTaskDelay(100 / portTICK_PERIOD_MS); esp_task_wdt_reset(); }
+  while (!aprsis_client.available() && (millis()-t_start) < 5000L) { vTaskDelay(100 / portTICK_PERIOD_MS); esp_task_wdt_reset(); }
   if (aprsis_client.available()) {
     // check
     String s = aprsis_client.readStringUntil('\n');

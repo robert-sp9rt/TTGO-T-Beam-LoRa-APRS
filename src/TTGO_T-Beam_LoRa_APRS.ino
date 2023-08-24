@@ -192,7 +192,8 @@ int position_ambiguity = 0; // 0: default, compressed. -1: uncompressed. -2: unc
 String aprsPresetShown = "P";
 //double lastTxdistance = 0;
 
-#if defined(T_BEAM_V1_2) || defined(T_BEAM_V1_0) || defined(T_BEAM_V0_7)
+#if defined(T_BEAM_V1_2) || defined(T_BEAM_V1_0) || defined(T_BEAM_V0_7) || defined(FORCE_ENABLE_GPS)
+									         // ^ may used as compile time define
   boolean gps_state = true;
 #else
   boolean gps_state = false;
@@ -449,8 +450,10 @@ bool acceptOwnPositionReportsViaKiss = true;		// true: Switches off local beacon
 boolean gps_allow_sleep_while_kiss = true;		// user has a kiss device attached via kiss which sends positions with own call, we don't need our gps to be turned on -> We pause sending positions by ourself (neither fixed nor smart beaconing). Except: user has a display attached to this tracker, he'll will be able to see his position because our gps does not go to sleep (-> set this to false). Why sleep? Energy saving
 boolean wifi_do_fallback_to_mode_AP = true;		// Allow fallback to mode AP after once connected successfully connected (after boot) to configured remote AP. Disable for igates, where you don't need your tracker to be a hotspot. You like to enable, if you use your tracker portable and it should automatically be wifi client to your home network, and be AP if you are outside.
 boolean send_status_message_to_aprsis = true;		// Send reboot, wifi- or internet-loss as APPRS-status-message to APRS-IS
-uint8_t usb_serial_data_type = 0;		// 0: KISS. 1: Display some debug messages on serial port. 2: Display lora-received packets in TNC trace format. 3: 1+2
+uint8_t usb_serial_data_type = 0;		// 0: KISS. 1: Display some debug messages on serial port. 2: Display lora-received packets in TNC trace format. 3: 1+2. 4: Send GPS NMEA sentences.
 						// If >0  usb-serial KISS-send and KISS-receive are stoped.
+						// Unfortunately, 0 was pre-set for kiss. -> There's no real-off.
+						// Because we test on set bits, number 128 (binary 10000000) means "off".
 
 #ifdef KISS_PROTOCOL
 // do not configure
@@ -3374,8 +3377,6 @@ void setup_phase2_soft_reconfiguration(boolean runtime_reconfiguration) {
     //#elif T_BEAM_V1_2
     // axp.enableXXX();                                                       // switch this on if you need it
     //#endif
-  #else
-    gps_state = false;
   #endif
   gps_state_before_autochange = false;
 
@@ -4684,6 +4685,7 @@ void handle_usb_serial_input(void) {
             Serial.println("  save_wifi_cfg        (saves running wifi config to /wifi.cfg in filesystem)");
             Serial.println("  dir                  (lists SPIFFS directory)");
 #endif
+            Serial.println("  nmea <on|off>");
             Serial.println("  trace <on|off>");
             Serial.println("  reboot");
 #if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
@@ -4739,12 +4741,12 @@ void handle_usb_serial_input(void) {
             if (arg != "") {
               if (arg_bool) {
                 usb_serial_data_type |= 1;
-                usb_serial_data_type &= ~4;
+                usb_serial_data_type &= ~128;
               } else {
                 // avoid going to kiss mode (!usb_serial_data_type)
                 usb_serial_data_type &= ~1;
                 if (!usb_serial_data_type)
-                  usb_serial_data_type = 4;
+                  usb_serial_data_type = 128;
               }
               #ifdef ENABLE_PREFERENCES
                 preferences.putInt(PREF_DEV_USBSERIAL_DATA_TYPE, usb_serial_data_type);
@@ -4759,12 +4761,12 @@ void handle_usb_serial_input(void) {
             if (arg != "") {
               if (arg_bool) {
                 usb_serial_data_type |= 2;
-                usb_serial_data_type &= ~4;
+                usb_serial_data_type &= ~128;
               } else {
                 // avoid going to kiss mode (!usb_serial_data_type)
                 usb_serial_data_type &= ~2;
                 if (!usb_serial_data_type)
-                  usb_serial_data_type = 4;
+                  usb_serial_data_type = 128;
               }
               #ifdef ENABLE_PREFERENCES
                 preferences.putInt(PREF_DEV_USBSERIAL_DATA_TYPE, usb_serial_data_type);
@@ -4772,9 +4774,29 @@ void handle_usb_serial_input(void) {
                   if (debug_verbose)
                     syslog_log(LOG_DEBUG, String("FlashWrite preferences: handle_usb_serial_input() 2"));
                 #endif
-             #endif
-           }
-           Serial.println("*** " + cmd + " is " + ((usb_serial_data_type & 2) ? "on" : "off"));
+              #endif
+            }
+            Serial.println("*** " + cmd + " is " + ((usb_serial_data_type & 2) ? "on" : "off"));
+          } else if (cmd == "nmea") {
+            if (arg != "") {
+              if (arg_bool) {
+                usb_serial_data_type |= 4;
+                usb_serial_data_type &= ~128;
+              } else {
+                // avoid going to kiss mode (!usb_serial_data_type)
+                usb_serial_data_type &= ~4;
+                if (!usb_serial_data_type)
+                  usb_serial_data_type = 128;
+              }
+              #ifdef ENABLE_PREFERENCES
+                preferences.putInt(PREF_DEV_USBSERIAL_DATA_TYPE, usb_serial_data_type);
+                #if defined(ENABLE_SYSLOG)
+                  if (debug_verbose)
+                    syslog_log(LOG_DEBUG, String("FlashWrite preferences: handle_usb_serial_input() 3"));
+                #endif
+              #endif
+            }
+            Serial.println("*** " + cmd + " is " + ((usb_serial_data_type & 4) ? "on" : "off"));
 #ifdef	ENABLE_WIFI
           } else if (cmd == "aprsis") {
             if (arg != "") {
@@ -4782,7 +4804,7 @@ void handle_usb_serial_input(void) {
               preferences.putBool(PREF_APRSIS_EN, arg_bool);
               #if defined(ENABLE_SYSLOG)
                 if (debug_verbose)
-                  syslog_log(LOG_DEBUG, String("FlashWrite preferences: handle_usb_serial_input() 3"));
+                  syslog_log(LOG_DEBUG, String("FlashWrite preferences: handle_usb_serial_input() 4"));
               #endif
             }
             Serial.println("*** " + cmd + " is " + (aprsis_enabled ? "on" : "off"));
@@ -4792,7 +4814,7 @@ void handle_usb_serial_input(void) {
                 preferences.putInt(PREF_WIFI_ENABLE, (arg_bool) ? 0 : 1);
                 #if defined(ENABLE_SYSLOG)
                   if (debug_verbose)
-                    syslog_log(LOG_DEBUG, String("FlashWrite preferences: handle_usb_serial_input() 4"));
+                    syslog_log(LOG_DEBUG, String("FlashWrite preferences: handle_usb_serial_input() 5"));
                 #endif
               #endif
               if (arg_bool) {
@@ -5018,9 +5040,7 @@ debug_bestHdop = bestHdop;
     }
 
     uint32_t t_elapsed = millis() - t_interval_start;
-    if (curr_hdop < bestHdop && curr_sats >= 4) {
-      do_update = 1;
-    } else if (t_elapsed > 15000L && ((curr_hdop < 1.5 && curr_sats >= 5) || no_gps_position_since_boot)) {
+    if (t_elapsed > 15000L && ((curr_hdop < 1.5 && curr_sats >= 5) || no_gps_position_since_boot)) {
       // Approach to avoid gps inaccuracy (we observed bad gps positions in a range of 30m, or more):
       // Resolution of GPS is +/- 3 to 5m. In 1s at 10m/s (= 36 km/h) we are in 'best' case still
       // in behalf the resolution of GPS.
