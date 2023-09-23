@@ -25,7 +25,7 @@ extern const char web_js_js_end[] asm("_binary_data_embed_js_js_out_end");
 bool getLocalTimeTheBetterWay(struct tm * info);
 
 // Variable needed to send beacon from html page
-extern bool manBeacon;
+extern uint8_t manBeacon;
 
 // KISS-friendly serial logging
 extern void do_serial_println(const String &);
@@ -95,6 +95,12 @@ extern String OledLine5;
 
 extern char src_call_blacklist;
 
+#ifdef IF_SEMAS_WOULD_WORK
+extern xSemaphoreHandle sema_lora_chip;
+#else
+extern volatile boolean sema_lora_chip;
+#endif
+
 QueueHandle_t webListReceivedQueue = nullptr;
 std::list <tReceivedPacketData*> receivedPackets;
 const int MAX_RECEIVED_LIST_SIZE = 50;
@@ -122,6 +128,7 @@ extern double lora_freq_cross_digi;
 extern void loraSend(byte, float, ulong, uint8_t , const String &);
 extern void load_preferences_from_flash(void);
 extern void setup_phase2_soft_reconfiguration(boolean);
+extern int is_call_blacklisted(const char *);
 
 extern int save_to_file(const String &, const char *, const String &);
 
@@ -400,7 +407,7 @@ void handle_Beacon() {
   do_serial_println("WebServer: WebServer: Button manual beacon pressed.");
   server.sendHeader("Location", "/");
   server.send(302,"text/html", "");
-  manBeacon=true;
+  manBeacon=1;
 }
 
 void handle_Shutdown() {
@@ -1640,32 +1647,37 @@ String generate_third_party_packet(String callsign, String packet_in) {
 
   if (p && q && r && p > s && p-s < 10 && p < q && q < r && (q-s) < sizeof(buf)) {
     strncpy(buf, s, q-s);
-    buf[(q-s)] = 0;
+    buf[q-s] = 0;
     packet_out = callsign + ">" + MY_APRS_DEST_IDENTIFYER + ":}" + buf;
                              // ^ 3rd party traffic should be addressed directly (-> not to WIDE2-1 or so)
 
-    // Copy repeater ",DIGI1,DIGI2*,..". Buf size is 82 (incl. \0). Copy header (excl. ':'), without leading ''
+    // Copy repeater ",DIGI1,DIGI2*,..". Buf size is 82 (incl. \0). Copy header (excl. ':'), without leading ','
     // Skip leading ','
     q++;
     // snprintf len is incl. \0
     snprintf(buf, r-q +1, "%.81s", q);
-    buf[81] = 0;
+    buf[sizeof(buf)-1] = 0;
     // strip q-construct
     if (*(q = buf) == 'q' || (q = strstr(buf, ",q"))) {
       *q = 0;
     }
     // Strip TCPIP if present. We'll add it. We like to avoid packets like TCPIP,TCPIP*
-    if ((q = strstr(buf, ",TCPIP")))
+    if ( ((q = strstr(buf, "TCPIP")) && (!q[5] || q[5] == '*' || q[5] == ',') && (q == buf || *(q-1) == ',')) ) {
+      if (q > buf && *(q-1) == ',') {
+        q--;
+      }
       *q = 0;
+    }
     // cut unused digipeaters. Remove '*' from the last-repeated one.
     if ((q = strchr(buf, '*'))) {
       *q = 0;
     } else {
-      // no digipeater? -> Nothing to add as third-party header
+      // remove unused digipeaters from path, according to aprs spec
       *buf = 0;
     }
-    if (*buf)
+    if (*buf) {
       packet_out = packet_out + "," + buf;
+    }
     packet_out = packet_out + ",TCPIP," + callsign + "*" + r;
   }
   return packet_out;
@@ -1819,7 +1831,7 @@ void read_from_aprsis(void) {
     do_serial_println(log_msg);
     return;
   }
-  // bug: header_end may be 0 (due to crash trace), but schouldn't: we tried to assuere.
+  // bug: header_end may be 0 (due to crash trace), but shuoldn't: we tried to assure.
   // Can't see why this happens.
   // Code without "goto" is ugly and can lead to strange results ;)
   // Needs to be resolved. This is a the&D fix:
@@ -1848,7 +1860,14 @@ void read_from_aprsis(void) {
   }
 
   // Don't gate, if packet has word TCPXX, NOGATE or RFONLY in header (TCPIP is allowed). See aprs-is iGateDetails spec
-  if ((q = strstr(s.c_str(), ",TCPIP")) || (q = strstr(s.c_str(), ",NOGATE")) || (q = strstr(s.c_str(), "RFONLY")))
+  if (((q = strstr(s.c_str(), ",TCPXX")) && (q[6] == '*' || q[6] == ',' || q[6] == ':')) && q < header_end)
+    return;
+  if ((q = strstr(s.c_str(), ",NOGATE")) && (q[7] == '*' || q[7] == ',' || q[7] == ':') && q < header_end)
+    return;
+  if ((q = strstr(s.c_str(), ",RFONLY")) && (q[7] == '*' || q[7] == ',' || q[7] == ':') && q < header_end)
+    return;
+
+  if (is_call_blacklisted(s.c_str()))
     return;
 
   // generate third party packet. Use aprs_callsign (deriving from webServerCfg->callsign), because aprsis_callsign may have a non-aprs (but only aprsis-compatible) ssid like '-L4'
@@ -1860,13 +1879,16 @@ void read_from_aprsis(void) {
 
     esp_task_wdt_reset();
 #ifdef KISS_PROTOCOL
-    sendToTNC(third_party_packet);
+    if (!src_call_not_for_rf)
+      sendToTNC(third_party_packet);
 #endif
     if (lora_tx_enabled && aprsis_data_allow_inet_to_rf && !src_call_not_for_rf) {
       // not query or aprs-message addressed to our call (check both, aprs_callsign and aprsis_callsign)
       // Format: "..::DL9SAU-15:..."
       // check is in this code part, because we may like to see those packets via kiss (sent above)
       q = header_end + 1;
+      if (*q == '?')
+        return;
       if (*q == ':' && strlen(q) > 10 && q[10] == ':' &&
           ((!strncmp(q+1, aprs_callsign.c_str(), aprs_callsign.length()) && (aprs_callsign.length() == 9 || q[9] == ' ')) ||
           (!strncmp(q+1, aprsis_callsign.c_str(), aprsis_callsign.length()) && (aprsis_callsign.length() == 9 || q[9] == ' ')) ))
@@ -1897,21 +1919,60 @@ void send_to_aprsis()
   to_aprsis_data = "";
   data.trim();
   char *p = strchr(data.c_str(), '>');
-  char *q;
+  char *header_end;
   // some plausibility checks.
-  if (p && p > data.c_str() && (q = strchr(p+1, ':'))) {
-    // Due to http://www.aprs-is.net/IGateDetails.aspx , never gate third-party traffic contining TCPIP or TCPXX
+  if (p && p > data.c_str() && (header_end = strchr(p+1, ':'))) {
+    // Due to http://www.aprs-is.net/IGateDetails.aspx , never gate third-party traffic with TCPIP or TCPXX
     // IGATECALL>APRS,GATEPATH:}FROMCALL>TOCALL,TCPIP,IGATECALL*:original packet data
-    char *r; char *s;
-    if (!(((s = strstr(p+1, ",TCPIP")) || (s = strstr(p+1, ",TCPXX")) || (s = strstr(p+1, ",NOGATE")) || (s = strstr(p+1, ",RFONLY"))) && s < q) &&
-	q[1] != '?' &&
-	!(q[1] == '}' && (r = strchr(q+2, '>')) && ((s = strstr(r+1, ",TCPIP,")) || (s = strstr(r+1, ",TCPXX,"))) && strstr(s+6, "*:")) ) {
+    const char *p_data = data.c_str();
+    int len = header_end - p_data;
+    char *r;
+    if (header_end[1] != '?' &&
+        !( ((r = strstr(p+1, ",TCPIP")) && (r[6] == '*' || r[6] == ',' || r[6] == ':') && r < header_end) ||
+           ((r = strstr(p+1, ",TCPXX")) && (r[6] == '*' || r[6] == ',' || r[6] == ':') && r < header_end) ||
+           ((r = strstr(p+1, ",NOGATE")) && (r[7] == '*' || r[7] == ',' || r[7] == ':') && r < header_end) ||
+           ((r = strstr(p+1, ",RFONLY")) && (r[7] == '*' || r[7] == ',' || r[7] == ':') && r < header_end) ) ) {
+      char optional_third_party_sender[10] = ""; // room for DL9SAU-15 + \0 == 10
+      if (header_end[1] == '}') {
+        // Third party traffic. Strip the RF header, due to aprsis-spec
+        snprintf(optional_third_party_sender, p-p_data +1, "%.9s*", p_data);
+        optional_third_party_sender[sizeof(optional_third_party_sender)-1] = 0;
+        p_data = header_end+2; //  // go to start of callsign behind '}'-marker.
+        p = strchr(p_data, '>');
+        header_end = strchr(p_data, ':');
+        len = 0;
+        if (p && header_end) {
+          int len_optional_third_party_sender = strlen(optional_third_party_sender);
+          if ((header_end - p > len_optional_third_party_sender) && *(header_end -1) == '*' && !strncmp(header_end - 1 - len_optional_third_party_sender, optional_third_party_sender, len_optional_third_party_sender)) {
+            // src call already in path?
+            *optional_third_party_sender = 0;
+            len_optional_third_party_sender = 0;
+          }
+          if (*p_data && p && header_end && p < header_end) {
+            // Look also in the third-party header
+            if (!( ((r = strstr(p+1, ",TCPIP")) && (r[6] == '*' || r[6] == ',' || r[6] == ':') && r < header_end) ||
+               ((r = strstr(p+1, ",TCPXX")) && (r[6] == '*' || r[6] == ',' || r[6] == ':') && r < header_end) ||
+               ((r = strstr(p+1, ",NOGATE")) && (r[7] == '*' || r[7] == ',' || r[7] == ':') && r < header_end) ||
+               ((r = strstr(p+1, ",RFONLY")) && (r[7] == '*' || r[7] == ',' || r[7] == ':') && r < header_end) ) ) {
+             len = header_end - p_data;
+           }
+         }
+       }
+      }
       char buf[256];
-      int len = (q-data.c_str());
-      if (len > 0 && len < sizeof(buf)) {
-        strncpy(buf, data.c_str(), len);
+      if (len && len < sizeof(buf) && *p_data && header_end) {
+        // just to be sure
+        strncpy(buf, p_data, len);
         buf[len] = 0;
-        String s_data = String(buf) + (lora_tx_enabled ? ",qAR," : ",qAO,") + aprsis_callsign + q + "\r\n";
+        String s_buf = String(buf);
+        if (*optional_third_party_sender) {
+          if ((p = strchr(buf, '*')) && p < header_end) {
+            s_buf.replace("*", (String(",") + String(optional_third_party_sender) + String("*")));
+          } else {
+            s_buf.replace(":", s_buf + String(",") + String(optional_third_party_sender) + String("*:"));
+          }
+        }
+        String s_data = s_buf + (lora_tx_enabled ? ",qAR," : ",qAO,") + aprsis_callsign + header_end + "\r\n";
         aprsis_status = "OK, toAPRSIS: " + s_data; aprsis_status.trim();
         aprsis_client.print(s_data);
         t_aprsis_lastRXorTX = millis();
@@ -1958,6 +2019,19 @@ void send_to_aprsis()
   }, []() {
     HTTPUpload& upload = server.upload();
     if (upload.status == UPLOAD_FILE_START) {
+      #ifdef IF_SEMAS_WOULD_WORK
+        while (xSemaphoreTake(sema_lora_chip, 10) != pdTRUE)
+          esp_task_wdt_reset();
+      #else
+        for (int n = 0; sema_lora_chip; n++) {
+          delay(10);
+          if (!(n % 100))
+            esp_task_wdt_reset();
+        }
+        sema_lora_chip = true;
+      #endif
+      // hack to circumvent crash on interrupt handler isr0():
+      rf95.setFrequency(lora_freq_rx_curr + 1);
       rf95.sleep(); // disable rf95 before update
       // switch LORA chip off during firmware upload
       #ifdef T_BEAM_V1_0
@@ -1980,11 +2054,18 @@ void send_to_aprsis()
           syslog_log(LOG_ERR, String("Firmware: Update error: ") + Update.errorString());
         #endif
         Update.printError(Serial);
+        // hack to circumvent crash on interrupt handler isr0():
+        rf95.setFrequency(lora_freq_rx_curr);
         #ifdef T_BEAM_V1_0
           axp.setPowerOutPut(AXP192_LDO2, AXP202_ON);
         #elif T_BEAM_V1_2
           axp.setALDO2Voltage(3300);
           axp.enableALDO2();
+        #endif
+        #ifdef IF_SEMAS_WOULD_WORK
+          xSemaphoreGive(sema_lora_chip);
+        #else
+          sema_lora_chip = false;
         #endif
       }
     } else if (upload.status == UPLOAD_FILE_END) {
@@ -2159,7 +2240,7 @@ void send_to_aprsis()
           if (!aprsis_client.connected()) {
             if (t_aprsis_last_connect_try + 10000 > millis()) {
               if (aprsis_status == "Error: no internet") {
-                aprsis_status = "Internet available";
+                aprsis_status = "Internet unavailable";
                 // inform about state change
                 log_msg = String("APRS-IS: ") + aprsis_status;
                 #if defined(ENABLE_SYSLOG)
@@ -2173,7 +2254,7 @@ void send_to_aprsis()
               // connect to aprsis
               // try to connect to aprsis and login
               if ((ret = connect_to_aprsis()) < 0) {
-                log_msg = String("APRS-IS: on_Err: '") + aprsis_status + String("' [") + aprsis_client.remoteIP().toString() + String("], tries ") +  String(aprsis_connect_tries);
+                log_msg = String("APRS-IS: on_Err: '") + aprsis_status + String("' [") + aprsis_client.remoteIP().toString() + String("], tries ") +  String(aprsis_connect_tries) + String(", connect_to_aprsis() returned ") + String(ret);
                 aprsis_client.stop();
 		WiFi.setSleep(true);
                 // Known problems which usually resolve by reboot:
@@ -2198,8 +2279,8 @@ void send_to_aprsis()
                     #endif
                     do_serial_println(m);
                     delay(3*60*1000);
-                    // wdt reseted? Then we'll not have survied to be not here. -> next try: reboot
-                    m = "Did not help. Now the hard way: reboot";
+                    // wdt reseted? Then we'll not have survived to be not here. -> next try: reboot
+                    m = "APRS-IS: rebooting with ESP.restart()";
                     #if defined(ENABLE_SYSLOG)
                       syslog_log(LOG_CRIT, m);
                     #endif

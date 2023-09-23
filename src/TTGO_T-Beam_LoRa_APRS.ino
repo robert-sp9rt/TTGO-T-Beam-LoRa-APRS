@@ -362,7 +362,7 @@ bool display_is_on = true; // Turn ON OLED at first startup
 ulong oled_timer;
 
 // Variable to manually send beacon from html page
-bool manBeacon = false;
+uint8_t manBeacon = 0;  // 1: triggered from web-interface, 2: triggered from CLI
 
 // Variable to show AP settings on OLED
 #ifdef ENABLE_WIFI
@@ -1042,7 +1042,9 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, uint8_t fla
   #ifdef ENABLE_LED_SIGNALING
     digitalWrite(TXLED, LOW);
   #endif
+  esp_task_wdt_reset();
   rf95.sendAPRS(lora_TXBUFF, messageSize);
+  esp_task_wdt_reset();
   rf95.waitPacketSent();
   #ifdef ENABLE_LED_SIGNALING
     digitalWrite(TXLED, HIGH);
@@ -2098,8 +2100,10 @@ void init_wifi_STA_and_AP_settings() {
       // save old wifi credentials on pos 1, assuming that thhis is the best chance to reconnect
       wifi_ModeSTA_PASS = preferences.getString(PREF_WIFI_PASSWORD, "");
       wifi_ModeSTA_SSID = preferences.getString(PREF_WIFI_SSID, "");
-      strncpy(APs[apcnt].ssid, wifi_ModeSTA_SSID.c_str(),sizeof(APs[apcnt].ssid)-1);
-      strncpy(APs[apcnt].pw, wifi_ModeSTA_PASS.c_str(),sizeof(APs[apcnt].pw)-1);
+      strncpy(APs[apcnt].ssid, wifi_ModeSTA_SSID.c_str(), sizeof(APs[apcnt].ssid)-1);
+      APs[apcnt].ssid[sizeof(APs[apcnt].ssid)-1] = 0;
+      strncpy(APs[apcnt].pw, wifi_ModeSTA_PASS.c_str(), sizeof(APs[apcnt].pw)-1);
+      APs[apcnt].pw[sizeof(APs[apcnt].pw)-1] = 0;
       Serial.printf("Preferences AP %s found with PW %s and stored at pos %d\r\n", APs[apcnt].ssid, APs[apcnt].pw, apcnt);
       apcnt = 1;
     }
@@ -2258,7 +2262,9 @@ boolean readFile(fs::FS &fs, const char *filename) {
       } else {
         if (apcnt < MAX_AP_CNT && strcmp(wifi_ssid_old.c_str(), wifi_ModeSTA_SSID.c_str()) && strcmp(wifi_password_old.c_str(), wifi_ModeSTA_PASS.c_str())) {
           strncpy(APs[apcnt].ssid, wifi_ssid_old.c_str(), sizeof(APs[apcnt].ssid)-1);
+          APs[apcnt].ssid[sizeof(APs[apcnt].ssid)-1] = 0;
           strncpy(APs[apcnt].pw, wifi_password_old.c_str(), sizeof(APs[apcnt].pw)-1);
+          APs[apcnt].pw[sizeof(APs[apcnt].pw)-1] = 0;
           Serial.printf("readFile: wifi.cfg, old structure AP %s found with PW %s (%d)\r\n", APs[apcnt].ssid, APs[apcnt].pw,apcnt);
           apcnt++;
         } else {
@@ -2276,8 +2282,8 @@ boolean readFile(fs::FS &fs, const char *filename) {
         wifi_password_old = "";
       } else {
         if (apcnt < MAX_AP_CNT && strcmp(wifi_ssid_old.c_str(), wifi_ModeSTA_SSID.c_str()) && strcmp(wifi_password_old.c_str(), wifi_ModeSTA_PASS.c_str())) {
-          strncpy(APs[apcnt].ssid, wifi_ssid_old.c_str(),sizeof(APs[apcnt].ssid)-1);
-          strncpy(APs[apcnt].pw, wifi_password_old.c_str(),sizeof(APs[apcnt].pw)-1);
+          strncpy(APs[apcnt].ssid, wifi_ssid_old.c_str(), sizeof(APs[apcnt].ssid)-1);
+          strncpy(APs[apcnt].pw, wifi_password_old.c_str(), sizeof(APs[apcnt].pw)-1);
           Serial.printf("readFile: wifi.cfg, old structure AP %s found with PW %s (%d)\r\n", APs[apcnt].ssid, APs[apcnt].pw,apcnt);
           apcnt++;
         } else {
@@ -3822,10 +3828,6 @@ int is_call_blacklisted(const char *frame_start) {
     else if (i > 2 && !isalpha(p_call[i])) return 1;
   }
 
-  // list empty? we may leave here
-  if (!*blacklist_calls || !strcmp(blacklist_calls, ",,"))
-    return 0;
-
   boolean ssid_present = false;
   char buf[12]; // room for ",DL1AAA-15," + \0
   char *p = buf;
@@ -3852,6 +3854,11 @@ int is_call_blacklisted(const char *frame_start) {
   }
   *p++ = ',';
   *p = 0;
+
+
+  // blacklist empty? we may leave here
+  if (!*blacklist_calls || !strcmp(blacklist_calls, ",,"))
+    return 0;
 
   // exact match?
   if (strstr(blacklist_calls, buf))
@@ -4657,7 +4664,7 @@ void handle_usb_serial_input(void) {
             (cmd == "?" || cmd == "beacon" || cmd == "converse" || cmd == "display" || cmd == "reboot" || cmd == "shutdown") ) {
           if (cmd == "beacon") {
             Serial.println("*** beacon: sending");
-            manBeacon = true;
+            manBeacon = 2;
           } else if (cmd == "converse") {
             do_prompt = false;
             Serial.println("*** converse: entering converse mode. Enabling LoRa RX packet trace. Hit ^C to leave");
@@ -5155,13 +5162,13 @@ debug_bestHdop = bestHdop;
     enableOled();
     fillDisplayLines3to5(0);
 #ifdef	ENABLE_WIFI
-    writedisplaytext("((WEB TX))","SSID: " + oled_wifi_SSID_curr,"IP: " + oled_wifi_IP_curr, OledLine3, OledLine4, OledLine5);
+    writedisplaytext((manBeacon == 1 ? "((WEB TX))" : "((CLI TX))"),"SSID: " + oled_wifi_SSID_curr,"IP: " + oled_wifi_IP_curr, OledLine3, OledLine4, OledLine5);
 #else
-    writedisplaytext("((WEB TX))","","",OledLine3, OledLine4, OledLine5);
+    writedisplaytext((manBeacon == 1) ? "((WEB TX))" : "((CLI TX))"),"","",OledLine3, OledLine4, OledLine5);
 #endif
     sendpacket(SP_POS_GPS);
     next_fixed_beacon = millis() + fix_beacon_interval;
-    manBeacon=false;
+    manBeacon=0;
   }
 
   // Only wake up OLED when necessary, note that DIM is to turn OFF the backlight
@@ -5405,13 +5412,18 @@ debug_bestHdop = bestHdop;
 
 #if defined(ENABLE_WIFI)
         if (!was_own_position_packet || tx_own_beacon_from_this_device_or_fromKiss__to_aprsis) {
-          // No word "NOGATE" or "RFONLY" in header? -> may be sent to aprs-is
-          char *q = strstr(data, ",NOGATE");
-          if (!q || q > strchr(data, ':')) {
-            q = strstr(data, ",RFONLY");
-            if (!q || q > strchr(data, ':')) {
-              send_to_aprsis(*TNC2DataFrame);
-            }
+          // No word "NOGATE" or "RFONLY" in header? -> may be sent to aprs-is. This is a quick pre-check;
+          // send_to_aprsis() will check in detail
+          char *header_end = strchr(data, ':');
+          char *q;
+          if (!(q = strstr(data, ",NOGATE")) || q > header_end) {
+            if (!(q = strstr(data, ",RFONLY")) || q > header_end) {
+              if (!(q = strstr(data, ",TCPIP")) || q > header_end) {
+                if (!(q = strstr(data, ",TCPXX")) || q > header_end) {
+                  send_to_aprsis(*TNC2DataFrame);
+                }
+              }
+           }
           }
         }
 #endif
@@ -5565,21 +5577,30 @@ out:
         boolean do_not_repeat_on_main_freq = false;
 
         if (our_packet ||
-            (header_end && header_end[1] == '}') ||
-            ((q = strstr(received_frame, ",TCPIP")) && q < header_end) ||
-            ((q = strstr(received_frame, ",TCPXX")) && q < header_end)) {
-          // 3rd party traffic. Do not send to aprsis. For main and secondary frequency, it's a filter for avoiding unnecessary traffic
+              (header_end && header_end[1] == '}') ||
+              ((q = strstr(received_frame, ",TCPIP")) && (q[6] == '*' || q[6] == ',' || q[6] == ':') && q < header_end) ||
+              ((q = strstr(received_frame, ",TCPXXX")) && (q[6] == '*' || q[6] == ',' || q[6] == ':') && q < header_end) ) {
+          // 3rd party traffic.
+          // For main and secondary frequency, it's a filter for avoiding unnecessary traffic.
+          // If we gate 3rd-party-traffic, we'd have to look there in the path for TCPIP, TCPXX, RFONLY, ..;
+          // this is now implemented in send_to_aprsis(), where it's checked in detail if it already was there.
           do_not_repeat_on_main_freq = true;
           do_not_repeat_to_secondary_freq = true;
-          do_not_gate = true;
         } else if (header_end && header_end[1] == 'T') {
           // this is actually a filter to prevent telemetry flood on main frequency. You can disable this and recompile, if you really need this
           do_not_repeat_on_main_freq = true;
-        } else if ((q = strstr(received_frame, ",RFONLY")) && q < header_end) {
+#ifdef notdef // for testing, these checks are disabled here, because send_to_aprsis() now should handle these cases properly
+        } else if (((q = strstr(received_frame, ",RFONLY")) && (q[7] == '*' || q[7] != ',' || q[7] == ':')) && q < header_end) {
           do_not_gate = true;
-        } else if ((q = strstr(received_frame, ",NOGATE")) && q < header_end) {
+        } else if (((q = strstr(received_frame, ",NOGATE")) && (q[7] == '*' || q[7] != ',' || q[7] == ':')) && q < header_end) {
           do_not_gate = true;
           do_not_repeat_to_secondary_freq = true;
+#else
+        } else if (((q = strstr(received_frame, ",NOGATE")) && (q[7] == '*' || q[7] != ',' || q[7] == ':')) && q < header_end) {
+          do_not_repeat_to_secondary_freq = true;
+#endif
+        } else if (((q = strstr(received_frame, ",GATE")) && (q[5] == '*' || q[5] != ',' || q[5] == ':')) && q < header_end) {
+          do_not_repeat_to_secondary_freq = true; // no ping pong to secondary freq
         }
 
  #if defined(ENABLE_WIFI)
