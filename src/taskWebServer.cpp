@@ -78,7 +78,9 @@ extern int tx_own_beacon_from_this_device_or_fromKiss__to_frequencies;
 
 extern uint8_t usb_serial_data_type;
 extern double lora_freq_rx_curr;
+extern ulong lora_speed_rx_curr;
 extern boolean lora_tx_enabled;
+extern boolean lora_rx_enabled;
 
 extern String aprsLatPreset;
 extern String aprsLonPreset;
@@ -100,6 +102,8 @@ extern xSemaphoreHandle sema_lora_chip;
 #else
 extern volatile boolean sema_lora_chip;
 #endif
+
+extern boolean enable_bluetooth;
 
 QueueHandle_t webListReceivedQueue = nullptr;
 std::list <tReceivedPacketData*> receivedPackets;
@@ -129,6 +133,7 @@ extern void loraSend(byte, float, ulong, uint8_t , const String &);
 extern void load_preferences_from_flash(void);
 extern void setup_phase2_soft_reconfiguration(boolean);
 extern int is_call_blacklisted(const char *);
+extern void lora_set_speed(ulong lora_speed);
 
 extern int save_to_file(const String &, const char *, const String &);
 
@@ -1630,7 +1635,13 @@ int connect_to_aprsis(void) {
   to_aprsis_data = "";
 
   // WiFi powermanagement. Disable sleep -> better network performance
-  WiFi.setSleep(false);
+  // Default for WiFi sleep is on.
+  // But (bugfix): A user reported crash
+  //   "E (27793) wifi:Error! Should enable WiFi modem sleep when both WiFi and Bluetooth are enabled!!!!!!"
+  //   abort() was called at PC 0x40139607 on core 0
+  // -> Enable this feature only if bluetooth is disabled
+  if (!enable_bluetooth)
+    WiFi.setSleep(false);
 
   return 0;
 }
@@ -1893,6 +1904,35 @@ void read_from_aprsis(void) {
           ((!strncmp(q+1, aprs_callsign.c_str(), aprs_callsign.length()) && (aprs_callsign.length() == 9 || q[9] == ' ')) ||
           (!strncmp(q+1, aprsis_callsign.c_str(), aprsis_callsign.length()) && (aprsis_callsign.length() == 9 || q[9] == ' ')) ))
         return;
+      // Give main loop a chance to finish loraSend and parse a new packet in the incoming queue.
+      // Sema locking is important because waitAvailableTimeout() calls available() which calls setModeRx() and this may cause a
+      // panic if the chip is currently transmitting. We can skip this, if lora rx is disabled (which, btw, would not make sense)
+      if (lora_rx_enabled) {
+        esp_task_wdt_reset();
+        #ifdef IF_SEMAS_WOULD_WORK
+          while (xSemaphoreTake(sema_lora_chip, 100) != pdTRUE)
+            esp_task_wdt_reset();
+        #else
+          for (int n = 0; sema_lora_chip; n++) {
+            delay(10);
+            if (!(n % 100))
+              esp_task_wdt_reset();
+          }
+          sema_lora_chip = true;
+        #endif
+        boolean packet_available = rf95.waitAvailableTimeout(lora_speed_rx_curr > 300 ? 2500 : 10000);
+        esp_task_wdt_reset();
+        #ifdef IF_SEMAS_WOULD_WORK
+          xSemaphoreGive(sema_lora_chip);
+        #else
+          sema_lora_chip = false;
+        #endif
+        // After lock release, main thread could gather packet. Give him enough time to receive and parse the packet
+        if (packet_available) {
+          delay(250);
+          esp_task_wdt_reset();
+        }
+      }
       if (aprsis_data_allow_inet_to_rf % 2) {
         esp_task_wdt_reset();
         loraSend(txPower, lora_freq, lora_speed, 0, third_party_packet);
@@ -1900,7 +1940,6 @@ void read_from_aprsis(void) {
       if (aprsis_data_allow_inet_to_rf > 1 && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq) {
         esp_task_wdt_reset();
         loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, 0, third_party_packet);
-        esp_task_wdt_reset();
       }
     }
   }
@@ -2017,10 +2056,19 @@ void send_to_aprsis()
     delay(500);
     ESP.restart();
   }, []() {
+    static bool aprsis_enabled_prev = aprsis_enabled;
+    static bool lora_rx_enabled_prev = lora_rx_enabled;
+    static bool lora_tx_enabled_prev = lora_tx_enabled;
     HTTPUpload& upload = server.upload();
     if (upload.status == UPLOAD_FILE_START) {
+      lora_rx_enabled = false;
+      lora_tx_enabled = false;
+      if (aprsis_enabled && aprsis_client.connected()) {
+        aprsis_client.stop();
+      }
+      aprsis_enabled = false;
       #ifdef IF_SEMAS_WOULD_WORK
-        while (xSemaphoreTake(sema_lora_chip, 10) != pdTRUE)
+        while (xSemaphoreTake(sema_lora_chip, 100) != pdTRUE)
           esp_task_wdt_reset();
       #else
         for (int n = 0; sema_lora_chip; n++) {
@@ -2030,6 +2078,8 @@ void send_to_aprsis()
         }
         sema_lora_chip = true;
       #endif
+      esp_task_wdt_reset();
+      rf95.setTxPower(0);
       // hack to circumvent crash on interrupt handler isr0():
       rf95.setFrequency(lora_freq_rx_curr + 1);
       rf95.sleep(); // disable rf95 before update
@@ -2039,7 +2089,8 @@ void send_to_aprsis()
       #elif T_BEAM_V1_2
         axp.disableALDO2();
       #endif
-      WiFi.setSleep(false);
+      if (!enable_bluetooth)
+        WiFi.setSleep(false);
       Serial.printf("Firmware: Update: %s\r\n", upload.filename.c_str());
       if (!Update.begin(UPDATE_SIZE_UNKNOWN)) { //start with max available size
         #if defined(ENABLE_SYSLOG)
@@ -2054,14 +2105,19 @@ void send_to_aprsis()
           syslog_log(LOG_ERR, String("Firmware: Update error: ") + Update.errorString());
         #endif
         Update.printError(Serial);
-        // hack to circumvent crash on interrupt handler isr0():
-        rf95.setFrequency(lora_freq_rx_curr);
         #ifdef T_BEAM_V1_0
           axp.setPowerOutPut(AXP192_LDO2, AXP202_ON);
         #elif T_BEAM_V1_2
           axp.setALDO2Voltage(3300);
           axp.enableALDO2();
         #endif
+        // hack to circumvent crash on interrupt handler isr0():
+        rf95.setFrequency(lora_freq_rx_curr);
+        lora_set_speed(lora_speed_rx_curr);
+        rf95.setTxPower(txPower);
+        lora_tx_enabled = lora_tx_enabled_prev;
+        lora_rx_enabled = lora_rx_enabled_prev;
+        aprsis_enabled = aprsis_enabled_prev;
         #ifdef IF_SEMAS_WOULD_WORK
           xSemaphoreGive(sema_lora_chip);
         #else
@@ -2256,7 +2312,8 @@ void send_to_aprsis()
               if ((ret = connect_to_aprsis()) < 0) {
                 log_msg = String("APRS-IS: on_Err: '") + aprsis_status + String("' [") + aprsis_client.remoteIP().toString() + String("], tries ") +  String(aprsis_connect_tries) + String(", connect_to_aprsis() returned ") + String(ret);
                 aprsis_client.stop();
-		WiFi.setSleep(true);
+                if (!enable_bluetooth)
+		  WiFi.setSleep(true);
                 // Known problems which usually resolve by reboot:
                 if (ret == -5 /* login denied, until reboot. Reason unknown */ ||
                      (ret == -1 /* sometimes after boot it can't connect. DNS- or IP-stack Problem? */ && lora_digipeating_mode > 1) /* we are a digi */ ) {
@@ -2322,7 +2379,8 @@ void send_to_aprsis()
 
         } else {
 
-	  WiFi.setSleep(true);
+          if (!enable_bluetooth)
+	    WiFi.setSleep(true);
 
           if (aprsis_status != "Error: no internet") {
             aprsis_status = "Error: no internet";

@@ -55,6 +55,9 @@ int debug_verbose = 1;
 #endif
 String wifi_info;                // saving wifi info (CLI|AP|dis) for Oled. If WIFI not compiled in, we still need this variable
 
+String RemoteDebug;
+uint32_t RemoteDebugNr = 0L;
+
 // oled address
 #define SSD1306_ADDRESS 0x3C
 
@@ -182,7 +185,6 @@ RawDegrees bestRawLng;
 double bestDoubleLat;
 double bestDoubleLng;
 double bestHdop = 99.9;
-double debug_bestHdop = 99.9;
 boolean no_gps_position_since_boot = true;
 
 int position_ambiguity = 0; // 0: default, compressed. -1: uncompressed. -2: uncompressed, with DAO '!W..!'. -3: uncompressed, with DAO '!w..!'. 1: ambiguity 1/10'. 2: ambiguity 1'. 3: ambiguity 10'. 4: Ambuguity 1 deg (60').
@@ -296,7 +298,7 @@ int oled_show_locator = 0;    // 0: show always locator (and never lat/lon). 1: 
 int oled_loc_amb = 0;     // display locator not more precise than 0: RR99XX. -1: RR99XX99. -2: RR99XX99XX
 
 #if defined(ENABLE_TNC_SELF_TELEMETRY)
-  time_t nextTelemetryFrame = 60*1000L;  // first possible start of telemetry 60s after boot.
+  uint32_t nextTelemetryFrame = 60*1000L;  // first possible start of telemetry 60s after boot.
 #endif
 
 
@@ -475,7 +477,7 @@ uint16_t lora_automaic_cr_adoption_rf_transmissions_heard_in_timeslot = 0;
 uint16_t lora_packets_received_in_timeslot_on_main_freq = 0;
 uint16_t lora_packets_received_in_timeslot_on_secondary_freq = 0;
 char lora_TXBUFF_for_digipeating[BG_RF95_MAX_MESSAGE_LEN+1] = "";		// buffer for digipeating
-time_t time_lora_TXBUFF_for_digipeating_was_filled = 0L;
+uint32_t time_lora_TXBUFF_for_digipeating_was_filled = 0L;
 boolean sendpacket_was_called_twice = false;
 // bits for sendpacket()
 #define SP_POS_FIXED 1
@@ -512,9 +514,9 @@ Adafruit_SSD1306 display(128, 64, &Wire, OLED_RESET);
 
 
 #ifdef IF_SEMAS_WOULD_WORK
-xSemaphoreHandle sema_lora_chip;
+  xSemaphoreHandle sema_lora_chip;
 #else
-volatile boolean sema_lora_chip = false;
+  volatile boolean sema_lora_chip = false;
 #endif
 
 
@@ -936,6 +938,48 @@ void send_to_aprsis(const String &s)
 #endif
 
 
+#if defined(ENABLE_WIFI)
+// We separated sendpacket_to_aprsis() from sendpacket() due to the wish of a user:
+// Messages to aprsis are faster than those sent to rf, received by another igate and sent from there to aprsis.
+// But the user likes to examine RF-conditions (that means, who heard him on RF).
+// Thus we send some of our packets with delay.
+void send_own_beacon_to_aprsis_cached_or_now(const String &message) {
+  static String cached_message;
+  static uint32_t t_last_beacon = 0L;
+  static uint8_t beacon_number = 0;
+
+  if (!tx_own_beacon_from_this_device_or_fromKiss__to_aprsis) {
+    return;
+  }
+
+  if (message != "") {
+    if (cached_message == "")
+      beacon_number++;
+    if (!fixed_beacon_enabled && millis() - t_last_beacon < sb_max_interval) {
+      // we are moving and have an own aprsis connection -> send immediately
+      t_last_beacon = millis();
+      send_to_aprsis(message);
+      cached_message = "";
+    } else {
+      t_last_beacon = millis();
+      cached_message = String(message); // make a local copy, and maybe overwrite old cached one
+    }
+  } else {
+    if ((t_last_beacon + 180*1000L) < millis()) {
+      // packet too old
+      cached_message = "";
+    }
+  }
+
+  if (cached_message == "") return;
+
+  if ((beacon_number % 4) || ((t_last_beacon + 120*1000L) < millis())) {
+    send_to_aprsis(cached_message);
+    cached_message = "";
+  }
+}
+#endif
+
 #define LORA_FLAGS_NODELAY 1
 
 void sendpacket(uint8_t sp_flags){
@@ -956,7 +1000,7 @@ void sendpacket(uint8_t sp_flags){
   lastTX = millis();
 #if defined(ENABLE_WIFI)
   if (tx_own_beacon_from_this_device_or_fromKiss__to_aprsis)
-    send_to_aprsis(outString);
+    send_own_beacon_to_aprsis_cached_or_now(outString);
 #endif
   sendpacket_was_called_twice = true;
 }
@@ -973,7 +1017,6 @@ void sendpacket(uint8_t sp_flags){
 
 
 void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, uint8_t flags, const String &message) {
-  int n;
 
   if (!lora_tx_enabled)
     return;
@@ -993,21 +1036,27 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, uint8_t fla
   else if (lora_speed  == 1200) wait_for_signal = 125;
 
   // sema lock for lora chip operations
+  esp_task_wdt_reset();
 #ifdef IF_SEMAS_WOULD_WORK
-  while (xSemaphoreTake(sema_lora_chip, 10) != pdTRUE)
+  while (xSemaphoreTake(sema_lora_chip, 100) != pdTRUE)
     esp_task_wdt_reset();
 #else
-  for (n = 0; sema_lora_chip; n++) {
+  for (int n = 0; sema_lora_chip; n++) {
     delay(10);
     if (!(n % 100))
       esp_task_wdt_reset();
   }
   sema_lora_chip = true;
 #endif
+  esp_task_wdt_reset();
 
   randomSeed(millis());
 
-  for (n = 0; n < 30; n++) {
+  // If lora chip is busy by still sending a packet, we'll get an exception
+  // on rf95 commands like rf95.setFrequency(). Assure the chip is available
+  // before any access to it
+
+  for (int n = 0; n < 30; n++) {
     esp_task_wdt_reset();
     delay(wait_for_signal);
     if (n == 1 && (flags & LORA_FLAGS_NODELAY)) {
@@ -1044,34 +1093,42 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, uint8_t fla
   #endif
   esp_task_wdt_reset();
   rf95.sendAPRS(lora_TXBUFF, messageSize);
-  esp_task_wdt_reset();
   rf95.waitPacketSent();
-  #ifdef ENABLE_LED_SIGNALING
-    digitalWrite(TXLED, HIGH);
-  #endif
-  // cross-digipeating may have altered our RX-frequency. Revert frequency change needed for this transmission.
-  if (lora_FREQ != lora_freq_rx_curr) {
-    rf95.setFrequency(lora_freq_rx_curr);
+  esp_task_wdt_reset();
+
+  if (lora_SPEED != lora_speed_rx_curr || lora_FREQ != lora_freq_rx_curr) {
+    // cross-digipeating may have altered our LoRa Speed and RX-frequency. Revert frequency change needed for this transmission.
+    if (lora_SPEED != lora_speed_rx_curr) {
+      lora_set_speed(lora_speed_rx_curr);
+    }
+    if (lora_FREQ != lora_freq_rx_curr) {
+      rf95.setFrequency(lora_freq_rx_curr);
+    }
     // flush cache. just to be sure, so that no cross-digi-qrg packet comes in the input-buffer of the main qrg.
     // With no buffer / length called, recvAPRS directly calls clearRxBuf()
     rf95.recvAPRS(0, 0);
   }
-  if (lora_SPEED != lora_speed_rx_curr)
-    lora_set_speed(lora_speed_rx_curr);
-#if (T_BEAM_V1_0) || defined(T_BEAM_V1_2)
-  // if lora_rx is disabled, but  ONLY if lora_digipeating_mode == 0 AND no SerialBT.hasClient is connected,
+
+  #ifdef ENABLE_LED_SIGNALING
+    digitalWrite(TXLED, HIGH);
+  #endif
+
+#if defined (T_BEAM_V1_0) || defined(T_BEAM_V1_2)
+  // if lora_rx is disabled AND lora_digipeating_mode == 0 AND no SerialBT.hasClient is connected,
   // we can savely go to sleep
-  if (! (lora_rx_enabled || lora_digipeating_mode > 0
+  if ( !lora_rx_enabled && lora_digipeating_mode == 0
           #if defined(ENABLE_BLUETOOTH) && defined(KISS_PROTOCOL)
-            || (enable_bluetooth && SerialBT.hasClient())
+            && (!enable_bluetooth || SerialBT.hasClient())
           #endif
-      ) )
+      ) {
     #ifdef T_BEAM_V1_0
       axp.setPowerOutPut(AXP192_LDO2, AXP202_OFF);                           // switch LoRa chip off
     #else
       axp.disableALDO2();                                                    // switch LoRa chip off
     #endif
+  }
 #endif
+
   esp_task_wdt_reset();
   // release lock
 #ifdef IF_SEMAS_WOULD_WORK
@@ -3928,14 +3985,14 @@ int bg_rf95snr_to_snr(uint8_t snr)
 }
 
 
-int bg_rf95rssi_to_rssi(int rssi)
+// bg_rf95rssi_to_rssi, called with arguments: 1. rf95.lastRssi() and 2. result of  bg_rf95snr_to_snr(rf95.lastSNR())
+int bg_rf95rssi_to_rssi(int rf95_lastRssi, int _lastSNR)
 {
   // We use an old BG_RF95 library from 2001. RadioHead/RH_RF95.cpp implements _lastSNR and _lastRssi correctly accordingg to the specs
-  int _lastSNR = bg_rf95snr_to_snr(rf95.lastSNR());
   boolean _usingHFport = (lora_freq >= 779.0);
 
   // bg_rf95 library: _lastRssi = spiRead(BG_RF95_REG_1A_PKT_RSSI_VALUE) - 137. First, undo -137 operation
-  int _lastRssi = rf95.lastRssi() + 137;
+  int _lastRssi = rf95_lastRssi + 137;
 
   if (_lastSNR < 0)
     _lastRssi = _lastRssi + _lastSNR;
@@ -3949,7 +4006,7 @@ int bg_rf95rssi_to_rssi(int rssi)
 }
 
 
-char *encode_snr_rssi_in_path()
+char *encode_snr_rssi_in_path(int snr, int rssi)
 {
   static char buf[7]; // length for "Q2373X" == 6 + 1 (\0) == 7
   *buf = 0;
@@ -3957,8 +4014,6 @@ char *encode_snr_rssi_in_path()
   // https://github.com/Lora-net/LoRaMac-node/issues/275
   // https://github.com/mayeranalytics/pySX127x/blob/master/SX127x/LoRa.py
   // rf95snr_to_snr returns values in range -32 to 31. The lowest two bits are RFU
-  int snr = bg_rf95snr_to_snr(rf95.lastSNR());
-  int rssi = bg_rf95rssi_to_rssi(rf95.lastRssi());
   if (snr > 99) snr = 99;			// snr will not go upper 31
   else if (snr < -99) snr = -99;		// snr will not go below -32
   if (rssi > 0) rssi = 0;			// rssi is always negative
@@ -4595,7 +4650,7 @@ void handle_usb_serial_input(void) {
               inputBuf = "";
               return;
             } else if (cmd == "show_preferences") {
-              Serial.println("*** show_preferenes:");
+              Serial.println("*** show_preferences:");
               refill_preferences_as_jsonData();
               // local copy
               String s = String(preferences_as_jsonData);
@@ -5043,7 +5098,6 @@ void loop()
       bestDoubleLat = gps.location.lat();
       bestDoubleLng = gps.location.lng();
       bestHdop = curr_hdop;
-debug_bestHdop = bestHdop;
     }
 
     uint32_t t_elapsed = millis() - t_interval_start;
@@ -5444,14 +5498,42 @@ out:
     }
   #endif // KISS_PROTOCOL
 
+
   // sema lock for lora chip operations
-#ifdef IF_SEMAS_WOULD_WORK
-  if (xSemaphoreTake(sema_lora_chip, 100) == pdTRUE) {
-#else
-  if (!sema_lora_chip) {
-   sema_lora_chip = true;
-#endif
-   if (rf95.waitAvailableTimeout(100)) {
+  boolean sema_lora_lock_success = false;
+  boolean packet_available = false;
+
+  esp_task_wdt_reset();
+  // lora chip is in mode RX
+  #ifdef IF_SEMAS_WOULD_WORK
+    if (xSemaphoreTake(sema_lora_chip, 100) == pdTRUE)
+      sema_lora_lock_success = true;
+  #else
+    for (int n = 0; n < 10; n++) {
+      if (!sema_lora_chip) {
+        sema_lora_chip = true;
+        sema_lora_lock_success = true;
+        break;
+      }
+      delay(10);
+    }
+  #endif
+  esp_task_wdt_reset();
+
+  if (sema_lora_lock_success) {
+    if (rf95.waitAvailableTimeout(10)) {
+      packet_available = true;
+      esp_task_wdt_reset();
+    } else {
+      #ifdef IF_SEMAS_WOULD_WORK
+        xSemaphoreGive(sema_lora_chip);
+      #else
+        sema_lora_chip = false;
+      #endif
+    }
+  }
+  if (packet_available) {
+    // we still take the lock
     #ifdef ENABLE_LED_SIGNALING
       #ifdef T_BEAM_V1_0
         axp.setChgLEDMode(AXP20X_LED_LOW_LEVEL);
@@ -5464,20 +5546,22 @@ out:
       buzzer(melody, sizeof(melody)/sizeof(int));
     #endif
 
-    // we need to read the received packt, even if rx is set to disable. else rf95.waitAvailableTimeout(100) will always show, data is available
+    // we need to read the received packt, even if rx is set to disable. else rf95.waitAvailableTimeout() will always show, data is available
     //byte array
     byte  lora_RXBUFF[BG_RF95_MAX_MESSAGE_LEN];      //buffer for packet to send
     uint8_t loraReceivedLength = sizeof(lora_RXBUFF); // (implicit ) reset max length before receiving!
     boolean lora_rx_data_available = rf95.recvAPRS(lora_RXBUFF, &loraReceivedLength);
+    int lastSNR = bg_rf95snr_to_snr(rf95.lastSNR());
+    int lastRssi = bg_rf95rssi_to_rssi(rf95.lastRssi(), lastSNR);
 
     // release lock here. We read the data from the lora chip. And we may call later loraSend (which should not be blocked by ourself)
-#ifdef IF_SEMAS_WOULD_WORK
-    xSemaphoreGive(sema_lora_chip);
-#else
-    sema_lora_chip = false;
-#endif
+    #ifdef IF_SEMAS_WOULD_WORK
+      xSemaphoreGive(sema_lora_chip);
+    #else
+      sema_lora_chip = false;
+    #endif
 
-    const char *rssi_for_path = encode_snr_rssi_in_path();
+    const char *rssi_for_path = encode_snr_rssi_in_path(lastSNR, lastRssi);
 
     // always needed (even if rx is disabled)
     if (lora_freq_rx_curr == lora_freq) {
@@ -5619,11 +5703,11 @@ out:
         writedisplaytext("  ((RX))", "", loraReceivedFrameString, "", "", "");
         time_to_refresh = millis() + showRXTime;
         #ifdef ENABLE_WIFI
-          sendToWebList(loraReceivedFrameString_for_weblist, bg_rf95rssi_to_rssi(rf95.lastRssi()), bg_rf95snr_to_snr(rf95.lastSNR()));
+          sendToWebList(loraReceivedFrameString_for_weblist, lastRssi, lastSNR);
         #endif
     #endif
     #if defined(ENABLE_SYSLOG) && defined(ENABLE_WIFI) // unfortunately, on this plattform we only have IP if we have WIFI
-        syslog_log(LOG_INFO, String("LoRa-RX: '") + loraReceivedFrameString_for_syslog + "', RSSI:" + bg_rf95rssi_to_rssi(rf95.lastRssi()) + ", SNR: " + bg_rf95snr_to_snr(rf95.lastSNR()));
+        syslog_log(LOG_INFO, String("LoRa-RX: '") + loraReceivedFrameString_for_syslog + "', RSSI:" + String(lastRssi) + ", SNR: " + String(lastSNR));
     #endif
     #ifdef KISS_PROTOCOL
         s = 0;
@@ -5675,7 +5759,7 @@ out:
         }
     } else {
       // rx disabled. guess blind
-     lora_automaic_cr_adoption_rf_transmissions_heard_in_timeslot++;
+      lora_automaic_cr_adoption_rf_transmissions_heard_in_timeslot++;
     }
 call_invalid_or_blacklisted:
 invalid_packet:
@@ -5690,13 +5774,6 @@ invalid_packet:
     #else
       ; // make compiler happy
     #endif
-   } else {
-#ifdef IF_SEMAS_WOULD_WORK
-     xSemaphoreGive(sema_lora_chip);
-#else
-     sema_lora_chip = false;
-#endif
-   }
   }
 
   if (lora_rx_enabled && rx_on_frequencies == 3 && lora_digipeating_mode < 2) {
@@ -5741,9 +5818,35 @@ invalid_packet:
       // avoid calling rf95.setFrequency() and lora_set_speed() if previos *p_curr_slot_table was the same freq/speed
       if (*p_curr_slot_table != ((p_curr_slot_table > curr_slot_table) ? p_curr_slot_table[-1] : curr_slot_table[9])) {
         lora_freq_rx_curr = (*p_curr_slot_table) ? lora_freq_cross_digi : lora_freq;
-        rf95.setFrequency(lora_freq_rx_curr);
         lora_speed_rx_curr = (*p_curr_slot_table) ? lora_speed_cross_digi : lora_speed;
-        lora_set_speed(lora_speed_rx_curr);
+        boolean sema_lora_lock_success = false;
+        esp_task_wdt_reset();
+        #ifdef IF_SEMAS_WOULD_WORK
+          if (xSemaphoreTake(sema_lora_chip, 250) == pdTRUE)
+            sema_lora_lock_success = true;
+        #else
+          for (int n = 0; n < 25; n++) {
+            if (!sema_lora_chip) {
+              sema_lora_chip = true;
+              sema_lora_lock_success = true;
+              break;
+            }
+            delay(10);
+          }
+        #endif
+        esp_task_wdt_reset();
+        if (sema_lora_lock_success) {
+          rf95.setFrequency(lora_freq_rx_curr);
+          lora_set_speed(lora_speed_rx_curr);
+          // Avoid packet in rx queue from secondary qrg being interpreted to come from main qrg
+          if (lora_freq_rx_curr == lora_freq)
+             rf95.recvAPRS(0, 0);
+          #ifdef IF_SEMAS_WOULD_WORK
+            xSemaphoreGive(sema_lora_chip);
+          #else
+            sema_lora_chip = false;
+          #endif
+        }
       }
       // restart from beginning of current row?
       if ((p_curr_slot_table - curr_slot_table) >= 9)
@@ -5994,6 +6097,12 @@ behind_position_tx:
   }
 
   handle_usb_serial_input();
+
+#if defined(ENABLE_WIFI)
+  if (tx_own_beacon_from_this_device_or_fromKiss__to_aprsis) {
+    send_own_beacon_to_aprsis_cached_or_now("");
+  }
+#endif
 
   vTaskDelay(1);
 }
