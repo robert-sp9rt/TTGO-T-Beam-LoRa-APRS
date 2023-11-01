@@ -1501,7 +1501,7 @@ void fillDisplayLine2() {
         wifi_info = "";
 #endif
 
-  if (dont_send_own_position_packets || !lora_tx_enabled) {
+  if (dont_send_own_position_packets || !(lora_tx_enabled || aprsis_enabled)) {
     OledLine2 = wifi_info + " LoRa-TX: dis";
   } else {
     if (gps_isValid) {
@@ -5014,7 +5014,7 @@ void loop()
     if(digitalRead(BUTTON)==LOW){
       delay(300);
       time_delay = millis() + 1500;
-      if (digitalRead(BUTTON)==HIGH && lora_tx_enabled){
+      if (digitalRead(BUTTON)==HIGH && (lora_tx_enabled || aprsis_enabled)) {
         if (!display_is_on && enabled_oled) {
           enableOled(); // turn ON OLED temporary
         } else {
@@ -5211,7 +5211,7 @@ void loop()
   }
 #endif
 
-  if (manBeacon && lora_tx_enabled) {
+  if (manBeacon && (lora_tx_enabled || aprsis_enabled)) {
     // Manually sending beacon from html page
     enableOled();
     fillDisplayLines3to5(0);
@@ -5320,7 +5320,7 @@ void loop()
 
   // fixed beacon, or if smartbeaconing with lost gps fix (but had at least one gps fix).
   // smartbeaconing also ensures correct next_fixed_beacon time
-  if (lora_tx_enabled && !dont_send_own_position_packets && millis() >= next_fixed_beacon &&
+  if ((lora_tx_enabled || aprsis_enabled) && !dont_send_own_position_packets && millis() >= next_fixed_beacon &&
        (fixed_beacon_enabled ||
        ((!gps_state || !gps_isValid) && t_last_smart_beacon_sent && t_last_smart_beacon_sent + sb_max_interval < millis()) ) ) {
       nextTX = sb_max_interval;
@@ -5877,7 +5877,7 @@ invalid_packet:
 
   boolean display_was_updated = false;
   // Send position, if not requested to do not ;) But enter this part if user likes our LA/LON/SPD/CRS to be displayed on his screen ('!gps_allow_sleep_while_kiss' caused 'gps_state false')
-  if (!gps_state && (!dont_send_own_position_packets || !lora_tx_enabled))
+  if (!gps_state && (!dont_send_own_position_packets || !(lora_tx_enabled || aprsis_enabled)))
     goto behind_position_tx;
 
   // refresh speed and hdop
@@ -5972,7 +5972,7 @@ invalid_packet:
 
   // rate limit to 20s in SF12 CR4/5 aka lora_speed 300; 5s in lora_speed 1200 (SF9 CR4/7). -> 1200/lora_speed*5 seconds == 6000000 / lora_speed ms
   // If special case nextTX <= 1: we already enforced rate-limiting (see course computation)
-  if (!fixed_beacon_enabled && !dont_send_own_position_packets && lora_tx_enabled && (lastTX+nextTX) < millis() && (nextTX <= 2 || (millis()-lastTX) >= (6000000L / lora_speed ))) {
+  if (!fixed_beacon_enabled && !dont_send_own_position_packets && (lora_tx_enabled || aprsis_enabled) && (lastTX+nextTX) < millis() && (nextTX <= 2 || (millis()-lastTX) >= (6000000L / lora_speed ))) {
     if (gps_isValid) {
       enableOled(); // enable OLED
       //writedisplaytext(" ((TX))","","LAT: "+LatShownP,"LON: "+LongShownP,"SPD: "+String(gps.speed.kmph(),1)+"  CRS: "+String(gps.course.deg(),1),getSatAndBatInfo());
