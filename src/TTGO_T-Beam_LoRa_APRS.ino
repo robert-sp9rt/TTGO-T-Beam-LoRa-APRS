@@ -1931,7 +1931,7 @@ void sendTelemetryFrame() {
       //Example for the up 8 digital BITS channel (currently not used)
       //It contins exact 8 bytes of 0 or 1, followed by up to 23 bytes procect title.
       s = String("BITS.");
-      s = s + "00000000" + "SQ9MDD LoRa Tracker";
+      s = s + "00000000" + ",SQ9MDD LoRa Tracker";
       break;
     }
 
@@ -2070,12 +2070,12 @@ void sendTelemetryFrame() {
       uint8_t dc_c = max(0, min((int ) (axp.getVbusCurrent() / 10), 255));
       uint8_t b_c_out = max(0, min((int ) (axp.getBattDischargeCurrent() / 10), 255));
       uint8_t b_c_in = may_add_temperature ? 0 : min((int ) (axp.getBattChargeCurrent() / 10), 255);
-      uint8_t axp_temperature = may_add_temperature ? max(min((int ) ((axp.getTemp() + 5) / 0.25), 255), 0) : 0;
+      uint8_t axp_temperature = may_add_temperature ? max(min((int ) ((axp.getTemp() + 5 + 0.125) / 0.25), 255), 0) : 0;
     #elif T_BEAM_V1_2
       uint8_t dc_c = 0;
       uint8_t b_c_out = 0;
       uint8_t b_c_in = 0;
-      uint8_t axp_temperature = max(min((int ) ((axp.getTemperature() + 5) / 0.25), 255), 0);
+      uint8_t axp_temperature = max(min((int ) ((axp.getTemperature() + 5 + 0.125) / 0.25), 255), 0);
     #endif
   #else
     batt_read();
