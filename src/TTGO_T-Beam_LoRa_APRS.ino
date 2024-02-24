@@ -523,8 +523,12 @@ Adafruit_SSD1306 display(128, 64, &Wire, OLED_RESET);
 
 #ifdef IF_SEMAS_WOULD_WORK
   xSemaphoreHandle sema_lora_chip;
+  xSemaphoreHandle sema_handle_aprs_message_addressed_to_us;
+  xSemaphoreHandle sema_is_call_blacklisted;
 #else
   volatile boolean sema_lora_chip = false;
+  volatile boolean sema_handle_aprs_message_addressed_to_us = false;
+  volatile boolean sema_is_call_blacklisted = false;
 #endif
 
 
@@ -3891,8 +3895,12 @@ void setup()
   // Avoid concurrent access of processes to lora our chip
 #ifdef IF_SEMAS_WOULD_WORK
   sema_lora_chip = xSemaphoreCreateBinary();
+  sema_handle_aprs_message_addressed_to_us = xSemaphoreCreateBinary();
+  sema_is_call_blacklisted = xSemaphoreCreateBinary();
 #else
   sema_lora_chip = false;
+  sema_handle_aprs_message_addressed_to_us = false;
+  sema_is_call_blacklisted = false;
 #endif
 
 
@@ -4039,10 +4047,30 @@ int packet_is_valid (const char *frame_start) {
 
 
 int is_call_blacklisted(const char *frame_start) {
+
+  esp_task_wdt_reset();
+  #ifdef IF_SEMAS_WOULD_WORK
+    while (xSemaphoreTake(sema_is_call_blacklisted, 100) != pdTRUE)
+      esp_task_wdt_reset();
+  #else
+    for (int n = 0; sema_is_call_blacklisted; n++) {
+      delay(10);
+      if (!(n % 100))
+        esp_task_wdt_reset();
+      }
+    sema_is_call_blacklisted = true;
+  #endif
+
   // src-call_validation
   const char *p_call = frame_start;
+  char *header_end;
+  char *p;
+  int ret = 1;
+  boolean ssid_present = false;
+  char buf[13]; // room for ",DL1AAA-15*," + \0
   int i = 0;
-  if (!p_call || !*p_call) return 1;
+
+  if (!p_call || !*p_call) goto end;
   // Special case: message from ham radio winlink system:
   if (!strncmp(p_call, "WLNK", 4)) {
     ;
@@ -4054,19 +4082,18 @@ int is_call_blacklisted(const char *frame_start) {
       p_call--; // warning, beyond start of pointer
     }
     for (; i <= 7; i++) {
-      if (i == 7) return 1;
+      if (i == 7) goto end;
       else if (!p_call[i] || p_call[i] == '>' || p_call[i] == '-') {
-        if (i < 4) return 1;
+        if (i < 4) goto end;
         break;
-      } else if (i < 2 && !isalnum(p_call[i])) return 1;
-      else if (i == 2 && !isdigit(p_call[i])) return 1;
-      else if (i > 2 && !isalpha(p_call[i])) return 1;
+      } else if (i < 2 && !isalnum(p_call[i])) goto end;
+      else if (i == 2 && !isdigit(p_call[i])) goto end;
+      else if (i > 2 && !isalpha(p_call[i])) goto end;
     }
   }
 
-  boolean ssid_present = false;
-  char buf[12]; // room for ",DL1AAA-15," + \0
-  char *p = buf;
+
+  p = buf;
   *p++ = ',';
   for (i = 0; i < 9; i++) {
     if (!frame_start[i] || /* frame_start[i] == '>' || */ ! (frame_start[i] == '-' || isalnum(frame_start[i]))) {
@@ -4093,20 +4120,26 @@ int is_call_blacklisted(const char *frame_start) {
 
 
   // blacklist empty? we may leave here
-  if (!*blacklist_calls || !strcmp(blacklist_calls, ",,"))
-    return 0;
+  if (!*blacklist_calls || !strcmp(blacklist_calls, ",,")) {
+    ret = 0;
+    goto end;
+  }
 
   // exact match?
-  if (strstr(blacklist_calls, buf))
-    return 2;
+  if (strstr(blacklist_calls, buf)) {
+    ret = 2;
+    goto end;
+  }
   // filter call completely?
   if ((p = strchr(buf, '-'))) {
     *p++ = ','; *p++ = 0;
-    if (strstr(blacklist_calls, buf))
-      return 3;
+    if (strstr(blacklist_calls, buf)) {
+      ret = 3;
+      goto end;
+    }
   }
 
-  char *header_end = strchr(frame_start, ':');
+  header_end = strchr(frame_start, ':');
   // check for blacklisted digi in path
   if (header_end && (p = strchr(frame_start, ','))) {
     for (;;) {
@@ -4114,7 +4147,7 @@ int is_call_blacklisted(const char *frame_start) {
       if (!q || q > header_end)
         q = header_end;
       // copy ",DL1AAA,.." to buf as ",DL1AAA"
-      // but before: length check. len ",DL1AAA-15*," is 12; sizeof(buf) is 12 (due to \0); we copy until trailing ','.
+      // but before: length check. len ",DL1AAA-15*," is 12; sizeof(buf) is 13 (due to \0); we copy until trailing ','.
       if ((q-p) > sizeof(buf)-1)
         break;
       strncpy(buf, p, q-p);
@@ -4122,29 +4155,45 @@ int is_call_blacklisted(const char *frame_start) {
       char *r = strchr(buf, '*');
       if (r)
         *r = 0;
-      // after modifications above, is len(buf) still < 10 (space for ',' and \0)?
-      if (strlen(buf) > 10)
-        return 0;
+      // after modifications above, is len(buf) still <= 10 (room for ',' + 9 (call-ssid)  == 10. and later  ',' and \0)?
+      r = strchr(buf, '-');
+      if (strlen(buf) > (r ? 10 : 7)) {
+        // can't check non-conformal stuff. Unfortunately, aprs-is tier node names in the digi path like T2CSNGRAD (length of 9)
+        // are non-conformal. That's why we return 0 here. Length for our exact-match-test below would be ",T2CSNGRAD-0,"+\0 == 14
+        break;
+      }
       // our ssid filter construct: -0 means search for call with ssid 0 zero.
-      if (!(r = strchr(buf, '-')))
+      if (!r) {
         strcat(buf, "-0");
+      }
       strcat(buf, ",");
       // exact match?
-      if (strstr(blacklist_calls, buf))
-        return 4;
+      if (strstr(blacklist_calls, buf)) {
+        ret = 4;
+        goto end;
+      }
       // filter call completely?
       if ((r = strchr(buf, '-'))) {
         *r++ = ','; *r++ = 0;
-        if (strstr(blacklist_calls, buf))
-          return 5;
+        if (strstr(blacklist_calls, buf)) {
+          ret = 5;
+          goto end;
+        }
       }
       if (q == header_end)
         break;
       p = q;
     }
   }
+  ret = 0;
 
-  return 0;
+end:
+  #ifdef IF_SEMAS_WOULD_WORK
+    xSemaphoreGive(sema_is_call_blacklisted);
+  #else
+    sema_is_call_blacklisted = false;
+  #endif
+  return ret;
 }
 
 
@@ -5194,32 +5243,49 @@ void handle_usb_serial_input(void) {
 
 
 String handle_aprs_messsage_addressed_to_us(const char *received_frame) {
+  char *header_end;
+  const char *header_normal_or_third_party_start;
+  char *header_normal_or_third_party_end;
+  char *q;
+
+  #ifdef IF_SEMAS_WOULD_WORK
+    while (xSemaphoreTake(sema_handle_aprs_message_addressed_to_us, 100) != pdTRUE)
+      esp_task_wdt_reset();
+  #else
+    for (int n = 0; sema_handle_aprs_message_addressed_to_us; n++) {
+      delay(10);
+      if (!(n % 100))
+        esp_task_wdt_reset();
+    }
+    sema_handle_aprs_message_addressed_to_us = true;
+  #endif
+
   String answer_message = "";
   if (!received_frame)
-    return answer_message;
-  char *header_end = strchr(received_frame, ':');
+    goto end;
+  header_end = strchr(received_frame, ':');
   if (!header_end)
-    return answer_message;
-  const char *header_normal_or_third_party_start = received_frame;
-  char *header_normal_or_third_party_end = header_end;
-  char *q;
+    goto end;
+  header_normal_or_third_party_start = received_frame;
+  header_normal_or_third_party_end = header_end;
 
   // handle messages addressed to us. May be called after lora RF receiption, or when parsing an aprsis message
   if (header_end[1] == '}') {
     header_normal_or_third_party_start = header_end+2;
     header_normal_or_third_party_end = strchr(header_normal_or_third_party_start, ':');
     if (!header_normal_or_third_party_end)
-      return answer_message;
+      goto end;
   }
-
-  if (is_call_blacklisted(header_normal_or_third_party_start))
-    return answer_message;
 
   if (strlen(header_normal_or_third_party_end+1) > 11 &&
       header_normal_or_third_party_end[1] == ':' &&
       header_normal_or_third_party_end[11] == ':') {
     // this is an aprs message. Is this message for us? Then we will not digipeat and we will not send it to aprsis
     // Example: WLNK-1>APWLK,TCPIP*,qAC,T2MCI::DL9SAU-12:You have 1 Winlink mail messages pending{2077
+
+    if (is_call_blacklisted(header_normal_or_third_party_start))
+      goto end;
+
     char msg_to[12];
     sprintf(msg_to, ":%-9.9s:", Tcall.c_str());
     if (!strncmp(header_normal_or_third_party_end+1, msg_to, 11)) {
@@ -5261,7 +5327,14 @@ String handle_aprs_messsage_addressed_to_us(const char *received_frame) {
     }
   }
 
-  return answer_message;
+end:
+  #ifdef IF_SEMAS_WOULD_WORK
+    xSemaphoreGive(sema_handle_aprs_message_addressed_to_us);
+  #else
+    sema_handle_aprs_message_addressed_to_us = false;
+  #endif
+
+  return String(answer_message);
 }
 
 
