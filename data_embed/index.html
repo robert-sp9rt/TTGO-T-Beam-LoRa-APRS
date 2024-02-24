@@ -29,9 +29,9 @@
                         </select>
                     </div>
                 </div>
-				<div class="grid-container full">
-					<h5 class="u-full-width">AP settings</h5>
-				</div>
+               <div class="grid-container full">
+                       <h5 class="u-full-width">AP settings</h5>
+               </div>
                 <div class="grid-container halves">
                     <div>
                         <label for="ap_password">AUTO AP Password</label>
@@ -48,9 +48,9 @@
                         </select>
                     </div>
                 </div>
-				<div class="grid-container full">
-					<h5 class="u-full-width">STA settings</h5>
-				</div>
+                <div class="grid-container full">
+                        <h5 class="u-full-width">STA settings</h5>
+                </div>
                 <div class="grid-container full">
                     <div id="wifi_list">
                         <label for="wifi_ssid">Network</label>
@@ -202,7 +202,7 @@ You like to enable, if you use your tracker portable and it should automatically
                 <div class="grid-container quarters">
                     <div>
                         <label for="aprs_callsign">Callsign and SSID *</label>
-                        <input class="u-full-width" type="text" minlength="3" maxlength="9" name="aprs_callsign" placeholder="NOCALL-1" id="aprs_callsign" title="your callsign with SSID. SSID is optional and should be in the range of -1 to -15". SSIDs like "-L4" are ok for aprs-is, but should not be sent on RF; thus LoRa TX will be disabled.">
+                        <input class="u-full-width" type="text" minlength="3" maxlength="9" name="aprs_callsign" placeholder="NOCALL-1" id="aprs_callsign" title="your callsign with SSID. SSID is optional and should be in the range of -1 to -15. SSIDs like '-L4' are ok for aprs-is, but should not be sent on RF; thus LoRa TX will be disabled.">
                     </div>
                     <div>
                         <label for="aprs_relay_path">Relay Path</label>
@@ -222,7 +222,7 @@ You like to enable, if you use your tracker portable and it should automatically
                     </div>
                     <div>
                         <label for="aprs_alt_r">Altitude ratio [%]</label>
-                        <input name="aprs_alt_r" id="aprs_alt_r" type="number" min="0" max="100" title="Altitude ratio every n'th packet.. Use 100 for every packet, 0 for no altitude, or any number in between. Recommended: 10 (altitude every tenth's frame). If you use compression ('Send Course/Speed along with Altitude switched off') for reducing airtime (-> then n% altitude-encoding packets are sent, and 100-n% course/speed-encoded packets), you may choose 50 for ballons, where speed/dir and altitude are of equal interrest; if you choose 10, then 90 % of your transmissions encode speed/direction. Cave: if you set it to 100 and switch next option 'Always send CSE/SPD and ALT' to off, then only altitude packets are sen; if you switch the next option on, then altitude is always sent and this configured Altitude ratio is ignored. If you configure 0, altitude is never sent (-> only compressed speed). If ratio is < 100 and gps altitude is not refreshed, only encoded speed is sent." placeholder="10">
+                        <input name="aprs_alt_r" id="aprs_alt_r" type="number" min="0" max="100" title="Altitude ratio every n'th packet.. Use 100 for every packet, 0 for no altitude, or any number in between. Recommended: 10 (altitude every tenth's beacon). If you use compression ('Send Course/Speed along with Altitude switched off') for reducing airtime (-> then n% altitude-encoding packets are sent, and 100-n% course/speed-encoded packets), you may choose 50 for ballons, where speed/dir and altitude are of equal interrest; if you choose 10, then 90 % of your transmissions encode speed/direction. Cave: if you set it to 100 and switch next option 'Always send CSE/SPD and ALT' to off, then only altitude packets are sen; if you switch the next option on, then altitude is always sent and this configured Altitude ratio is ignored. If you configure 0, altitude is never sent (-> only compressed speed). If ratio is < 100 and gps altitude is not refreshed, only encoded speed is sent." placeholder="10">
                     </div>
                     <div>
                         <label for="aprs_CSandA">Always send CSE/SPD and ALT</label>
@@ -243,6 +243,18 @@ You like to enable, if you use your tracker portable and it should automatically
                     <div>
                         <label for="aprs_batt">Show Battery</label>
                         <input name="aprs_batt" id="aprs_batt" type="checkbox" value="1" title=" show battery voltage after personal comment">
+                    </div>
+                    <div>
+                        <label for="aprs_stat_wl">Add winlink notification to position comment once/hour</label>
+                        <select id="aprs_stat_wl" name="aprs_stat_wl">
+                            <option value="0">off (default)</option>
+                            <option value="1">on, if bluetooth kiss device is connected</option>
+                            <option value="2">on</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="aprs_stat_qrt">Send Status-packet on shutdown</label>
+                        <input name="aprs_stat_qrt" id="aprs_stat_qrt" type="checkbox" value="1" title=" Send status packet 'QRT' right before shutdown on RF. See also option 'Auto power off' if external power is switched off">
                     </div>
                     <div>
                         *) requires reboot only if connection to aprs-is enabled
@@ -289,7 +301,7 @@ You like to enable, if you use your tracker portable and it should automatically
                 <div class="grid-container thirds">
                     <div>
                         <label for="aprs_fixed_beac">Fixed Beacon</label>
-                        <input name="aprs_fixed_beac" id="aprs_fixed_beac" type="checkbox" value="1" title="enable fixed beacon when GPS is disabled or no fix">
+                        <input name="aprs_fixed_beac" id="aprs_fixed_beac" type="checkbox" value="1" title="enable fixed beacon when GPS is disabled or no fix". If set to off, your tracker will not send the configured fixed position (but only the current GPS position, after GPS-fix), except: if you maually send a position-beacon (using middle button, web-interface, cli), it starts sending in Fixed Beacon Interval (like Fixed Beacon would be enabled)>
                     </div>
                     <div>
                         <label for="aprs_fb_interv">Fixed Beacon Interval [s]</label>
@@ -306,7 +318,7 @@ You like to enable, if you use your tracker portable and it should automatically
                         <input type="text" minlength="0" name="aprs_lon_p" id="aprs_lon_p" title="longtitude for fixed beacon, APRS format for example 02050.59Ei (this is ddd.mmE). 'ddd.nnnnE', '-ddd.nnnn',  'ddd mm[.nnn]' and 'ddd mm ss' and 'ddd mm' ss&quot;' and 'ddd-mm[.nn]E' are also supported. If position is west, you can prefix '-' instead of writing 'W' behind the coordinate. '-nnW' does not make sense.. If you like to add a locator, add it to the latitude field and leave this field blank. APRS spec defindes a special notation for null-position: 0000.00N 00000.00W (W, not E). If GPS is enabled and a valid position has been received, that one will be used instead of the configured one, until the next system reboot">
                     </div>
                     <div>
-                        <label for="aprs_llfgps">Use lat/lon of current GPS position</label>
+                        <label for="aprs_llfgps">Instead, store current GPS position</label>
                         <input name="aprs_llfgps" id="aprs_llfgps" type="checkbox" value="1" title="Use lat/lon of current GPS position. Overwrites Latitude / Longitude settings above. Requires valid GPS position.">
                     </div>
                 </div>
@@ -444,6 +456,12 @@ III: Values above are referring to latitude; distance between two latitudes is a
                         </select>
                     </div>
                 </div>
+                <div class="grid-container full">
+                    <div>
+                        <label for="lora_myalias">My alias for digipeating (optional)</label>
+                        <input class="u-full-width" type="text" minlength="0" maxlength="9" name="lora_myalias" id="lora_myalias" title="My alias for digipeting (empty recommended). Kenwood users know it as UITRACE. We repeat this alias, if found in first position of the path and if it is not already repeated. Don't set this to WIDEn-m. This option is only active in LoRa Repeater Mode >= 1">
+                    </div>
+                </div>
                 <div class="grid-container halves">
                     <div>
                         <label for="lora_dig_x_m">Digipeat heard stations from MAIN frequency to which frequencies</label>
@@ -577,17 +595,17 @@ III: Values above are referring to latitude; distance between two latitudes is a
                 </div>
                 <div>
                     <label for="shutdown_act">Auto power off</label>
-                    <input name="shutdown_act" id="shutdown_act" type="checkbox" value="1" title="activate auto shutdown after usb plug off (not for T-BEAM 0.7). The power off the device will be switched off. Default: 'yes' (power off). Consider if you need to switch it to 'no' (keep power on), i.e. if you are an additionaly battery-connected igate, or if you have a not reliable power source.">
+                    <input name="shutdown_act" id="shutdown_act" type="checkbox" value="1" title="activate auto shutdown after usb plug off (not for T-BEAM 0.7). The evice will powered down. You can interrupt this by pressing the middle button in time (right after pluging of or short before it powers down). Default: 'yes' (power off). Consider if you need to switch it to 'no' (keep power on), i.e. if you are an additionaly battery-connected igate, or if you have a not reliable power source.Please also look at the option 'Send Status-packet when shutdown' above.">
                 </div>
                 <div>
                     <label for="shutdown_dt">Auto power off delay [s]</label>
-                    <input name="shutdown_dt" id="shutdown_dt" type="number" min="3" max="3600" title="auto shutdown delay in seconds. Range 3 to 3600.">
+                    <input name="shutdown_dt" id="shutdown_dt" type="number" min="3" max="3600" title="auto shutdown delay in seconds. Range 3 to 3600. You can interrupt the timer by pressing the middle-button.">
                 </div>
             </div>
             <div class="grid-container thirds">
                 <div>
-                    <label for="sh_rxtime">Display show RX time [s]</label>
-                    <input name="sh_rxtime" id="sh_rxtime" type="number" min="0" max="45" title="show RX packet for seconds, refresh rate for OLED. Range 0 to 45.">
+                    <label for="sh_rxtime">Seconds to show RX packets [s]</label>
+                    <input name="sh_rxtime" id="sh_rxtime" type="number" min="0" max="45" title="show a received packet for seconds, refresh rate for OLED. Range 0 to 45.">
                 </div>
                 <div>
                     <label for="sh_oledtime">Display timeout [s]</label>
@@ -627,7 +645,7 @@ See also the option beneath about showing maidenhead grid locator.">
                     <option value="4">C2: Lat/Lon in nautical notation, left side</option>
                   </select>
                 </div>
-		<div>
+                <div>
                   <label for="oledlocator">Maidenhead Locator</label>
                   <select id="oledlocator" name="oledlocator" title="Show Maidenhead grid locator: always (instead of Lat/Lon), never, alternating. Alternating:
                           0: Never
@@ -848,8 +866,8 @@ Hard readable lengths / too long for our display:
                </ul>
                If OLED is disabled or OLED is ON:<br>
                <ul>
-                    <li>with GPS-FIX immediate sending of a frame with the position from the GPS</li>
-                    <li>without GPS-FIX, immediate sending of the frame with the position saved in the configuration</li>
+                    <li>with GPS-FIX immediate send a beacon with the position from the GPS</li>
+                    <li>without GPS-FIX, immediate send a beacon with the position saved in the configuration</li>
                </ul>
                <h6 class="u-full-width">long press</h6>
                <ul>
@@ -882,7 +900,7 @@ Hard readable lengths / too long for our display:
                </ul>
                Fixed Beacon off:<br>
                <ul>
-                    <li>Smart Beaconing is activated, if there is no fixed beacon</li>
+                    <li>Smart Beaconing is activated and GPS position is sent (if GPS fix is available). There is no fixed beacon. Beaconing starts after first GPS-fix (or if you manualy send a fixed beacon). If GPS-fix is lost, the last GPS position is sent in Fixed Beacon Interval.</li>
                </ul>
             </div>
             <div class="grid-container full">

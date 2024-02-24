@@ -2,11 +2,11 @@
 #include <esp_task_wdt.h>
 
 
-extern boolean enable_bluetooth;
 extern uint8_t usb_serial_data_type;
 
 #ifdef ENABLE_BLUETOOTH
   BluetoothSerial SerialBT;
+  extern boolean serial_bt_client_is_connected;
 #endif
 
 QueueHandle_t tncReceivedQueue = nullptr;
@@ -46,7 +46,7 @@ void handleKISSData(char character, int bufferIndex) {
           Serial.print(inTNCData);
         }
         #ifdef ENABLE_BLUETOOTH
-        if (enable_bluetooth && SerialBT.hasClient()) {
+        if (serial_bt_client_is_connected) {
           SerialBT.print(inTNCData);
         }
         #endif
@@ -91,7 +91,7 @@ void handleKISSData(char character, int bufferIndex) {
       }
     }
     #ifdef ENABLE_BLUETOOTH
-      if (enable_bluetooth && SerialBT.hasClient()) {
+      if (serial_bt_client_is_connected) {
         while (SerialBT.available() > 0) {
           char character = SerialBT.read();
           handleKISSData(character, 1);
@@ -114,7 +114,7 @@ void handleKISSData(char character, int bufferIndex) {
       if (!usb_serial_data_type)
         Serial.print(kissEncoded);
       #ifdef ENABLE_BLUETOOTH
-        if (enable_bluetooth && SerialBT.hasClient()){
+        if (serial_bt_client_is_connected){
           SerialBT.print(kissEncoded);
         }
       #endif

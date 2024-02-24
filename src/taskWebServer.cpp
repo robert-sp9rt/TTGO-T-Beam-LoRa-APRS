@@ -95,8 +95,6 @@ extern String OledLine3;
 extern String OledLine4;
 extern String OledLine5;
 
-extern char src_call_blacklist;
-
 #ifdef IF_SEMAS_WOULD_WORK
 extern xSemaphoreHandle sema_lora_chip;
 #else
@@ -117,6 +115,8 @@ String aprsis_status = "Disconnected";
 // aprsis 3rd party traffic encoding
 String generate_third_party_packet(String, String);
 void do_send_status_message_about_reboot_to_aprsis();
+extern void sendStatusPacket(const String &);
+extern String handle_aprs_messsage_addressed_to_us(const char *);
 #if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
 void do_send_status_message_about_shutdown_to_aprsis();
 #endif
@@ -144,6 +144,7 @@ IPAddress IP_GATEWAY_NULL(0,0,0,0);
 
 // APRS-IS status message (about connection reset or our rboot)
 extern boolean send_status_message_to_aprsis;
+extern boolean send_status_message_about_shutdown_to_rf;
 String aprsis_time_last_successful_connect = "";
 int aprsis_connect_tries = 0;
 extern char gps_time_s[];
@@ -179,6 +180,8 @@ WiFiClient aprsis_client;
   extern AXP20X_Class axp;
 #endif
 
+
+void send_queue_to_aprsis();
 
 void sendCacheHeader() { server.sendHeader("Cache-Control", "max-age=3600"); }
 void sendGzipHeader() { server.sendHeader("Content-Encoding", "gzip"); }
@@ -422,7 +425,12 @@ void handle_Shutdown() {
     #endif
     Serial.println("WebServer: Shutdown Request -> Shutdown...");
     server.send(200,"text/html", "Shutdown");
+    if (send_status_message_about_shutdown_to_rf) {
+      String msg = String("B") + buildnr + String(",up:") + String((int ) (millis()/1000/60)) + String(" qrt");
+      sendStatusPacket(msg);
+    }
     do_send_status_message_about_shutdown_to_aprsis();
+    delay(500);
     #ifdef T_BEAM_V1_0
       axp.setChgLEDMode(AXP20X_LED_OFF);
     #elif T_BEAM_V1_2
@@ -476,6 +484,7 @@ void refill_preferences_as_jsonData()
   s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_LORA_ADD_SNR_RSSI_TO_PATH_PRESET);
   s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_LORA_ADD_SNR_RSSI_TO_PATH_END_AT_KISS_PRESET);
   s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_APRS_DIGIPEATING_MODE_PRESET);
+  s = s + "\n  " +  jsonLineFromPreferenceString(PREF_APRS_DIGIPEATING_MYALIAS);
   s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_APRS_CROSS_DIGIPEATING_MODE_PRESET);
   s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_LORA_TX_BEACON_AND_KISS_TO_FREQUENCIES_PRESET);
   s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_LORA_TX_BEACON_AND_KISS_TO_APRSIS_PRESET);
@@ -503,6 +512,8 @@ void refill_preferences_as_jsonData()
   s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_APRS_SB_TURN_SLOPE_PRESET);
   s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_APRS_SB_TURN_TIME_PRESET);
   s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_APRS_SHOW_BATTERY);
+  s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_APRS_STATUS_WINLINK_NOTIFICATION);
+  s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_APRS_STATUS_SHUTDOWN_NOTIFICATION);
   s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_APRS_FIXED_BEACON_PRESET);
   //s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_APRS_SHOW_ALTITUDE);
   s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_APRS_ALTITUDE_RATIO);
@@ -950,6 +961,56 @@ void handle_SaveAPRSCfg() {
   if (server.hasArg(PREF_APRS_DIGIPEATING_MODE_PRESET)){
     preferences.putInt(PREF_APRS_DIGIPEATING_MODE_PRESET, server.arg(PREF_APRS_DIGIPEATING_MODE_PRESET).toInt());
   }
+  if (server.hasArg(PREF_APRS_DIGIPEATING_MYALIAS)) {
+    String s = server.arg(PREF_APRS_DIGIPEATING_MYALIAS);
+    s.toUpperCase();
+    s.trim();
+    if (s.endsWith("-0"))
+      s.replace("-0", "");
+
+    if (!s.isEmpty()) {
+      uint8_t is_valid = 1;
+      const char *p;
+      const char *q;
+
+      p = s.c_str();
+      for (q = p; *q; q++) {
+        if (isalnum(*q) || *q == '-')
+          continue;
+        is_valid = 0;
+        break;
+      }
+
+      if (is_valid) {
+        is_valid = 0;
+        q = strchr(p, '-');
+        if (q) {
+          if (q > p && q-p <= 6 && strlen(q) > 1 && strlen(q) <= 3) {
+            q++;
+            if (q[0]) {
+              if (q[1]) {
+                if (q[0] == '1' && q[1] >= '0' && q[1] <= '5') {
+                  is_valid = 1;
+                }
+              } else {
+                if (q[0] > '0' && q[0] <= '9') {
+                  is_valid = 1;
+                }
+              }
+            }
+          }
+        } else {
+          if (*p && strlen(p) <= 6) {
+            is_valid = 1;
+          }
+        }
+      }
+      if (!is_valid) {
+        s = "";
+      }
+    }
+    preferences.putString(PREF_APRS_DIGIPEATING_MYALIAS, s);
+  }
   if (server.hasArg(PREF_APRS_CROSS_DIGIPEATING_MODE_PRESET)){
     preferences.putInt(PREF_APRS_CROSS_DIGIPEATING_MODE_PRESET, server.arg(PREF_APRS_CROSS_DIGIPEATING_MODE_PRESET).toInt());
   }
@@ -995,17 +1056,19 @@ void handle_SaveAPRSCfg() {
       if (q) {
         if (q > p && q-p <= 6 && strlen(q) > 1 && strlen(q) <= 3) {
           q++;
-          if ((q[0] >= 'A' && q[0] <= 'Z') || (q[1] >= 'A' && q[1] <= 'Z')) {
-            // non-conformal SSIDs like "-L4" are ok for aprs-is, but should not be sent on RF -> disable TX
-            is_valid = 1;
-          } else {
-            if (q[1]) {
-              if (q[0] == '1' && q[1] >= '0' && q[1] <= '5') {
-                is_valid = 2;
-              }
+          if (q[0]) {
+            if ((q[0] >= 'A' && q[0] <= 'Z') || (q[1] >= 'A' && q[1] <= 'Z')) {
+              // non-conformal SSIDs like "-L4" are ok for aprs-is, but should not be sent on RF -> disable TX
+              is_valid = 1;
             } else {
-              if (q[0] > '0' && q[0] <= '9') {
-                is_valid = 2;
+              if (q[1]) {
+                if (q[0] == '1' && q[1] >= '0' && q[1] <= '5') {
+                  is_valid = 2;
+                }
+              } else {
+                if (q[0] > '0' && q[0] <= '9') {
+                  is_valid = 2;
+                }
               }
             }
           }
@@ -1152,6 +1215,8 @@ void handle_SaveAPRSCfg() {
   }
 
   preferences.putBool(PREF_APRS_SHOW_BATTERY, server.hasArg(PREF_APRS_SHOW_BATTERY));
+  preferences.putInt(PREF_APRS_STATUS_WINLINK_NOTIFICATION, server.arg(PREF_APRS_STATUS_WINLINK_NOTIFICATION).toInt());
+  preferences.putBool(PREF_APRS_STATUS_SHUTDOWN_NOTIFICATION, server.hasArg(PREF_APRS_STATUS_SHUTDOWN_NOTIFICATION));
   preferences.putBool(PREF_ENABLE_TNC_SELF_TELEMETRY, server.hasArg(PREF_ENABLE_TNC_SELF_TELEMETRY));
   //preferences.putBool(PREF_APRS_SHOW_ALTITUDE, server.hasArg(PREF_APRS_SHOW_ALTITUDE));
   if (server.hasArg(PREF_APRS_ALTITUDE_RATIO)){
@@ -1292,21 +1357,21 @@ void restart_AP_or_STA(void) {
         used_wifi_ModeSTA_PASS = String(APs[pos].pw);
 
         static uint32_t last_write = 0L;
-	boolean changed = false;
+        boolean changed = false;
         // store last successfull association into flash (preferences); ratelimit writing to flash
         if (!last_write || millis() > last_write + 5*60*1000L) {
           if (used_wifi_ModeSTA_PASS != preferences.getString(PREF_WIFI_PASSWORD, "")) {
             preferences.putString(PREF_WIFI_PASSWORD, used_wifi_ModeSTA_PASS);
-	    changed = true;
+            changed = true;
             last_write = millis();
           }
           if (used_wifi_ModeSTA_SSID != preferences.getString(PREF_WIFI_SSID, "")) {
             preferences.putString(PREF_WIFI_SSID, used_wifi_ModeSTA_SSID);
-	    changed = true;
+            changed = true;
             last_write = millis();
           }
           #if defined(ENABLE_SYSLOG)
-	    if (changed && debug_verbose)
+            if (changed && debug_verbose)
               syslog_log(LOG_DEBUG, String("FlashWrite preferences: restart_AP_or_STA()"));
           #endif
         }
@@ -1325,8 +1390,8 @@ void restart_AP_or_STA(void) {
       if (wifi_do_fallback_to_mode_AP || (!mode_sta_once_successfully_connected && millis() < +3*60*1000L)) {
         start_soft_ap = true;
       } else {
-	// if not fallback to mode ap, we are finished here. wifi_connection_status is still WIFI_SEARCHING_FOR_AP
-	return;
+        // if not fallback to mode ap, we are finished here. wifi_connection_status is still WIFI_SEARCHING_FOR_AP
+        return;
       }
     }
 
@@ -1812,9 +1877,9 @@ void read_from_aprsis(void) {
           }
           if (!err) {
             for (q = s.c_str(); *q && *q != ':'; q++) {
-	      // q (for qAR) is also a valid character
+              // q (for qAR) is also a valid character
               //if (! ( (*q >= '0' && *q <= '9') || (*q >= 'A' && *q <= 'Z') || *q == 'q' || *q == '>' || *q == '-' || *q == ',' || *q == '*' ) ) {
-	      //No, unfortunately some aprs-submitters have a lowercase call
+              //No, unfortunately some aprs-submitters have a lowercase call
               if (! ( isalnum(*q) || *q == '>' || *q == '-' || *q == ',' || *q == '*' ) ) {
                 err = 1;
                 log_msg = "bad character in header";
@@ -1835,7 +1900,7 @@ void read_from_aprsis(void) {
       aprsis_client.stop();
       log_msg = "disconnecting: ";
     }
-    log_msg = "APRS-IS: read_from_aprs(): " + log_msg + ": '" + s + "'";
+    log_msg = "APRS-IS: read_from_aprsis(): " + log_msg + ": '" + s + "'";
     #if defined(ENABLE_SYSLOG)
       syslog_log(LOG_INFO, log_msg);
     #endif
@@ -1848,14 +1913,13 @@ void read_from_aprsis(void) {
   // Needs to be resolved. This is a the&D fix:
   // search for ':' in String s again
   if (!header_end && !(header_end = strchr(s.c_str(), ':'))) {
-    log_msg = "APRS-IS: read_from_aprs(): BUG! header_end is NULL: '" + s + "'";
+    log_msg = "APRS-IS: read_from_aprsis(): BUG! header_end is NULL: '" + s + "'";
     #if defined(ENABLE_SYSLOG)
       syslog_log(LOG_INFO, log_msg);
     #endif
     do_serial_println(log_msg);
     return;
   }
-
 
   // packet has our call in i.E. ...,qAR,OURCALL:...
   q = strstr(s.c_str(), (',' + aprsis_callsign + ':').c_str());
@@ -1881,6 +1945,14 @@ void read_from_aprsis(void) {
   if (is_call_blacklisted(s.c_str()))
     return;
 
+  String answer_message = handle_aprs_messsage_addressed_to_us(s.c_str());
+  boolean its_an_aprs_message_for_us = !answer_message.isEmpty();
+  if (answer_message == "M") {
+    // It was a message for us. It contained an answer message we have to send;
+    // or a Placeholder "M" if no ack message is required -- in this case, clear the message
+    answer_message = "";
+  }
+
   // generate third party packet. Use aprs_callsign (deriving from webServerCfg->callsign), because aprsis_callsign may have a non-aprs (but only aprsis-compatible) ssid like '-L4'
   String third_party_packet = generate_third_party_packet(aprs_callsign, s);
   if (!third_party_packet.isEmpty()) {
@@ -1893,6 +1965,17 @@ void read_from_aprsis(void) {
     if (!src_call_not_for_rf)
       sendToTNC(third_party_packet);
 #endif
+
+    if (its_an_aprs_message_for_us) {
+      if (!answer_message.isEmpty()) {
+        to_aprsis_data = String(answer_message);
+        send_queue_to_aprsis();
+        if (usb_serial_data_type & 2)
+          Serial.println(third_party_packet);
+      }
+      return; // Message was for us -> do not TX on RF
+    }
+
     if (lora_tx_enabled && aprsis_data_allow_inet_to_rf && !src_call_not_for_rf) {
       // not query or aprs-message addressed to our call (check both, aprs_callsign and aprsis_callsign)
       // Format: "..::DL9SAU-15:..."
@@ -1947,7 +2030,7 @@ void read_from_aprsis(void) {
 
 
 // forward packets to APRSIS
-void send_to_aprsis()
+void send_queue_to_aprsis()
 {
   if (!aprsis_client.connected() || !to_aprsis_data || !to_aprsis_data.length())
     return;
@@ -1956,6 +2039,8 @@ void send_to_aprsis()
   String data = String(to_aprsis_data);
   // clear queue
   to_aprsis_data = "";
+  // Avoid breaking aprs-is protocol with frames lile "FOO>APRS:>helo\rworld"
+  data.replace("\r", " "); data.replace("\n", " "); data.replace("\0", " ");
   data.trim();
   char *p = strchr(data.c_str(), '>');
   char *header_end;
@@ -2229,6 +2314,7 @@ void send_to_aprsis()
 
   // main loop
   while (true) {
+
     esp_task_wdt_reset();
 
     if (apcnt && millis() - webserver_started > 60*1000L &&
@@ -2313,7 +2399,7 @@ void send_to_aprsis()
                 log_msg = String("APRS-IS: on_Err: '") + aprsis_status + String("' [") + aprsis_client.remoteIP().toString() + String("], tries ") +  String(aprsis_connect_tries) + String(", connect_to_aprsis() returned ") + String(ret);
                 aprsis_client.stop();
                 if (!enable_bluetooth)
-		  WiFi.setSleep(true);
+                  WiFi.setSleep(true);
                 // Known problems which usually resolve by reboot:
                 if (ret == -5 /* login denied, until reboot. Reason unknown */ ||
                      (ret == -1 /* sometimes after boot it can't connect. DNS- or IP-stack Problem? */ && lora_digipeating_mode > 1) /* we are a digi */ ) {
@@ -2348,7 +2434,7 @@ void send_to_aprsis()
                 }
               }
 
-	      if (log_msg.length()) {
+              if (log_msg.length()) {
                 #if defined(ENABLE_SYSLOG)
                   syslog_log(LOG_INFO, log_msg);
                 #endif
@@ -2356,7 +2442,7 @@ void send_to_aprsis()
               }
               if (!aprsis_status.startsWith("Error: "))
                 aprsis_status = "Disconnected";
-	    }
+            }
           }
 
           // session died during read / write?
@@ -2365,10 +2451,10 @@ void send_to_aprsis()
             read_from_aprsis();
           }
 
-          // session died during read / write? - log^
+          // session died during read / write? - log
           if (aprsis_client.connected()) {
             // forward packets to APRSIS
-            send_to_aprsis();
+            send_queue_to_aprsis();
           }
 
           // anti-idle timer for the tcp session
@@ -2380,7 +2466,7 @@ void send_to_aprsis()
         } else {
 
           if (!enable_bluetooth)
-	    WiFi.setSleep(true);
+            WiFi.setSleep(true);
 
           if (aprsis_status != "Error: no internet") {
             aprsis_status = "Error: no internet";

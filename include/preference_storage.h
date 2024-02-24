@@ -59,6 +59,8 @@ static const char *const PREF_LORA_AUTOMATIC_CR_ADAPTION_PRESET_INIT = "lora_cra
 static const char *const PREF_LORA_AUTOMATIC_CR_ADAPTION_PRESET = "lora_cradapt";
 static const char *const PREF_APRS_DIGIPEATING_MODE_PRESET_INIT = "lora_dig_mode_i";
 static const char *const PREF_APRS_DIGIPEATING_MODE_PRESET = "lora_dig_mode";
+static const char *const PREF_APRS_DIGIPEATING_MYALIAS_INIT = "lora_myalias_i";
+static const char *const PREF_APRS_DIGIPEATING_MYALIAS = "lora_myalias";
 static const char *const PREF_APRS_CROSS_DIGIPEATING_MODE_PRESET_INIT = "lora_dig_x_m_i";
 static const char *const PREF_APRS_CROSS_DIGIPEATING_MODE_PRESET = "lora_dig_x_m";
 
@@ -83,6 +85,10 @@ static const char *const PREF_APRS_ALWAYS_SEND_CSE_SPEED_AND_ALTITUDE_INIT = "ap
 
 static const char *const PREF_APRS_SHOW_BATTERY = "aprs_batt";
 static const char *const PREF_APRS_SHOW_BATTERY_INIT = "aprs_batt_init";
+static const char *const PREF_APRS_STATUS_WINLINK_NOTIFICATION = "aprs_stat_wl";
+static const char *const PREF_APRS_STATUS_WINLINK_NOTIFICATION_INIT = "aprs_stat_wl_i";
+static const char *const PREF_APRS_STATUS_SHUTDOWN_NOTIFICATION = "aprs_stat_qrt";
+static const char *const PREF_APRS_STATUS_SHUTDOWN_NOTIFICATION_INIT = "aprs_stat_qrt_i";
 static const char *const PREF_APRS_LATITUDE_PRESET = "aprs_lat_p";
 static const char *const PREF_APRS_LATITUDE_PRESET_INIT = "aprs_lat_p_init";
 static const char *const PREF_APRS_LATLON_FROM_GPS = "aprs_llfgps"; // no _INIT needed. Checkbox is evaluated on "save" in the Web interface
