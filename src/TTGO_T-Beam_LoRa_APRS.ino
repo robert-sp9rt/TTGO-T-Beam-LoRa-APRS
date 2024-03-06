@@ -186,6 +186,8 @@ double bestDoubleLat;
 double bestDoubleLng;
 double bestHdop = 99.9;
 boolean no_gps_position_since_boot = true;
+double aprsLatPresetdec = 0;
+double aprsLonPresetdec = 0;
 
 int position_ambiguity = 0; // 0: default, compressed. -1: uncompressed. -2: uncompressed, with DAO '!W..!'. -3: uncompressed, with DAO '!w..!'. 1: ambiguity 1/10'. 2: ambiguity 1'. 3: ambiguity 10'. 4: Ambuguity 1 deg (60').
 //String LatShownP = aprsLonPreset;
@@ -307,6 +309,30 @@ int oled_loc_amb = 0;     // display locator not more precise than 0: RR99XX. -1
   uint32_t nextTelemetryFrame = 60*1000L;  // first possible start of telemetry 60s after boot.
 #endif
 
+// test double_click
+int button_down_count = 0;
+#define MAX_LH 5                  // max lastheard
+
+// structure for AP Array
+struct LastHeard{
+//    char callsign[10];
+    String callsign;
+    uint32_t time_received = 0L;
+    String time_elapsed;
+    double lat;
+    double lng;
+    String digi;
+};
+struct LastHeard LH[MAX_LH+1];
+//double lh_lat;
+//double lh_lng;
+char *lh_data;
+String LastRX[4];
+
+// Displayzeile
+// 012345678901234567890
+// DL1ABC-15>NW115k11h12
+// DL3EL-10>APLOX1,WIDE1
 
 //byte Variables
 byte  lora_TXStart;          //start of packet data in TXbuff
@@ -349,7 +375,6 @@ int point_avg_speed = 0, point_avg_course = 0;
 ulong nextTX = 60000L;                  // preset time period between TX = 60000ms = 60secs = 1min
 
 ulong time_to_refresh = 1000;            // typical time display lines are shown, before overwritten with new info
-ulong display_dont_update_until = 0L;
 ulong next_fixed_beacon = 75000L;    // first fixed beacon approx 125s after system start (DL3EL)
 ulong fix_beacon_interval = FIX_BEACON_INTERVAL;
 ulong showRXTime = SHOW_RX_TIME;
@@ -368,6 +393,7 @@ uint32_t reboot_interval = 0L;
 uint oled_timeout = SHOW_OLED_TIME; // OLED Timeout
 bool display_is_on = true; // Turn ON OLED at first startup
 ulong oled_timer;
+boolean freeze_display = false;
 
 // Variable to manually send beacon from html page
 uint8_t manBeacon = 0;  // 1: triggered from web-interface, 2: triggered from CLI
@@ -1084,15 +1110,12 @@ out_relay_path:
   if (usb_serial_data_type & 2)
     Serial.println(outString);
 
-  display_dont_update_until = millis() + 1500L;
   if (lora_tx_enabled && tx_own_beacon_from_this_device_or_fromKiss__to_frequencies) {
     if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies % 2) {
       loraSend(txPower, lora_freq, lora_speed, 0, outString);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
-      display_dont_update_until += 1000L;
     }
     if (((tx_own_beacon_from_this_device_or_fromKiss__to_frequencies > 1 && lora_digipeating_mode > 1) || tx_own_beacon_from_this_device_or_fromKiss__to_frequencies == 5) && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq) {
       loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, 0, outString);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
-      display_dont_update_until += 1000L;
     }
   }
   time_last_status_packet_sent = millis();
@@ -1259,7 +1282,6 @@ void setup_oled_timer_values() {
   // if enabled_oled is true and oled_timeout is 0, this does not harm.
   oled_timer = millis() + (oled_timeout ? oled_timeout : SHOW_OLED_TIME);
   time_to_refresh = millis() + showRXTime;
-  display_dont_update_until = 0L;
 }
 
 void enableOled() {
@@ -1421,9 +1443,11 @@ void timer_once_a_second() {
 
   // Ticker blinks upper left corner to indicate system is running
   // only when OLED is on
-  if (display_is_on && millis() > display_dont_update_until) {
+//  if (display_is_on && millis() > display_dont_update_until) {
+  if (display_is_on) {
     // refresh display once a second
-    fillDisplayLine1(); //update time & uptime
+    if (!freeze_display)
+      fillDisplayLine1(0); //update time & uptime
 
     // some assurances
     if (OledLine1.length() > 21) OledLine1.remove(21, OledLine1.length()-21);
@@ -1592,11 +1616,15 @@ String getSatAndBatInfo() {
   return line5;
 }
 
-void fillDisplayLine1() {
+void fillDisplayLine1(int caller) {
   //static String OledLine1s = "";
   //OledLine1_time = gps_time_s;
   // OledLine1s = " Up:" + String(millis()/1000/60) + "m";
 
+  if (freeze_display)
+    return;
+  if (debug_verbose > 2)
+    Serial.printf("fillDisplayLine1 caller:%d button_down:%d\r\n",caller, freeze_display);
   static uint32_t old_time = 0L;
   uint32_t t = millis() / 1000;
   char s_uptime[9];  // room for 49d17:02 + \0 -> 9 bytes
@@ -1677,11 +1705,14 @@ void fillDisplayLine2() {
 void fillDisplayLines3to5(int force) {
   static uint32_t ratelimit_until = 0L;
 
-  if (debug_verbose > 1)
-    Serial.printf("fillDisplayLines3to5 start, force:%d\r\n", force);
+  if (debug_verbose > 2)
+    Serial.printf("fillDisplayLines3to5 start, force:%d Display::%d\r\n",force,display_is_on);
   if (!force && millis() < ratelimit_until)
       return;
   ratelimit_until = millis() + (oled_timeout == 0 ? 1000 : showRXTime);
+
+  if (debug_verbose > 1)
+    Serial.printf("fillDisplayLines3to5 ongoing, force:%d Display::%d\r\n",force,display_is_on);
 
   boolean show_locator = false;
   if (oled_show_locator == 1) {
@@ -1845,8 +1876,12 @@ void fillDisplayLines3to5(int force) {
 
 void displayInvalidGPS() {
   uint32_t gpsage;
+  if (freeze_display)
+    return;
+  if (debug_verbose > 1)
+      Serial.printf("displayInvalidGPS start (%d)\r\n",freeze_display);
   String gpsage_p = " GPS: dis";
-  fillDisplayLine1();
+  fillDisplayLine1(1);
   if (gps_state) {
     //show GPS age (only if last retrieval was invalid)
     gpsage = gps.location.age()/1000;
@@ -1870,6 +1905,27 @@ void displayInvalidGPS() {
   writedisplaytext(Tcall, OledLine1, OledLine2, OledLine3, OledLine4, OledLine5);
 }
 
+String compute_time_since_received(uint32_t recv) {
+  String recv_p;
+  uint32_t elapsed;
+  
+  elapsed = millis()/1000 - recv;
+  if (elapsed < 60) {
+    recv_p = String(elapsed) + "s";
+  } 
+  else 
+    if (elapsed < 3600) {
+      recv_p = String(elapsed/60) + "m";
+    } 
+    else 
+      if (elapsed < 86400) {
+        recv_p = String(elapsed/3600) + "h";
+      } 
+      else {
+        recv_p = String(elapsed/86400) + "d";
+      }
+  return(recv_p);
+}
 
 #if defined(KISS_PROTOCOL)
 /**
@@ -2276,18 +2332,15 @@ void sendTelemetryFrame() {
   // you could enable it. It's here as a sample, only for providing the correct way to use that "feature".
   // Telemetry on secondary qrg is sent if config variable is 2 or 3. On main qrg: 1 or 3.
 
-  display_dont_update_until = millis() + 1500L;
   if (tel_allow_tx_on_rf) {
     String telemetryPacket = telemetryBaseRF + telemetryData;
     if (tel_allow_tx_on_rf & 2) {
       if (lora_freq_cross_digi != lora_freq && lora_speed_cross_digi >= 1200) {
         loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, 0, telemetryPacket);
-        display_dont_update_until += 1000L;
       }
     }
     if ((tel_allow_tx_on_rf & 1) && really_allow_telemetry_on_main_freq) {
       loraSend(txPower, lora_freq, (lora_speed < 300) ? 300 : lora_speed, 0, telemetryPacket);
-      display_dont_update_until += 1000L;
     }
   }
 
@@ -2824,6 +2877,14 @@ int storeLatLonPreset(String _sLat, String _sLon, int precision) {
   // String(tmp_...) enforces a new String object.
   aprsLatPreset = String(tmp_aprsLatPreset);
   aprsLonPreset = String(tmp_aprsLonPreset);
+  char lh_lat_aprs[9];
+  char lh_lng_aprs[10];
+  strcpy(lh_lat_aprs,aprsLatPreset.c_str());
+  strcpy(lh_lng_aprs,aprsLonPreset.c_str());
+  char *lh_lat_aprs_p = lh_lat_aprs;
+  char *lh_lng_aprs_p = lh_lng_aprs;
+  aprspos2dec(lh_lat_aprs_p, lh_lng_aprs_p, aprsLatPresetdec, aprsLonPresetdec); 
+  Serial.printf("own pos is %5.2f  %5.2f\r\n",aprsLatPresetdec,aprsLonPresetdec);
   aprsLatPresetDAO = String(tmp_aprsLatPresetDAO);
   aprsLonPresetDAO = String(tmp_aprsLonPresetDAO);
   aprsLatLonDAO = String(tmp_aprsLatLonDAO);
@@ -4004,11 +4065,17 @@ void setup()
   esp_task_wdt_reset();
 
   writedisplaytext("LoRa-APRS","","Init:","FINISHED OK!","   =:-)   ","");
-  fillDisplayLine1();
+  fillDisplayLine1(2);
   fillDisplayLine2();
   displayInvalidGPS();
 
   digitalWrite(TXLED, HIGH);
+
+// init lastheard table  
+  for (int ii=0; ii < MAX_LH; ii++) {
+    LH[ii].callsign = "";
+  }    
+
 }
 
 
@@ -4431,6 +4498,17 @@ struct ax25_frame *tnc_format_to_ax25_frame(const char *s)
   return &frame;
 }
 
+//String handle_lora_frame_for_lastheard(const char *received_frame, const char &data)
+String handle_lora_frame_for_lastheard(const char *received_frame)
+{
+  struct ax25_frame* frame = tnc_format_to_ax25_frame(received_frame);
+
+  if (!frame)
+    return("NoCall");
+    
+  lh_data = frame->data;
+  return (frame->src.addr);
+}  
 
 void handle_lora_frame_for_lora_digipeating(const char *received_frame, const char *snr_rssi)
 {
@@ -5194,15 +5272,12 @@ void handle_usb_serial_input(void) {
           if (lora_tx_enabled) {
             enableOled_now(); // enable OLED
             writedisplaytext("((KISSTX))","",inputBuf,"","","");
-            display_dont_update_until = millis() + 1500L;
             if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies % 2) {
               loraSend(txPower, lora_freq, lora_speed, 0, inputBuf);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
-              display_dont_update_until += 1000L;
               esp_task_wdt_reset();
             }
             if (((tx_own_beacon_from_this_device_or_fromKiss__to_frequencies > 1 && lora_digipeating_mode > 1) || tx_own_beacon_from_this_device_or_fromKiss__to_frequencies == 5) && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq) {
               loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, 0, inputBuf);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
-              display_dont_update_until += 1000L;
               esp_task_wdt_reset();
             }
           } else {
@@ -5241,6 +5316,37 @@ void handle_usb_serial_input(void) {
   Serial.flush();
 }
 
+void aprspos2dec(char *lh_lat_aprs, char *lh_lng_aprs, double &lh_lat, double &lh_lng) {
+// ######################### Position umrechnen
+// decomprimierung nach DL9SAU
+//        double lh_lat = 0;
+//        double lh_lng = 0;
+
+    char buf[9];
+    double decimals;
+    boolean south = false;
+    boolean west = false;
+   
+    strncpy(buf,lh_lat_aprs,8);
+    
+    if (buf[7] == 'S') south = true;
+      
+    buf[7] = 0; // null terminate at end of decimal minute
+    decimals=atof(buf+2) /60.0;
+    buf[2] = 0; // null terminate az begin of minute
+    lh_lat = atoi(buf) + decimals;
+    if (south) lh_lat *= -1;
+    
+    strncpy(buf,lh_lng_aprs,9);
+    if (buf[8] == 'W') west = true;
+    buf[8] = 0; // null terminate at end of decimal minute
+    decimals=atof(buf+3) /60.0;
+    buf[3] = 0; // null terminate az begin of minute
+    lh_lng = atoi(buf) + decimals;
+    if (west) lh_lng *= -1;
+
+    if (debug_verbose > 1) Serial.printf("Decimal Pos %5.2f  %5.2f South: %d West %d\r\n", lh_lat,lh_lng,south, west);
+}
 
 String handle_aprs_messsage_addressed_to_us(const char *received_frame) {
   char *header_end;
@@ -5296,8 +5402,8 @@ String handle_aprs_messsage_addressed_to_us(const char *received_frame) {
       if ((q = strchr(msg_from, '>')))
         *q = 0;
       enableOled_now(); // enable OLED
+      freeze_display = true;
       writedisplaytext(" ((MSG))","",String(msg_from) + String(": ") + String(header_normal_or_third_party_end + 11+1),"","","");
-      display_dont_update_until = millis() + 30000L;
 #ifdef ENABLE_WIFI
       // TODO: add message to a new-to-implement web-received-list-for-aps-messages
 #endif
@@ -5379,9 +5485,17 @@ void loop()
     key_up = false;
     delay(50);
     Serial.println("Tracker: Button pressed...");
+    button_down_count += 1;
+    if (debug_verbose > 1) Serial.printf("Button pressed %dx (1)\r\n", button_down_count);
+    if (button_down_count) {
+      enableOled(); // rewind oled_timer
+      freeze_display = true;
+    }
+    
     if(digitalRead(BUTTON)==LOW){
       delay(300);
       time_delay = millis() + 1500;
+      if (debug_verbose > 1) Serial.printf("Button has been pressed %dx (2)\r\n", button_down_count);
       if (digitalRead(BUTTON)==HIGH) {
         #if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
           if (shutdown_active && shutdown_countdown_timer_enable &&
@@ -5391,39 +5505,141 @@ void loop()
             enableOled_now(); // turn ON OLED now
             shutdown_countdown_timer_enable = false;
             writedisplaytext("((ABORT))","","Shutdown aborted:","middle Button","was pressed","");
-            display_dont_update_until = millis() + 2500L;
+            freeze_display = true;
             key_up = true;
           } else
         #endif
         if (lora_tx_enabled || aprsis_enabled) {
           if (!display_is_on && enabled_oled) {
+            button_down_count = 0;
+            freeze_display = false;
             enableOled(); // turn ON OLED temporary
           } else {
-            if (gps_state && gps_isValid) {
+            if (debug_verbose > 1) Serial.printf("Button Count (Oled on): %d\r\n", button_down_count);
+            if (button_down_count == 6 && lora_tx_enabled) {
+                if (debug_verbose > 1) Serial.printf("sending position (%d)\r\n", button_down_count);
+                button_down_count = 0;
+                freeze_display = false;
+                enableOled(); // rewind oled_timer
+                fillDisplayLines3to5(1);
+                if (gps_state && gps_isValid) {
 #ifdef ENABLE_WIFI
-              writedisplaytext("((MAN TX))","SSID: " + oled_wifi_SSID_curr, "IP: " + oled_wifi_IP_curr, OledLine3, OledLine4, OledLine5);
+                  writedisplaytext("((MAN TX))","SSID: " + oled_wifi_SSID_curr, "IP: " + oled_wifi_IP_curr, OledLine3, OledLine4, OledLine5);
 #else
-              fillDisplayLines3to5(0);
-              writedisplaytext("((MAN TX))","","",OledLine3, OledLine4, OledLine5);
+                  fillDisplayLines3to5(0);
+                  writedisplaytext("((MAN TX))","","",OledLine3, OledLine4, OledLine5);
 #endif
-              sendpacket(SP_POS_GPS);
-            } else {
+                  sendpacket(SP_POS_GPS);
+                } else {
 #ifdef ENABLE_WIFI
-              writedisplaytext("((FIX TX))","SSID: " + oled_wifi_SSID_curr, "IP: " + oled_wifi_IP_curr, OledLine3, OledLine4, OledLine5);
+                  writedisplaytext("((FIX TX))","SSID: " + oled_wifi_SSID_curr, "IP: " + oled_wifi_IP_curr, OledLine3, OledLine4, OledLine5);
 #else
-              fillDisplayLines3to5(0);
-              writedisplaytext("((FIX TX))","","",OledLine3, OledLine4, OledLine5);
+                  fillDisplayLines3to5(0);
+                  writedisplaytext("((FIX TX))","","",OledLine3, OledLine4, OledLine5);
 #endif
-              sendpacket(SP_POS_FIXED);
+                  sendpacket(SP_POS_FIXED);
+                }
+            // reset timer for automatic fixed beacon after manual beacon
+            next_fixed_beacon = millis() + fix_beacon_interval;
+             }   
+            else {
+              if (button_down_count == 1) {
+                enableOled(); // rewind oled_timer
+                if (debug_verbose > 1) Serial.printf("Action Button Count (Oled on): %d\r\n", button_down_count);
+                fillDisplayLines3to5(1);
+                String line[5];
+                double dist = 0;
+                char dist_c[7];
+                char courseTo_c[3];
+
+                for (int i=0; i < MAX_LH; i++) {
+                  if (LH[i].callsign != "") {
+                    LH[i].time_elapsed = compute_time_since_received(LH[i].time_received);
+                    line[i] = LH[i].callsign + LH[i].digi + LH[i].time_elapsed + " ";
+                    double courseTo = TinyGPSPlus::courseTo(aprsLatPresetdec, aprsLonPresetdec, LH[i].lat, LH[i].lng);
+                    if     (courseTo == 0) sprintf(courseTo_c,"N");
+                    else if (courseTo < 23) sprintf(courseTo_c,"N");
+                    else if (courseTo < 67)  sprintf(courseTo_c,"NE");
+                    else if (courseTo < 112) sprintf(courseTo_c,"E");
+                    else if (courseTo < 157) sprintf(courseTo_c,"SE");
+                    else if (courseTo < 202) sprintf(courseTo_c,"S");
+                    else if (courseTo < 247) sprintf(courseTo_c,"SW");
+                    else if (courseTo < 292) sprintf(courseTo_c,"W");
+                    else if (courseTo < 337) sprintf(courseTo_c,"NW"); 
+                    else sprintf(courseTo_c,"N");
+                    courseTo_c[2] = 0;
+
+                    dist = TinyGPSPlus::distanceBetween(aprsLatPresetdec, aprsLonPresetdec, LH[i].lat, LH[i].lng);
+                    if (dist < 1000) {
+                      dist /= 1000;
+                      sprintf(dist_c,"%3.1f %s",dist,courseTo_c);
+                    }  
+                    else {  
+                      dist /= 1000;
+                      if (dist > 999) 
+                        sprintf(dist_c,"xxx %s",courseTo_c);
+                      else   
+                        sprintf(dist_c,"%03.0f %s",dist,courseTo_c);
+                    }  
+                    dist_c[6] = 0;
+                    line[i] +=  dist_c;
+                  }
+                  else {
+                    line[i] = "";
+                  }  
+                }  
+                writedisplaytext("((LH))",line[0],line[1],line[2],line[3],line[4]);
+//              space on display
+//              01234567890123456789
+//              DB0ABC-10*10m 001 SE  
+                if (debug_verbose > 1) Serial.printf("LH:\r\n%s\r\n%s\r\n%s\r\n%s\r\n", line[0].c_str(),line[1].c_str(),line[2].c_str(),line[3].c_str());
+              }
+              else {
+                if (button_down_count == 2) {
+                  enableOled(); // rewind oled_timer
+                  if (debug_verbose > 1) Serial.printf("Button pressed check == %d, show buildnr %s\r\n", button_down_count,buildnr.c_str());
+                  writedisplaytext("((BN))","","BuildNr:" + buildnr,"by DL9SAU & DL3EL","","");
+                }  
+                if (button_down_count == 3) {
+                  if (debug_verbose > 1) Serial.printf("Button pressed check == %d, show raw rx_Packet %s\r\n", button_down_count,LastRX[0].c_str());
+                  writedisplaytext("RX raw","",LastRX[0],"","","");
+                  time_to_refresh = millis() + showRXTime;
+                }  
+                if (button_down_count == 4) {
+                  enableOled(); // rewind oled_timer
+                  if (debug_verbose > 1) Serial.printf("Button pressed check == %d, show raw rx_Packet %s\r\n", button_down_count,LastRX[1].c_str());
+                  writedisplaytext("RX raw-1","",LastRX[1],"","","");
+//                  if (debug_verbose > 1) writedisplaytext("((NI))","",String(button_down_count)+"x button pressed","next press tx pos","","");
+//                  Serial.printf("Button pressed check == %d, next press tx position\r\n", button_down_count);
+                }  
+                if (button_down_count == 5) {
+                  enableOled(); // rewind oled_timer
+                  if (debug_verbose > 1) Serial.printf("Button pressed check == %d, show raw rx_Packet %s\r\n", button_down_count,LastRX[2].c_str());
+                  writedisplaytext("RX raw-2","",LastRX[2],"","","");
+                }  
+                if (button_down_count > 6) {
+                  if (debug_verbose > 1) Serial.printf("Button pressed check >= %d, shouldn't come here\r\n", button_down_count);
+                  button_down_count = 0;
+                }  
+              }
             }
-            display_dont_update_until = millis() + 2500L;
           }
           key_up = true;
         }
+        else {
+          if (debug_verbose > 1) Serial.printf("Button still down %dx \r\n", button_down_count);
+        }  
       }
+      else {
+        if (debug_verbose > 1) Serial.printf("Button now up %dx \r\n", button_down_count);
+      }  
     }
+    else {
+      if(digitalRead(BUTTON)==LOW && button_down_count > 0){
+        if (debug_verbose > 1) Serial.printf("Button press was lost...(%d)\r\n", button_down_count);
+      }
+   }
   }
-
   // Time to adjust time?
   int8_t t_hour_adjust_next = -1;
   if (gps_state && gps.time.isValid() && gps.time.isUpdated() &&
@@ -5596,7 +5812,6 @@ if (t_elapsed > 15000L && ((curr_hdop < 1.5 && curr_sats >= 4) || gps_isValid !=
     wifi_connection_status_prev = wifi_connection_status;
     // initial fill of line2
     fillDisplayLine2();
-    display_dont_update_until = millis() + 2500L;
   }
 #endif
 
@@ -5610,7 +5825,6 @@ if (t_elapsed > 15000L && ((curr_hdop < 1.5 && curr_sats >= 4) || gps_isValid !=
     writedisplaytext((manBeacon == 1) ? "((WEB TX))" : "((CLI TX))"),"","",OledLine3, OledLine4, OledLine5);
 #endif
     sendpacket(SP_POS_GPS);
-    display_dont_update_until = millis() + 2500L;
     manBeacon=0;
   }
 
@@ -5625,7 +5839,18 @@ if (t_elapsed > 15000L && ((curr_hdop < 1.5 && curr_sats >= 4) || gps_isValid !=
       display_is_on = false;
       // mark state change
       oled_timer = 0L;
-    } // else: keep it on, esp. if oled_timeout is set to 0, regardles of oled_timer.
+      button_down_count = 0;    
+      freeze_display = false;
+    } else { // else: keep it on, esp. if oled_timeout is set to 0, regardles of oled_timer.
+        if (freeze_display && millis() >= oled_timer + showRXTime) {
+          // if oled_timeout is set to 0 return to main display after showRXTime
+          freeze_display = false;
+          button_down_count = 0;    
+          fillDisplayLine1(6);
+          fillDisplayLine2();
+          fillDisplayLines3to5(1);
+        }
+    }
   } else {
     // state change of oled timer? switch backlight on, if oled is enabled
     if (enabled_oled && oled_timer != 0L) {
@@ -5637,6 +5862,8 @@ if (t_elapsed > 15000L && ((curr_hdop < 1.5 && curr_sats >= 4) || gps_isValid !=
   if (digitalRead(BUTTON)==LOW && key_up == false && millis() >= time_delay && t_lock == false) {
     // enable OLED
     enableOled_now();
+    button_down_count = 0;   
+    freeze_display = false; 
     //---------------
     t_lock = true;
     // re-enable webserver, if was set to off.
@@ -5718,7 +5945,6 @@ if (t_elapsed > 15000L && ((curr_hdop < 1.5 && curr_sats >= 4) || gps_isValid !=
     fillDisplayLines3to5(0);
     writedisplaytext("((AUT TX))", "", "fixed", OledLine3, OledLine4, OledLine5);
     sendpacket(SP_POS_FIXED);
-    display_dont_update_until = millis() + 2500L;
   }
 
 
@@ -5760,14 +5986,14 @@ if (t_elapsed > 15000L && ((curr_hdop < 1.5 && curr_sats >= 4) || gps_isValid !=
         } else {
           writedisplaytext("((POWER))","External Power","plugged in","","","");
         }
-        display_dont_update_until = millis() + 2500L;
+        freeze_display = true;
         usb_status_bef = true;
       }
     } else {
       if (usb_status_bef) {
         enableOled_now(); // Turn Oled on as indicatior that external power is plugged off
         writedisplaytext("((POWER))","","External Power","plugged off","Running on","batteries now");
-        display_dont_update_until = millis() + 2500L;
+        freeze_display = true;
         if (shutdown_active && !shutdown_countdown_timer_enable) {
           shutdown_countdown_timer_enable = true;
           shutdown_countdown_timer = millis() + shutdown_delay_time;
@@ -5801,7 +6027,7 @@ if (t_elapsed > 15000L && ((curr_hdop < 1.5 && curr_sats >= 4) || gps_isValid !=
             axp.shutdown();
           } else {
             writedisplaytext("((POWER))","","External Power","plugged off","Shutdown in",String((shutdown_countdown_timer-millis())/1000) + String("s"));
-            display_dont_update_until = millis() + 1000L;
+            freeze_display = true;
           }
         }
       }
@@ -5933,13 +6159,10 @@ if (t_elapsed > 15000L && ((curr_hdop < 1.5 && curr_sats >= 4) || gps_isValid !=
         if (lora_tx_enabled) {
           enableOled_now(); // enable OLED
           writedisplaytext("((KISSTX))","",String(data),"","","");
-          display_dont_update_until = millis() + 1500L;
           if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies % 2) {
             loraSend(txPower, lora_freq, lora_speed, 0, String(data));  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
-            display_dont_update_until += 1000L;
           } if (((tx_own_beacon_from_this_device_or_fromKiss__to_frequencies > 1 && lora_digipeating_mode > 1) || tx_own_beacon_from_this_device_or_fromKiss__to_frequencies == 5) && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq) {
             loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, 0, String(data));  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
-            display_dont_update_until += 1000L;
           }
         }
 
@@ -6056,6 +6279,102 @@ out:
 
         const char *received_frame = loraReceivedFrameString.c_str();
 
+// ######neu LH
+        String rxcall;
+        rxcall = handle_lora_frame_for_lastheard(received_frame);
+        if (rxcall != "NoCall") {
+
+// get position from frame
+          double lh_lat = 0;
+          double lh_lng = 0;
+
+          char lh_lat_aprs[9];
+          char lh_lng_aprs[10];
+          char *lh_lat_aprs_p = lh_lat_aprs;
+          char *lh_lng_aprs_p = lh_lng_aprs;
+          int pos_type = 0;
+          boolean lh_position = false;
+
+          char * p = lh_data;
+          if (debug_verbose > 1) Serial.printf("Check for LH RX pos for %s out of Payload:(%s)\r\n",rxcall.c_str(),lh_data);
+          if ((p[0] == '!') || (p[0] == '=')) {
+            pos_type = 1;
+            p++;
+          }  
+          else {
+            if ((p[0] == '/') || (p[0] == '@')) {
+              if (debug_verbose > 1) Serial.printf("Pos Type 2 detected LH RX pos out of %s\r\n",p);
+              pos_type = 2;
+              p += 8;
+            }
+            else {
+              pos_type = 3;
+              if (debug_verbose > 1) Serial.printf("Pos Type 3 detected, not valid here\r\n");
+            }
+          }
+        
+          if ((pos_type == 1) || (pos_type == 2)) {
+            lh_position = true;
+            if (debug_verbose > 1) Serial.printf("Pos detected %s\r\n",p);
+            if (isdigit(*p)) { 
+              strncpy(lh_lat_aprs_p,p,8);
+              lh_lat_aprs[8] = 0;
+              p += 9;
+              strncpy(lh_lng_aprs_p,p,9);
+              lh_lng_aprs[9] = 0;
+              lh_lat = 0;
+              lh_lng = 0;
+              aprspos2dec(lh_lat_aprs_p, lh_lng_aprs_p, lh_lat, lh_lng); 
+            } 
+            else {
+// compressed position
+              long n;
+              p++; // skip symbol id
+              n = 0;
+              for (int i = 3; i >= 0; i--) {
+                n = n + ( *p - 33 ) * pow(91, i);
+                p++;
+              }
+              lh_lat = double ( 90 - n / 380926.0);
+              n = 0;
+              for (int i = 3; i >= 0; i--) {
+                n = n + ( *p - 33 ) * pow(91, i);
+                p++;
+              }  
+              lh_lng = double ( -180 + n / 190463.0);
+            }
+          }
+          else {
+            if (debug_verbose > 1) Serial.printf("no Pos detected\r\n");
+            lh_lat = 0;
+            lh_lng = 0;
+            lh_position = false;
+        }   
+
+        if (lh_position) {
+
+          int ii;
+          for (ii=0; ii < MAX_LH; ii++) {
+            if (rxcall == LH[ii].callsign) {
+              break;
+            }
+          }    
+
+          for (; ii > 0; ii--) {
+            LH[ii] = LH[ii-1];
+          }  
+          LH[0].callsign = rxcall;
+          LH[0].time_received = millis()/1000;
+          LH[0].lat = lh_lat;
+          LH[0].lng = lh_lng;
+          if (strchr(received_frame, '*')) 
+            LH[0].digi = '*';
+          else 
+            LH[0].digi = ':';
+          if (debug_verbose > 1) Serial.printf("LH new:(0)%s%s%ds %5.2f %5.2f \r\n", LH[0].callsign.c_str(),LH[0].digi.c_str(),LH[0].time_received,LH[0].lat,LH[0].lng);
+        }
+      }
+// ######################################
         char *header_end = strchr(received_frame, ':');
         // valid packet?
         if (!header_end || !packet_is_valid(received_frame)) {
@@ -6166,8 +6485,12 @@ out:
            // ^ don't disturb the important display of the message content
           enableOled(); // enable OLED
           writedisplaytext("  ((RX))", "", loraReceivedFrameString, "", "", "");
+// ## LH
+          for (int ii=2; ii > 0; ii--) {
+            LastRX[ii] = LastRX[ii-1];
+          }  
+          LastRX[0] = loraReceivedFrameString;
           time_to_refresh = millis() + showRXTime;
-          display_dont_update_until = time_to_refresh;
         }
         #ifdef ENABLE_WIFI
           sendToWebList(loraReceivedFrameString_for_weblist, lastRssi, lastSNR);
@@ -6211,7 +6534,6 @@ out:
               lora_cross_digipeating_mode > 0 && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq &&
               time_lora_TXBUFF_for_digipeating_was_filled > time_lora_TXBUFF_for_digipeating_was_filled_prev) {
             enableOled_now(); // enable OLED
-            display_dont_update_until = millis() + 2500L;
             writedisplaytext("(TX-Xdigi)", "", String(lora_TXBUFF_for_digipeating), "", "", "");
             // word 'NOGATE' is not part of the header
             loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, 0, String(lora_TXBUFF_for_digipeating));  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
@@ -6466,16 +6788,15 @@ if (nextTX > 1 && tmp_t_since_last_sb_tx > (sb_turn_time*1000L) && average_speed
       //enableOled(); // enable OLED
       enableOled_now(); // enable OLED
       //writedisplaytext(" ((TX))","","LAT: "+LatShownP,"LON: "+LongShownP,"SPD: "+String(gps.speed.kmph(),1)+"  CRS: "+String(gps.course.deg(),1),getSatAndBatInfo());
-      fillDisplayLine1();
+      fillDisplayLine1(3);
       fillDisplayLine2();
       fillDisplayLines3to5(0);
       writedisplaytext("  ((TX))","",OledLine2,OledLine3,OledLine4,OledLine5);
       sendpacket(SP_POS_GPS | (nextTX == 1 ? SP_ENFORCE_COURSE : 0));
       // for fixed beacon (if we loose gps fix, we'll send our last position in fix_beacon_interval)
       // We just transmitted. We transmitted due to turn (nextTX == 1)? Also Don't TX again in next round, sendpacket() adjustet nextTX
-      display_dont_update_until = millis() + 2500L;
     } else {
-      if (millis() > display_dont_update_until && (display_is_on || millis() > time_to_refresh)) {
+      if (millis() > time_to_refresh){
         displayInvalidGPS();
       }
     }
@@ -6483,21 +6804,23 @@ if (nextTX > 1 && tmp_t_since_last_sb_tx > (sb_turn_time*1000L) && average_speed
   }
 
 behind_position_tx:
-  if (!display_was_updated && millis() > display_dont_update_until) {
-    if (display_is_on || millis() > time_to_refresh) {
+  if (!display_was_updated) {
+//    if (display_is_on || millis() > time_to_refresh) {
+    if (millis() > time_to_refresh){
       if (gps_isValid) {
         OledHdr = Tcall;
-        fillDisplayLine1();
+        if (debug_verbose > 1)
+          Serial.printf("Main Loop (behind_position_tx), Display GPS, freeze_display: %d\r\n", freeze_display);
+        fillDisplayLine1(4);
         fillDisplayLine2();
         fillDisplayLines3to5(0);
         writedisplaytext(OledHdr,OledLine1,OledLine2,OledLine3,OledLine4,OledLine5);
       } else {
-        displayInvalidGPS();
+          displayInvalidGPS();
       }
     } else {
       // refresh  time
-      fillDisplayLine1();
-      fillDisplayLine2();
+          fillDisplayLine1(5);
     }
   }
 
@@ -6572,7 +6895,6 @@ behind_position_tx:
       if (time_lora_TXBUFF_for_digipeating_was_filled + (lora_digipeating_mode == 2 ? 10 : 3 )*1000L > millis()) {
         enableOled_now(); // enable OLED
         writedisplaytext("((TXdigi))", "", String(lora_TXBUFF_for_digipeating), "", "", "");
-        display_dont_update_until = millis() + 2500L;
         // if SF12: we degipeat in fastest mode CR4/5. -> if lora_speed < 300 tx in lora_speed_300.
         loraSend(txPower, lora_freq, (lora_speed < 300) ? 300 : lora_speed, 0, String(lora_TXBUFF_for_digipeating));  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
 #ifdef KISS_PROTOCOL
