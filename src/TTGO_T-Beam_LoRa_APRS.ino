@@ -323,10 +323,9 @@ struct LastHeard{
     double lng;
     String digi;
 };
-struct LastHeard LH[MAX_LH+1];
+struct LastHeard LH[MAX_LH];
 //double lh_lat;
 //double lh_lng;
-char *lh_data;
 String LastRX[4];
 
 // Displayzeile
@@ -4498,18 +4497,6 @@ struct ax25_frame *tnc_format_to_ax25_frame(const char *s)
   return &frame;
 }
 
-//String handle_lora_frame_for_lastheard(const char *received_frame, const char &data)
-String handle_lora_frame_for_lastheard(const char *received_frame)
-{
-  struct ax25_frame* frame = tnc_format_to_ax25_frame(received_frame);
-
-  if (!frame)
-    return("NoCall");
-    
-  lh_data = frame->data;
-  return (frame->src.addr);
-}  
-
 void handle_lora_frame_for_lora_digipeating(const char *received_frame, const char *snr_rssi)
 {
 
@@ -5615,7 +5602,7 @@ void loop()
                 if (button_down_count == 5) {
                   enableOled(); // rewind oled_timer
                   if (debug_verbose > 1) Serial.printf("Button pressed check == %d, show raw rx_Packet %s\r\n", button_down_count,LastRX[2].c_str());
-                  writedisplaytext("RX raw-2","",LastRX[2],"","","");
+                  writedisplaytext("RX raw-2","next press: tx bcn",LastRX[2],"","","");
                 }  
                 if (button_down_count > 6) {
                   if (debug_verbose > 1) Serial.printf("Button pressed check >= %d, shouldn't come here\r\n", button_down_count);
@@ -6279,101 +6266,12 @@ out:
 
         const char *received_frame = loraReceivedFrameString.c_str();
 
-// ######neu LH
-        String rxcall;
-        rxcall = handle_lora_frame_for_lastheard(received_frame);
-        if (rxcall != "NoCall") {
-
-// get position from frame
-          double lh_lat = 0;
-          double lh_lng = 0;
-
-          char lh_lat_aprs[9];
-          char lh_lng_aprs[10];
-          char *lh_lat_aprs_p = lh_lat_aprs;
-          char *lh_lng_aprs_p = lh_lng_aprs;
-          int pos_type = 0;
-          boolean lh_position = false;
-
-          char * p = lh_data;
-          if (debug_verbose > 1) Serial.printf("Check for LH RX pos for %s out of Payload:(%s)\r\n",rxcall.c_str(),lh_data);
-          if ((p[0] == '!') || (p[0] == '=')) {
-            pos_type = 1;
-            p++;
-          }  
-          else {
-            if ((p[0] == '/') || (p[0] == '@')) {
-              if (debug_verbose > 1) Serial.printf("Pos Type 2 detected LH RX pos out of %s\r\n",p);
-              pos_type = 2;
-              p += 8;
-            }
-            else {
-              pos_type = 3;
-              if (debug_verbose > 1) Serial.printf("Pos Type 3 detected, not valid here\r\n");
-            }
-          }
-        
-          if ((pos_type == 1) || (pos_type == 2)) {
-            lh_position = true;
-            if (debug_verbose > 1) Serial.printf("Pos detected %s\r\n",p);
-            if (isdigit(*p)) { 
-              strncpy(lh_lat_aprs_p,p,8);
-              lh_lat_aprs[8] = 0;
-              p += 9;
-              strncpy(lh_lng_aprs_p,p,9);
-              lh_lng_aprs[9] = 0;
-              lh_lat = 0;
-              lh_lng = 0;
-              aprspos2dec(lh_lat_aprs_p, lh_lng_aprs_p, lh_lat, lh_lng); 
-            } 
-            else {
-// compressed position
-              long n;
-              p++; // skip symbol id
-              n = 0;
-              for (int i = 3; i >= 0; i--) {
-                n = n + ( *p - 33 ) * pow(91, i);
-                p++;
-              }
-              lh_lat = double ( 90 - n / 380926.0);
-              n = 0;
-              for (int i = 3; i >= 0; i--) {
-                n = n + ( *p - 33 ) * pow(91, i);
-                p++;
-              }  
-              lh_lng = double ( -180 + n / 190463.0);
-            }
-          }
-          else {
-            if (debug_verbose > 1) Serial.printf("no Pos detected\r\n");
-            lh_lat = 0;
-            lh_lng = 0;
-            lh_position = false;
-        }   
-
-        if (lh_position) {
-
-          int ii;
-          for (ii=0; ii < MAX_LH; ii++) {
-            if (rxcall == LH[ii].callsign) {
-              break;
-            }
-          }    
-
-          for (; ii > 0; ii--) {
-            LH[ii] = LH[ii-1];
-          }  
-          LH[0].callsign = rxcall;
-          LH[0].time_received = millis()/1000;
-          LH[0].lat = lh_lat;
-          LH[0].lng = lh_lng;
-          if (strchr(received_frame, '*')) 
-            LH[0].digi = '*';
-          else 
-            LH[0].digi = ':';
-          if (debug_verbose > 1) Serial.printf("LH new:(0)%s%s%ds %5.2f %5.2f \r\n", LH[0].callsign.c_str(),LH[0].digi.c_str(),LH[0].time_received,LH[0].lat,LH[0].lng);
-        }
-      }
+// ###### LH alte location
+//        String rxcall;
+//        rxcall = handle_lora_frame_for_lastheard(received_frame);
+//        if (rxcall != "NoCall") {
+// ... code
+//        }
 // ######################################
         char *header_end = strchr(received_frame, ':');
         // valid packet?
@@ -6479,19 +6377,26 @@ out:
           send_to_aprsis(s ? String(s) : loraReceivedFrameString);
         }
 #endif
-
+//################### neuer Platz für die LH Liste
+        struct ax25_frame* frame = tnc_format_to_ax25_frame(received_frame);
+        if (frame) {
+            if ((String(frame->src.addr) != "NoCall")&& (!our_packet)) {
+              fill_lh(String(frame->src.addr), digipeatedflag,frame->data);
+            }  
+        }   
+//################### neuer Platz für die LH Liste
     #ifdef SHOW_RX_PACKET                                                 // only show RX packets when activitated in config
         if (!its_an_aprs_message_for_us) {
            // ^ don't disturb the important display of the message content
           enableOled(); // enable OLED
           writedisplaytext("  ((RX))", "", loraReceivedFrameString, "", "", "");
-// ## LH
-          for (int ii=2; ii > 0; ii--) {
-            LastRX[ii] = LastRX[ii-1];
-          }  
-          LastRX[0] = loraReceivedFrameString;
           time_to_refresh = millis() + showRXTime;
         }
+// ## LH
+        for (int ii=2; ii > 0; ii--) {
+          LastRX[ii] = LastRX[ii-1];
+        }  
+        LastRX[0] = loraReceivedFrameString;
         #ifdef ENABLE_WIFI
           sendToWebList(loraReceivedFrameString_for_weblist, lastRssi, lastSNR);
         #endif
@@ -6917,4 +6822,95 @@ behind_position_tx:
 #endif
 
   vTaskDelay(1);
+}
+
+void fill_lh(String rxcall, const char *digipeatedflag, char * p) {
+// p has frame->data
+// get position from frame
+          double lh_lat = 0;
+          double lh_lng = 0;
+
+          char lh_lat_aprs[9];
+          char lh_lng_aprs[10];
+          char *lh_lat_aprs_p = lh_lat_aprs;
+          char *lh_lng_aprs_p = lh_lng_aprs;
+          int pos_type = 0;
+          boolean lh_position = false;
+
+          if (debug_verbose > 1) Serial.printf("Check for LH RX pos for %s out of Payload:(%s)\r\n",rxcall.c_str(),p);
+          if ((p[0] == '!') || (p[0] == '=')) {
+            pos_type = 1;
+            p++;
+          }  
+          else {
+            if ((p[0] == '/') || (p[0] == '@')) {
+              if (debug_verbose > 1) Serial.printf("Pos Type 2 detected LH RX pos out of %s\r\n",p);
+              pos_type = 2;
+              p += 8;
+            }
+            else {
+              pos_type = 3;
+              if (debug_verbose > 1) Serial.printf("Pos Type 3 detected, not valid here\r\n");
+            }
+          }
+        
+          if ((pos_type == 1) || (pos_type == 2)) {
+            lh_position = true;
+            if (debug_verbose > 1) Serial.printf("Pos detected %s\r\n",p);
+            if (isdigit(*p)) { 
+              strncpy(lh_lat_aprs_p,p,8);
+              lh_lat_aprs[8] = 0;
+              p += 9;
+              strncpy(lh_lng_aprs_p,p,9);
+              lh_lng_aprs[9] = 0;
+              lh_lat = 0;
+              lh_lng = 0;
+              aprspos2dec(lh_lat_aprs_p, lh_lng_aprs_p, lh_lat, lh_lng); 
+            } 
+            else {
+// compressed position
+              long n;
+              p++; // skip symbol id
+              n = 0;
+              for (int i = 3; i >= 0; i--) {
+                n = n + ( *p - 33 ) * pow(91, i);
+                p++;
+              }
+              lh_lat = double ( 90 - n / 380926.0);
+              n = 0;
+              for (int i = 3; i >= 0; i--) {
+                n = n + ( *p - 33 ) * pow(91, i);
+                p++;
+              }  
+              lh_lng = double ( -180 + n / 190463.0);
+            }
+          }
+          else {
+            if (debug_verbose > 1) Serial.printf("no Pos detected\r\n");
+            lh_lat = 0;
+            lh_lng = 0;
+            lh_position = false;
+        }   
+
+        if (lh_position) {
+          int ii;
+          for (ii=0; ii < (MAX_LH-1); ii++) {
+            if (rxcall == LH[ii].callsign) {
+              break;
+            }
+          }    
+
+          for (; ii > 0; ii--) {
+            LH[ii] = LH[ii-1];
+          }  
+          LH[0].callsign = rxcall;
+          LH[0].time_received = millis()/1000;
+          LH[0].lat = lh_lat;
+          LH[0].lng = lh_lng;
+          if (digipeatedflag)
+            LH[0].digi = '*';
+          else 
+            LH[0].digi = ':';
+          if (debug_verbose > 1) Serial.printf("LH new:(0)%s%s%ds %5.2f %5.2f \r\n", LH[0].callsign.c_str(),LH[0].digi.c_str(),LH[0].time_received,LH[0].lat,LH[0].lng);
+        }
 }
