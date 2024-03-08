@@ -168,12 +168,14 @@ String relay_path;
   String aprsObjectName = "";
 #endif
 String aprsComment = MY_COMMENT;
+double aprsLatPresetDouble = 0.0;
+double aprsLonPresetDouble = 0.0;
 String aprsLatPreset = LATITUDE_PRESET;
 String aprsLonPreset = LONGITUDE_PRESET;
-String aprsLatPresetFromPreferences = LATITUDE_PRESET;
-String aprsLonPresetFromPreferences = LONGITUDE_PRESET;
 String aprsLatPresetDAO = LATITUDE_PRESET;
 String aprsLonPresetDAO = LONGITUDE_PRESET;
+String aprsLatPresetFromPreferences = LATITUDE_PRESET;
+String aprsLonPresetFromPreferences = LONGITUDE_PRESET;
 String aprsLatPresetNiceNotation;
 String aprsLonPresetNiceNotation;
 String aprsLatLonAsMaidenheadGridLocator;
@@ -186,8 +188,6 @@ double bestDoubleLat;
 double bestDoubleLng;
 double bestHdop = 99.9;
 boolean no_gps_position_since_boot = true;
-double aprsLatPresetdec = 0;
-double aprsLonPresetdec = 0;
 
 int position_ambiguity = 0; // 0: default, compressed. -1: uncompressed. -2: uncompressed, with DAO '!W..!'. -3: uncompressed, with DAO '!w..!'. 1: ambiguity 1/10'. 2: ambiguity 1'. 3: ambiguity 10'. 4: Ambuguity 1 deg (60').
 //String LatShownP = aprsLonPreset;
@@ -309,29 +309,23 @@ int oled_loc_amb = 0;     // display locator not more precise than 0: RR99XX. -1
   uint32_t nextTelemetryFrame = 60*1000L;  // first possible start of telemetry 60s after boot.
 #endif
 
-// test double_click
+// cycle through the menu with by pressing the middle button multible times
 int button_down_count = 0;
-#define MAX_LH 5                  // max lastheard
 
-// structure for AP Array
+// structure for LastHeard Array. Used for displaying course and distance to them.
+#define MAX_LH 5                  // max lastheard
 struct LastHeard{
-//    char callsign[10];
-    String callsign;
-    uint32_t time_received = 0L;
-    String time_elapsed;
-    double lat;
-    double lng;
-    String digi;
+  String callsign;
+  uint32_t time_received = 0L;
+  double lat;
+  double lng;
+  boolean direct;
+//  String direct;
+
 };
 struct LastHeard LH[MAX_LH];
-//double lh_lat;
-//double lh_lng;
-String LastRX[4];
 
-// Displayzeile
-// 012345678901234567890
-// DL1ABC-15>NW115k11h12
-// DL3EL-10>APLOX1,WIDE1
+String RX_RAW_PACKET_LIST[3];
 
 //byte Variables
 byte  lora_TXStart;          //start of packet data in TXbuff
@@ -456,7 +450,7 @@ boolean lora_tx_enabled = true;
 #define UNITS_DIST_FT   128
 
 uint8_t units_speed = UNITS_SPEED_KMH;
-uint8_t units_dist = UNITS_DIST_M;
+uint8_t units_dist = UNITS_DIST_M;		// used for height
 
 // may be configured
 boolean rate_limit_message_text = true;		// ratelimit adding messate text (-> saves airtime)
@@ -1872,6 +1866,23 @@ void fillDisplayLines3to5(int force) {
   OledLine5 = getSatAndBatInfo();
 }
 
+String compute_time_since_received(uint32_t recv) {
+  String recv_p;
+  uint32_t elapsed;
+
+  elapsed = millis()/1000 - recv;
+  if (elapsed < 60) {
+    recv_p = String(elapsed) + "s";
+  } else if (elapsed < 3600) {
+    recv_p = String(elapsed/60) + "m";
+  } else if (elapsed < 86400) {
+    recv_p = String(elapsed/3600) + "h";
+  } else {
+    recv_p = String(elapsed/86400) + "d";
+  }
+  return (recv_p);
+}
+
 
 void displayInvalidGPS() {
   uint32_t gpsage;
@@ -1887,43 +1898,12 @@ void displayInvalidGPS() {
     if (gpsage > 49700) {
       gpsage_p = " GPS: no fix";
     } else {
-      if (gpsage < 60) {
-        gpsage_p = String(gpsage) + "s";
-      } else if (gpsage < 3600) {
-        gpsage_p = String(gpsage/60) + "m";
-      } else if (gpsage < 86400) {
-        gpsage_p = String(gpsage/3600) + "h";
-      } else {
-        gpsage_p = String(gpsage/86400) + "d";
-      }
-      gpsage_p = " GPS age:" + gpsage_p;
+      gpsage_p = " GPS age:" + compute_time_since_received(gpsage);
     }
   }
   OledLine2 = wifi_info + gpsage_p;
   fillDisplayLines3to5(0);
   writedisplaytext(Tcall, OledLine1, OledLine2, OledLine3, OledLine4, OledLine5);
-}
-
-String compute_time_since_received(uint32_t recv) {
-  String recv_p;
-  uint32_t elapsed;
-  
-  elapsed = millis()/1000 - recv;
-  if (elapsed < 60) {
-    recv_p = String(elapsed) + "s";
-  } 
-  else 
-    if (elapsed < 3600) {
-      recv_p = String(elapsed/60) + "m";
-    } 
-    else 
-      if (elapsed < 86400) {
-        recv_p = String(elapsed/3600) + "h";
-      } 
-      else {
-        recv_p = String(elapsed/86400) + "d";
-      }
-  return(recv_p);
 }
 
 #if defined(KISS_PROTOCOL)
@@ -2787,6 +2767,12 @@ int storeLatLonPreset(String _sLat, String _sLon, int precision) {
   sprintf(buf, "%.2s%05.2f%c", p, (f > 59.99 ? 59.99 : f), nswe);
   tmp_aprsLatPreset = String(buf);
 
+  // p is degrees, f is minutes.decimal
+  sprintf(buf, "%.2s", p);
+  fLat = atof(buf) + f/60.0;
+  if (nswe == 'S')
+   fLat *= -1;
+
   if (!aprsLatLonInvalidPosition && sLat.length() > 9 && (precision == 1 || precision == 2)) {
     float fp = f;
     if (precision == 1) {
@@ -2813,12 +2799,13 @@ int storeLatLonPreset(String _sLat, String _sLon, int precision) {
     sprintf(buf, "%.2s-%05.2f%c", p, (f > 59.99 ? 59.99 : f), nswe);
     tmp_aprsLatPresetNiceNotation = String(buf);
   }
-  if (!aprsLatLonInvalidPosition && aprsLatLonPresetCOMP.isEmpty()) {
-    sprintf(buf, "%.2s", p);
-    fLat = atof(buf) + f/60.0;
-    if (nswe == 'S')
-     fLat *= -1;
-  }
+  // No, we now need this always (for remote-call position -> course/distance computation). Moved it upwards
+  //if (!aprsLatLonInvalidPosition && aprsLatLonPresetCOMP.isEmpty()) {
+    //sprintf(buf, "%.2s", p);
+    //fLat = atof(buf) + f/60.0;
+    //if (nswe == 'S')
+    // fLat *= -1;
+  //}
 
   // 001-20.5000E is more readable in the Web-interface than 00120.5000E, and could not be mis-interpreted as 120.5 degrees east  (== 120 deg 30' 0" E)
   p = sLon.c_str();
@@ -2830,6 +2817,12 @@ int storeLatLonPreset(String _sLat, String _sLon, int precision) {
   // round up. sprintf for float does the rounding
   sprintf(buf, "%.3s%05.2f%c", p, (f > 59.99 ? 59.99 : f), nswe);
   tmp_aprsLonPreset = String(buf);
+
+  // p is degrees, f is minutes.decimal
+  sprintf(buf, "%.3s", p);
+  fLon = atof(buf) + f/60.0;
+  if (nswe == 'W')
+   fLon *= -1;
 
   if (!aprsLatLonInvalidPosition && sLon.length() > 10 && (precision == 1 || precision == 2)) {
     float fp = f;
@@ -2860,12 +2853,13 @@ int storeLatLonPreset(String _sLat, String _sLon, int precision) {
     tmp_aprsLonPresetNiceNotation = String(buf);
     tmp_aprsLatLonAsMaidenheadGridLocator = compute_maidenhead_grid_locator(tmp_aprsLatPresetNiceNotation, tmp_aprsLonPresetNiceNotation, 1);
   }
-  if (!aprsLatLonInvalidPosition && aprsLatLonPresetCOMP.isEmpty()) {
-    sprintf(buf, "%.3s", p);
-    fLon = atof(buf) + f/60.0;
-    if (nswe == 'W')
-     fLon *= -1;
-  }
+  // No, we now need this always (for remote-call position -> course/distance computation). Moved it upwards
+  //if (!aprsLatLonInvalidPosition && aprsLatLonPresetCOMP.isEmpty()) {
+    //sprintf(buf, "%.3s", p);
+    //fLon = atof(buf) + f/60.0;
+    //if (nswe == 'W')
+     //fLon *= -1;
+  //}
 
   tmp_aprsLatPresetNiceNotation.replace(".", ",");
   tmp_aprsLonPresetNiceNotation.replace(".", ",");
@@ -2874,16 +2868,10 @@ int storeLatLonPreset(String _sLat, String _sLon, int precision) {
   // I.e. we might have been called by the webserver Thread (on save config). And our main thread might in the meantime use these
   // variables for displaying, TX, etc. -> Apply the changes right after each other.
   // String(tmp_...) enforces a new String object.
+  aprsLatPresetDouble = fLat;
+  aprsLonPresetDouble = fLon;
   aprsLatPreset = String(tmp_aprsLatPreset);
   aprsLonPreset = String(tmp_aprsLonPreset);
-  char lh_lat_aprs[9];
-  char lh_lng_aprs[10];
-  strcpy(lh_lat_aprs,aprsLatPreset.c_str());
-  strcpy(lh_lng_aprs,aprsLonPreset.c_str());
-  char *lh_lat_aprs_p = lh_lat_aprs;
-  char *lh_lng_aprs_p = lh_lng_aprs;
-  aprspos2dec(lh_lat_aprs_p, lh_lng_aprs_p, aprsLatPresetdec, aprsLonPresetdec); 
-  Serial.printf("own pos is %5.2f  %5.2f\r\n",aprsLatPresetdec,aprsLonPresetdec);
   aprsLatPresetDAO = String(tmp_aprsLatPresetDAO);
   aprsLonPresetDAO = String(tmp_aprsLonPresetDAO);
   aprsLatLonDAO = String(tmp_aprsLatLonDAO);
@@ -4060,6 +4048,12 @@ void setup()
 
   setup_oled_timer_values();
 
+  // init lastheard table
+  for (int ii=0; ii < MAX_LH; ii++) {
+    LH[ii].callsign = "";
+  }
+
+
   esp_task_wdt_add(NULL); //add current thread to WDT watch
   esp_task_wdt_reset();
 
@@ -4069,12 +4063,6 @@ void setup()
   displayInvalidGPS();
 
   digitalWrite(TXLED, HIGH);
-
-// init lastheard table  
-  for (int ii=0; ii < MAX_LH; ii++) {
-    LH[ii].callsign = "";
-  }    
-
 }
 
 
@@ -5303,38 +5291,6 @@ void handle_usb_serial_input(void) {
   Serial.flush();
 }
 
-void aprspos2dec(char *lh_lat_aprs, char *lh_lng_aprs, double &lh_lat, double &lh_lng) {
-// ######################### Position umrechnen
-// decomprimierung nach DL9SAU
-//        double lh_lat = 0;
-//        double lh_lng = 0;
-
-    char buf[9];
-    double decimals;
-    boolean south = false;
-    boolean west = false;
-   
-    strncpy(buf,lh_lat_aprs,8);
-    
-    if (buf[7] == 'S') south = true;
-      
-    buf[7] = 0; // null terminate at end of decimal minute
-    decimals=atof(buf+2) /60.0;
-    buf[2] = 0; // null terminate az begin of minute
-    lh_lat = atoi(buf) + decimals;
-    if (south) lh_lat *= -1;
-    
-    strncpy(buf,lh_lng_aprs,9);
-    if (buf[8] == 'W') west = true;
-    buf[8] = 0; // null terminate at end of decimal minute
-    decimals=atof(buf+3) /60.0;
-    buf[3] = 0; // null terminate az begin of minute
-    lh_lng = atoi(buf) + decimals;
-    if (west) lh_lng *= -1;
-
-    if (debug_verbose > 1) Serial.printf("Decimal Pos %5.2f  %5.2f South: %d West %d\r\n", lh_lat,lh_lng,south, west);
-}
-
 String handle_aprs_messsage_addressed_to_us(const char *received_frame) {
   char *header_end;
   const char *header_normal_or_third_party_start;
@@ -5430,6 +5386,175 @@ end:
   return String(answer_message);
 }
 
+void aprspos2double(char *lh_lat_aprs, char *lh_lng_aprs, double &lh_lat, double &lh_lng) {
+  // ######################### recompute position
+  // TODOTRANSLATE decomprimierung nach DL9SAU
+  //        double lh_lat = 0;
+  //        double lh_lng = 0;
+
+  char buf[9];
+  double decimals;
+  boolean south = false;
+  boolean west = false;
+
+  strncpy(buf, lh_lat_aprs, 8);
+
+  if (buf[7] == 'S') south = true;
+
+  buf[7] = 0; // null terminate at end of decimal minute
+  decimals=atof(buf+2) /60.0;
+  buf[2] = 0; // null terminate az begin of minute
+  lh_lat = atoi(buf) + decimals;
+  if (south) lh_lat *= -1;
+
+  strncpy(buf, lh_lng_aprs, 9);
+  if (buf[8] == 'W') west = true;
+  buf[8] = 0; // null terminate at end of decimal minute
+  decimals=atof(buf+3) /60.0;
+  buf[3] = 0; // null terminate az begin of minute
+  lh_lng = atoi(buf) + decimals;
+  if (west) lh_lng *= -1;
+
+  if (debug_verbose > 1) Serial.printf("Decimal Pos %5.2f  %5.2f South: %d West %d\r\n", lh_lat, lh_lng,south, west);
+}
+
+
+// Store calls and their position in LH. Used for displaying distance and course
+void fill_lh(const String &rxcall, const char *digipeatedflag, const char *p) {
+  // p has frame->data
+  // get position from frame
+  double lh_lat = 0;
+  double lh_lng = 0;
+
+  char lh_lat_aprs[9];
+  char lh_lng_aprs[10];
+  int pos_type = 0;
+  boolean lh_position = false;
+
+  if (debug_verbose > 1) Serial.printf("Check for LH RX pos for %s out of Payload:(%s)\r\n",rxcall.c_str(), p);
+  if (p[0] == '!' || p[0] == '=') {
+    pos_type = 1;
+    p++;
+  } else if (p[0] == '/' || p[0] == '@') {
+    if (debug_verbose > 1) Serial.printf("Pos Type 2 detected LH RX pos out of %s\r\n", p);
+    pos_type = 2;
+    p += 8;
+  } else {
+    pos_type = 3;
+    if (debug_verbose > 1) Serial.printf("Pos Type 3 detected, not valid here\r\n");
+  }
+
+  if (pos_type == 1 || pos_type == 2) {
+    lh_position = true;
+    if (debug_verbose > 1) Serial.printf("Pos detected %s\r\n", p);
+    if (isdigit(*p)) {
+      strncpy(lh_lat_aprs, p, 8);
+      lh_lat_aprs[8] = 0;
+      p += 9;
+      strncpy(lh_lng_aprs, p, 9);
+      lh_lng_aprs[9] = 0;
+      lh_lat = 0;
+      lh_lng = 0;
+      aprspos2double(lh_lat_aprs, lh_lng_aprs, lh_lat, lh_lng);
+    } else {
+      // compressed position
+      long n;
+      p++; // skip symbol id
+      n = 0;
+      for (int i = 3; i >= 0; i--) {
+        n = n + ( *p - 33 ) * pow(91, i);
+        p++;
+      }
+      lh_lat = double ( 90 - n / 380926.0);
+      n = 0;
+      for (int i = 3; i >= 0; i--) {
+        n = n + ( *p - 33 ) * pow(91, i);
+        p++;
+      }
+      lh_lng = double ( -180 + n / 190463.0);
+    }
+  } else {
+    if (debug_verbose > 1) Serial.printf("no Pos detected\r\n");
+    lh_lat = 0;
+    lh_lng = 0;
+    lh_position = false;
+  }
+
+  if (lh_position) {
+    int ii;
+    for (ii=0; ii < (MAX_LH-1); ii++) {
+      if (rxcall == LH[ii].callsign) {
+        break;
+      }
+    }
+
+    for (; ii > 0; ii--) {
+      LH[ii] = LH[ii-1];
+    }
+
+    LH[0].callsign = String(rxcall);
+    LH[0].time_received = millis()/1000;
+    LH[0].lat = lh_lat;
+    LH[0].lng = lh_lng;
+    LH[0].direct = digipeatedflag ? false : true;
+//    LH[0].direct = String(digipeatedflag ? ":" : "*");
+    if (debug_verbose > 1) Serial.printf("LH new:(0)%s%c%ds %5.2f %5.2f \r\n", LH[0].callsign.c_str(), LH[0].direct ? ':' : '*', LH[0].time_received, LH[0].lat, LH[0].lng);
+  }
+}
+
+void write_last_heard_calls_with_distance_and_course_to_display() {
+  String line[5];
+  char dist_and_course[9];
+  char course[3];
+  double courseTo;
+  double distTo;
+  fillDisplayLines3to5(1);
+  for (int i=0; i < MAX_LH; i++) {
+    if (LH[i].callsign != "") {
+      courseTo = TinyGPSPlus::courseTo(aprsLatPresetDouble, aprsLonPresetDouble, LH[i].lat, LH[i].lng);
+      if (courseTo >= 22.5 && courseTo < 67.5) sprintf(course, "NE");
+      else if (courseTo < 112.5) sprintf(course, "E");
+      else if (courseTo < 157.5) sprintf(course, "SE");
+      else if (courseTo < 202.5) sprintf(course, "S");
+      else if (courseTo < 247.5) sprintf(course, "SW");
+      else if (courseTo < 292.5) sprintf(course, "W");
+      else if (courseTo < 337.5) sprintf(course, "NW");
+      else sprintf(course, "N");
+
+      distTo = TinyGPSPlus::distanceBetween(aprsLatPresetDouble, aprsLonPresetDouble, LH[i].lat, LH[i].lng) / 1000.0f;
+
+      // show distance accoring to user's preferred unit
+      switch (units_speed) {
+      case UNITS_SPEED_MPH:
+        distTo /= 1.609344;
+        break;
+      case UNITS_SPEED_KN:
+        distTo /= 1.852;
+        break;
+      }
+
+      // space on display
+      // 012345678901234567890
+      // DB0ABC-10*10m 0001 SE
+      if (distTo < 1.0) {
+        sprintf(dist_and_course, " %4.2f %s", distTo, course);
+      } else if (distTo < 10.0) {
+        sprintf(dist_and_course, " %4.1f %s", distTo, course);
+      } else if (distTo < 999.49) {
+        sprintf(dist_and_course, " %03.0f  %s", distTo, course);
+      } else {
+        sprintf(dist_and_course, " >999 %s", course);
+      }
+      line[i] = LH[i].callsign + (LH[i].direct ? ":" : "*") + compute_time_since_received(LH[i].time_received) + dist_and_course;
+//      line[i] = LH[i].callsign + LH[i].direct + compute_time_since_received(LH[i].time_received) + dist_and_course;
+    } else {
+      line[i] = "";
+    }
+  }
+  writedisplaytext("((LH))",line[0],line[1],line[2],line[3],line[4]);
+  if (debug_verbose > 1) Serial.printf("LH write Ende:\r\n[0]%s\r\n[1]%s\r\n[2]%s\r\n[3]%s\r\n", line[0].c_str(), line[1].c_str(), line[2].c_str(), line[3].c_str());
+}
+
 
 // +---------------------------------------------------------------------+//
 // + MAINLOOP -----------------------------------------------------------+//
@@ -5440,6 +5565,7 @@ void loop()
   double curr_kmph = 0.0;
   double curr_hdop = 99.9;
   int curr_sats = 0;
+//  String RX_RAW_PACKET_LIST[3];
 
   esp_task_wdt_reset();
 
@@ -5468,22 +5594,19 @@ void loop()
   }
 #endif
 
-  if(digitalRead(BUTTON)==LOW && key_up == true){
+  if (digitalRead(BUTTON) == LOW && key_up == true) {
     key_up = false;
     delay(50);
     Serial.println("Tracker: Button pressed...");
+
     button_down_count += 1;
     if (debug_verbose > 1) Serial.printf("Button pressed %dx (1)\r\n", button_down_count);
-    if (button_down_count) {
-      enableOled(); // rewind oled_timer
-      freeze_display = true;
-    }
-    
-    if(digitalRead(BUTTON)==LOW){
+
+    if (digitalRead(BUTTON) == LOW) {
       delay(300);
       time_delay = millis() + 1500;
       if (debug_verbose > 1) Serial.printf("Button has been pressed %dx (2)\r\n", button_down_count);
-      if (digitalRead(BUTTON)==HIGH) {
+      if (digitalRead(BUTTON) == HIGH) {
         #if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
           if (shutdown_active && shutdown_countdown_timer_enable &&
               ( shutdown_countdown_timer - shutdown_delay_time + 15000L >= millis()  /* display for 15s after shutdown was activated */
@@ -5492,22 +5615,33 @@ void loop()
             enableOled_now(); // turn ON OLED now
             shutdown_countdown_timer_enable = false;
             writedisplaytext("((ABORT))","","Shutdown aborted:","middle Button","was pressed","");
-            freeze_display = true;
             key_up = true;
+            button_down_count = 0;
           } else
         #endif
-        if (lora_tx_enabled || aprsis_enabled) {
-          if (!display_is_on && enabled_oled) {
+          if (!(display_is_on && enabled_oled)) {
+            enableOled_now(); // turn ON OLED now
             button_down_count = 0;
-            freeze_display = false;
-            enableOled(); // turn ON OLED temporary
           } else {
+            enableOled(); // rewind oled_timer
+            freeze_display = true;
             if (debug_verbose > 1) Serial.printf("Button Count (Oled on): %d\r\n", button_down_count);
-            if (button_down_count == 6 && lora_tx_enabled) {
+            if (button_down_count == 1) {
+              write_last_heard_calls_with_distance_and_course_to_display();
+              if (debug_verbose > 1) Serial.printf("Action Button Count (Oled on): %d\r\n", button_down_count);
+            } else if (button_down_count == 2) {
+              if (debug_verbose > 1) Serial.printf("Button pressed check == %d, show buildnr %s\r\n", button_down_count, buildnr.c_str());
+              writedisplaytext("((BN))","","BuildNr:" + buildnr,"by DL9SAU & DL3EL","","");
+            } else if (button_down_count < 6) {
+              int n = button_down_count-3;
+              if (debug_verbose > 1) Serial.printf("Button pressed check == %d, show raw rx_Packet %s\r\n", button_down_count, RX_RAW_PACKET_LIST[n].c_str());
+              writedisplaytext(n == 0 ? "RX raw" : "RX raw-" + String(n+1),n == 2 ? "next press: tx bcn" : "",RX_RAW_PACKET_LIST[n],"","","");
+              time_to_refresh = millis() + showRXTime;
+            } else if (button_down_count == 6) {
+              button_down_count = 0;
+              if (lora_tx_enabled || aprsis_enabled) {
                 if (debug_verbose > 1) Serial.printf("sending position (%d)\r\n", button_down_count);
-                button_down_count = 0;
                 freeze_display = false;
-                enableOled(); // rewind oled_timer
                 fillDisplayLines3to5(1);
                 if (gps_state && gps_isValid) {
 #ifdef ENABLE_WIFI
@@ -5517,7 +5651,7 @@ void loop()
                   writedisplaytext("((MAN TX))","","",OledLine3, OledLine4, OledLine5);
 #endif
                   sendpacket(SP_POS_GPS);
-                } else {
+              } else {
 #ifdef ENABLE_WIFI
                   writedisplaytext("((FIX TX))","SSID: " + oled_wifi_SSID_curr, "IP: " + oled_wifi_IP_curr, OledLine3, OledLine4, OledLine5);
 #else
@@ -5526,107 +5660,26 @@ void loop()
 #endif
                   sendpacket(SP_POS_FIXED);
                 }
-            // reset timer for automatic fixed beacon after manual beacon
-            next_fixed_beacon = millis() + fix_beacon_interval;
-             }   
-            else {
-              if (button_down_count == 1) {
-                enableOled(); // rewind oled_timer
-                if (debug_verbose > 1) Serial.printf("Action Button Count (Oled on): %d\r\n", button_down_count);
-                fillDisplayLines3to5(1);
-                String line[5];
-                double dist = 0;
-                char dist_c[7];
-                char courseTo_c[3];
-
-                for (int i=0; i < MAX_LH; i++) {
-                  if (LH[i].callsign != "") {
-                    LH[i].time_elapsed = compute_time_since_received(LH[i].time_received);
-                    line[i] = LH[i].callsign + LH[i].digi + LH[i].time_elapsed + " ";
-                    double courseTo = TinyGPSPlus::courseTo(aprsLatPresetdec, aprsLonPresetdec, LH[i].lat, LH[i].lng);
-                    if     (courseTo == 0) sprintf(courseTo_c,"N");
-                    else if (courseTo < 23) sprintf(courseTo_c,"N");
-                    else if (courseTo < 67)  sprintf(courseTo_c,"NE");
-                    else if (courseTo < 112) sprintf(courseTo_c,"E");
-                    else if (courseTo < 157) sprintf(courseTo_c,"SE");
-                    else if (courseTo < 202) sprintf(courseTo_c,"S");
-                    else if (courseTo < 247) sprintf(courseTo_c,"SW");
-                    else if (courseTo < 292) sprintf(courseTo_c,"W");
-                    else if (courseTo < 337) sprintf(courseTo_c,"NW"); 
-                    else sprintf(courseTo_c,"N");
-                    courseTo_c[2] = 0;
-
-                    dist = TinyGPSPlus::distanceBetween(aprsLatPresetdec, aprsLonPresetdec, LH[i].lat, LH[i].lng);
-                    if (dist < 1000) {
-                      dist /= 1000;
-                      sprintf(dist_c,"%3.1f %s",dist,courseTo_c);
-                    }  
-                    else {  
-                      dist /= 1000;
-                      if (dist > 999) 
-                        sprintf(dist_c,"xxx %s",courseTo_c);
-                      else   
-                        sprintf(dist_c,"%03.0f %s",dist,courseTo_c);
-                    }  
-                    dist_c[6] = 0;
-                    line[i] +=  dist_c;
-                  }
-                  else {
-                    line[i] = "";
-                  }  
-                }  
-                writedisplaytext("((LH))",line[0],line[1],line[2],line[3],line[4]);
-//              space on display
-//              01234567890123456789
-//              DB0ABC-10*10m 001 SE  
-                if (debug_verbose > 1) Serial.printf("LH:\r\n%s\r\n%s\r\n%s\r\n%s\r\n", line[0].c_str(),line[1].c_str(),line[2].c_str(),line[3].c_str());
+                // reset timer for automatic fixed beacon after manual beacon
+                next_fixed_beacon = millis() + fix_beacon_interval;
               }
-              else {
-                if (button_down_count == 2) {
-                  enableOled(); // rewind oled_timer
-                  if (debug_verbose > 1) Serial.printf("Button pressed check == %d, show buildnr %s\r\n", button_down_count,buildnr.c_str());
-                  writedisplaytext("((BN))","","BuildNr:" + buildnr,"by DL9SAU & DL3EL","","");
-                }  
-                if (button_down_count == 3) {
-                  if (debug_verbose > 1) Serial.printf("Button pressed check == %d, show raw rx_Packet %s\r\n", button_down_count,LastRX[0].c_str());
-                  writedisplaytext("RX raw","",LastRX[0],"","","");
-                  time_to_refresh = millis() + showRXTime;
-                }  
-                if (button_down_count == 4) {
-                  enableOled(); // rewind oled_timer
-                  if (debug_verbose > 1) Serial.printf("Button pressed check == %d, show raw rx_Packet %s\r\n", button_down_count,LastRX[1].c_str());
-                  writedisplaytext("RX raw-1","",LastRX[1],"","","");
-//                  if (debug_verbose > 1) writedisplaytext("((NI))","",String(button_down_count)+"x button pressed","next press tx pos","","");
-//                  Serial.printf("Button pressed check == %d, next press tx position\r\n", button_down_count);
-                }  
-                if (button_down_count == 5) {
-                  enableOled(); // rewind oled_timer
-                  if (debug_verbose > 1) Serial.printf("Button pressed check == %d, show raw rx_Packet %s\r\n", button_down_count,LastRX[2].c_str());
-                  writedisplaytext("RX raw-2","next press: tx bcn",LastRX[2],"","","");
-                }  
-                if (button_down_count > 6) {
-                  if (debug_verbose > 1) Serial.printf("Button pressed check >= %d, shouldn't come here\r\n", button_down_count);
-                  button_down_count = 0;
-                }  
-              }
+            } else {
+              if (debug_verbose > 1) Serial.printf("Button pressed check >= 6: %d, shouldn't come here\r\n", button_down_count);
+              button_down_count = 0;
             }
+            key_up = true;
           }
-          key_up = true;
-        }
-        else {
           if (debug_verbose > 1) Serial.printf("Button still down %dx \r\n", button_down_count);
-        }  
-      }
-      else {
+      } else {
         if (debug_verbose > 1) Serial.printf("Button now up %dx \r\n", button_down_count);
-      }  
-    }
-    else {
-      if(digitalRead(BUTTON)==LOW && button_down_count > 0){
+      }
+    } else {
+      if (button_down_count > 0) {
         if (debug_verbose > 1) Serial.printf("Button press was lost...(%d)\r\n", button_down_count);
       }
-   }
+    }
   }
+ 
   // Time to adjust time?
   int8_t t_hour_adjust_next = -1;
   if (gps_state && gps.time.isValid() && gps.time.isUpdated() &&
@@ -5826,13 +5879,13 @@ if (t_elapsed > 15000L && ((curr_hdop < 1.5 && curr_sats >= 4) || gps_isValid !=
       display_is_on = false;
       // mark state change
       oled_timer = 0L;
-      button_down_count = 0;    
+      button_down_count = 0;
       freeze_display = false;
     } else { // else: keep it on, esp. if oled_timeout is set to 0, regardles of oled_timer.
         if (freeze_display && millis() >= oled_timer + showRXTime) {
           // if oled_timeout is set to 0 return to main display after showRXTime
           freeze_display = false;
-          button_down_count = 0;    
+          button_down_count = 0;
           fillDisplayLine1(6);
           fillDisplayLine2();
           fillDisplayLines3to5(1);
@@ -5849,8 +5902,8 @@ if (t_elapsed > 15000L && ((curr_hdop < 1.5 && curr_sats >= 4) || gps_isValid !=
   if (digitalRead(BUTTON)==LOW && key_up == false && millis() >= time_delay && t_lock == false) {
     // enable OLED
     enableOled_now();
-    button_down_count = 0;   
-    freeze_display = false; 
+    button_down_count = 0;
+    freeze_display = false;
     //---------------
     t_lock = true;
     // re-enable webserver, if was set to off.
@@ -6377,14 +6430,17 @@ out:
           send_to_aprsis(s ? String(s) : loraReceivedFrameString);
         }
 #endif
+
 //################### neuer Platz für die LH Liste
-        struct ax25_frame* frame = tnc_format_to_ax25_frame(received_frame);
-        if (frame) {
-            if ((String(frame->src.addr) != "NoCall")&& (!our_packet)) {
-              fill_lh(String(frame->src.addr), digipeatedflag,frame->data);
-            }  
-        }   
+        // Third party traffic? - LH List is a LastPositionDistanceList, not a heard list. We'll skip third-party-packets.
+        if (!our_packet && !(header_end[1] && header_end[1] == '}')) {
+          struct ax25_frame* frame = tnc_format_to_ax25_frame(received_frame);
+          if (frame) {
+            fill_lh(String(frame->src.addr), digipeatedflag, frame->data);
+          }
+        }
 //################### neuer Platz für die LH Liste
+
     #ifdef SHOW_RX_PACKET                                                 // only show RX packets when activitated in config
         if (!its_an_aprs_message_for_us) {
            // ^ don't disturb the important display of the message content
@@ -6392,11 +6448,13 @@ out:
           writedisplaytext("  ((RX))", "", loraReceivedFrameString, "", "", "");
           time_to_refresh = millis() + showRXTime;
         }
-// ## LH
+
+        // List of received packets, for display
         for (int ii=2; ii > 0; ii--) {
-          LastRX[ii] = LastRX[ii-1];
-        }  
-        LastRX[0] = loraReceivedFrameString;
+          RX_RAW_PACKET_LIST[ii] = RX_RAW_PACKET_LIST[ii-1];
+        }
+        RX_RAW_PACKET_LIST[0] = String(loraReceivedFrameString);
+
         #ifdef ENABLE_WIFI
           sendToWebList(loraReceivedFrameString_for_weblist, lastRssi, lastSNR);
         #endif
@@ -6822,95 +6880,4 @@ behind_position_tx:
 #endif
 
   vTaskDelay(1);
-}
-
-void fill_lh(String rxcall, const char *digipeatedflag, char * p) {
-// p has frame->data
-// get position from frame
-          double lh_lat = 0;
-          double lh_lng = 0;
-
-          char lh_lat_aprs[9];
-          char lh_lng_aprs[10];
-          char *lh_lat_aprs_p = lh_lat_aprs;
-          char *lh_lng_aprs_p = lh_lng_aprs;
-          int pos_type = 0;
-          boolean lh_position = false;
-
-          if (debug_verbose > 1) Serial.printf("Check for LH RX pos for %s out of Payload:(%s)\r\n",rxcall.c_str(),p);
-          if ((p[0] == '!') || (p[0] == '=')) {
-            pos_type = 1;
-            p++;
-          }  
-          else {
-            if ((p[0] == '/') || (p[0] == '@')) {
-              if (debug_verbose > 1) Serial.printf("Pos Type 2 detected LH RX pos out of %s\r\n",p);
-              pos_type = 2;
-              p += 8;
-            }
-            else {
-              pos_type = 3;
-              if (debug_verbose > 1) Serial.printf("Pos Type 3 detected, not valid here\r\n");
-            }
-          }
-        
-          if ((pos_type == 1) || (pos_type == 2)) {
-            lh_position = true;
-            if (debug_verbose > 1) Serial.printf("Pos detected %s\r\n",p);
-            if (isdigit(*p)) { 
-              strncpy(lh_lat_aprs_p,p,8);
-              lh_lat_aprs[8] = 0;
-              p += 9;
-              strncpy(lh_lng_aprs_p,p,9);
-              lh_lng_aprs[9] = 0;
-              lh_lat = 0;
-              lh_lng = 0;
-              aprspos2dec(lh_lat_aprs_p, lh_lng_aprs_p, lh_lat, lh_lng); 
-            } 
-            else {
-// compressed position
-              long n;
-              p++; // skip symbol id
-              n = 0;
-              for (int i = 3; i >= 0; i--) {
-                n = n + ( *p - 33 ) * pow(91, i);
-                p++;
-              }
-              lh_lat = double ( 90 - n / 380926.0);
-              n = 0;
-              for (int i = 3; i >= 0; i--) {
-                n = n + ( *p - 33 ) * pow(91, i);
-                p++;
-              }  
-              lh_lng = double ( -180 + n / 190463.0);
-            }
-          }
-          else {
-            if (debug_verbose > 1) Serial.printf("no Pos detected\r\n");
-            lh_lat = 0;
-            lh_lng = 0;
-            lh_position = false;
-        }   
-
-        if (lh_position) {
-          int ii;
-          for (ii=0; ii < (MAX_LH-1); ii++) {
-            if (rxcall == LH[ii].callsign) {
-              break;
-            }
-          }    
-
-          for (; ii > 0; ii--) {
-            LH[ii] = LH[ii-1];
-          }  
-          LH[0].callsign = rxcall;
-          LH[0].time_received = millis()/1000;
-          LH[0].lat = lh_lat;
-          LH[0].lng = lh_lng;
-          if (digipeatedflag)
-            LH[0].digi = '*';
-          else 
-            LH[0].digi = ':';
-          if (debug_verbose > 1) Serial.printf("LH new:(0)%s%s%ds %5.2f %5.2f \r\n", LH[0].callsign.c_str(),LH[0].digi.c_str(),LH[0].time_received,LH[0].lat,LH[0].lng);
-        }
 }
