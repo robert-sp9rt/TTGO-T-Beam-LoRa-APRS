@@ -320,8 +320,6 @@ struct LastHeard{
   double lat;
   double lng;
   boolean direct;
-//  String direct;
-
 };
 struct LastHeard LH[MAX_LH];
 
@@ -378,8 +376,7 @@ ulong shutdown_countdown_timer = 0;
 
 boolean shutdown_active = true;
 boolean shutdown_countdown_timer_enable = false;
-boolean shutdown_process = false;
-boolean usb_status_bef = false;
+boolean usb_status_before = false;
 uint32_t reboot_interval = 0L;
 
 // Variables required to Power Save OLED
@@ -1436,9 +1433,7 @@ void timer_once_a_second() {
   }
 #endif
 
-  // Ticker blinks upper left corner to indicate system is running
   // only when OLED is on
-//  if (display_is_on && millis() > display_dont_update_until) {
   if (display_is_on) {
     // refresh display once a second
     if (!freeze_display)
@@ -5389,10 +5384,7 @@ end:
 }
 
 void aprspos2double(char *lh_lat_aprs, char *lh_lng_aprs, double &lh_lat, double &lh_lng) {
-  // ######################### recompute position
-  // TODOTRANSLATE decomprimierung nach DL9SAU
-  //        double lh_lat = 0;
-  //        double lh_lng = 0;
+  // conversion due to DL9SAU
 
   char buf[9];
   double decimals;
@@ -5423,8 +5415,6 @@ void aprspos2double(char *lh_lat_aprs, char *lh_lng_aprs, double &lh_lat, double
 
 // Store calls and their position in LH. Used for displaying distance and course
 void fill_lh(const String &rxcall, const char *digipeatedflag, const char *p) {
-  // p has frame->data
-  // get position from frame
   double lh_lat = 0;
   double lh_lng = 0;
 
@@ -5499,7 +5489,6 @@ void fill_lh(const String &rxcall, const char *digipeatedflag, const char *p) {
     LH[0].lat = lh_lat;
     LH[0].lng = lh_lng;
     LH[0].direct = digipeatedflag ? false : true;
-//    LH[0].direct = String(digipeatedflag ? ":" : "*");
     if (debug_verbose > 1) Serial.printf("LH new:(0)%s%c%ds %5.2f %5.2f \r\n", LH[0].callsign.c_str(), LH[0].direct ? ':' : '*', LH[0].time_received, LH[0].lat, LH[0].lng);
   }
 }
@@ -5548,13 +5537,12 @@ void write_last_heard_calls_with_distance_and_course_to_display() {
         sprintf(dist_and_course, " >999 %s", course);
       }
       line[i] = LH[i].callsign + (LH[i].direct ? ":" : "*") + compute_time_since_received(LH[i].time_received) + dist_and_course;
-//      line[i] = LH[i].callsign + LH[i].direct + compute_time_since_received(LH[i].time_received) + dist_and_course;
     } else {
       line[i] = "";
     }
   }
   writedisplaytext("((LH))",line[0],line[1],line[2],line[3],line[4]);
-  if (debug_verbose > 1) Serial.printf("LH write Ende:\r\n[0]%s\r\n[1]%s\r\n[2]%s\r\n[3]%s\r\n", line[0].c_str(), line[1].c_str(), line[2].c_str(), line[3].c_str());
+  if (debug_verbose > 1) Serial.printf("LH write End:\r\n[0]%s\r\n[1]%s\r\n[2]%s\r\n[3]%s\r\n", line[0].c_str(), line[1].c_str(), line[2].c_str(), line[3].c_str());
 }
 
 
@@ -5567,7 +5555,6 @@ void loop()
   double curr_kmph = 0.0;
   double curr_hdop = 99.9;
   int curr_sats = 0;
-//  String RX_RAW_PACKET_LIST[3];
 
   esp_task_wdt_reset();
 
@@ -5610,10 +5597,6 @@ void loop()
       if (debug_verbose > 1) Serial.printf("Button has been pressed %dx (2)\r\n", button_down_count);
       if (digitalRead(BUTTON) == HIGH) {
         #if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
-//          if (shutdown_active && shutdown_countdown_timer_enable &&
-//              ( shutdown_countdown_timer - shutdown_delay_time + 15000L >= millis()  /* display for 15s after shutdown was activated */
-//                  ||  millis() > shutdown_countdown_timer - 15000L                   /* display at least 15s before shutdown */
-//              ) ) {
           if (shutdown_active && shutdown_countdown_timer_enable) {
             enableOled_now(); // turn ON OLED now
             shutdown_countdown_timer_enable = false;
@@ -5654,7 +5637,7 @@ void loop()
                   writedisplaytext("((MAN TX))","","",OledLine3, OledLine4, OledLine5);
 #endif
                   sendpacket(SP_POS_GPS);
-              } else {
+                } else {
 #ifdef ENABLE_WIFI
                   writedisplaytext("((FIX TX))","SSID: " + oled_wifi_SSID_curr, "IP: " + oled_wifi_IP_curr, OledLine3, OledLine4, OledLine5);
 #else
@@ -5874,7 +5857,6 @@ if (t_elapsed > 15000L && ((curr_hdop < 1.5 && curr_sats >= 4) || gps_isValid !=
   // Only wake up OLED when necessary, note that DIM is to turn OFF the backlight
   // avoid unnecessary display_dim_calls -> remember dim state
   if (display_is_on) {
-//   if (!shutdown_process) {
     if (oled_timeout > 0 && millis() >= oled_timer) {
       // if enabled_oled is >0: oled_timer switch-of-time reached? -> dim the display
       // if enabled_oled is 0: if we booted, display is on and oled_timer is set. oled_timer switch-of-time reached? -> dim the display
@@ -5895,7 +5877,6 @@ if (t_elapsed > 15000L && ((curr_hdop < 1.5 && curr_sats >= 4) || gps_isValid !=
           fillDisplayLines3to5(1);
         }
     }
-//   } 
   } else {
     // state change of oled timer? switch backlight on, if oled is enabled
     if (enabled_oled && oled_timer != 0L) {
@@ -6023,7 +6004,7 @@ if (t_elapsed > 15000L && ((curr_hdop < 1.5 && curr_sats >= 4) || gps_isValid !=
 
   #if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
     if (InpVolts > 4.3) {
-      if (!usb_status_bef) {
+      if (!usb_status_before) {
         enableOled_now(); // Turn Oled on as indicatior that external power is plugged on
         if (shutdown_active && shutdown_countdown_timer_enable) {
           shutdown_countdown_timer_enable = false;
@@ -6031,52 +6012,51 @@ if (t_elapsed > 15000L && ((curr_hdop < 1.5 && curr_sats >= 4) || gps_isValid !=
         } else {
           writedisplaytext("((POWER))","External Power","plugged in","","","");
         }
-        shutdown_process = false;
         freeze_display = true;
-        usb_status_bef = true;
+        usb_status_before = true;
       }
     } else {
-      if (usb_status_bef) {
+      if (usb_status_before) {
         enableOled_now(); // Turn Oled on as indicatior that external power is plugged off
         writedisplaytext("((POWER))","","External Power","plugged off","Running on","batteries now");
         freeze_display = true;
         if (shutdown_active && !shutdown_countdown_timer_enable) {
           shutdown_countdown_timer_enable = true;
           shutdown_countdown_timer = millis() + shutdown_delay_time;
-          shutdown_process = true;
         }
-        usb_status_bef = false;
+        usb_status_before = false;
       } else {
-//        if (shutdown_active && shutdown_countdown_timer_enable &&
-//             (shutdown_countdown_timer - shutdown_delay_time + 15000L >= millis()  /* display for 15s after shutdown was activated */
-//                ||  millis() > shutdown_countdown_timer - 15000L                   /* display at least 15s before shutdown */
-//            ) ) {
-        if (shutdown_process) {
-          enableOled_now(); // Turn Oled on as indicatior that external power is plugged off
-          if ((millis() >= shutdown_countdown_timer)) {
-            // send_status_message_about_shutdown_to_rf() writes also to display. Display HALT afterwards
-            if (send_status_message_about_shutdown_to_rf) {
-              String msg = String("B") + buildnr + String(",up:") + String((int ) (millis()/1000/60)) + String(" qrt (ext. power plugged off)");
-              sendStatusPacket(msg);
+        if (shutdown_active && shutdown_countdown_timer_enable) {
+          if (shutdown_countdown_timer - shutdown_delay_time + 15000L >= millis()  /* display for 15s after shutdown was activated */
+                ||  millis() > shutdown_countdown_timer - 15000L                   /* display at least 15s before shutdown */
+              ) {
+            enableOled_now(); // Turn Oled on as indicatior that external power is plugged off
+            if ((millis() >= shutdown_countdown_timer)) {
+              // send_status_message_about_shutdown_to_rf() writes also to display. Display HALT afterwards
+              if (send_status_message_about_shutdown_to_rf) {
+                String msg = String("B") + buildnr + String(",up:") + String((int ) (millis()/1000/60)) + String(" qrt (ext. power plugged off)");
+                sendStatusPacket(msg);
+              }
+              writedisplaytext("((HALT))","","Powering","down","","");
+              #ifdef ENABLE_WIFI
+                do_send_status_message_about_shutdown_to_aprsis();
+              #endif
+              #if defined(ENABLE_SYSLOG) && defined(ENABLE_WIFI)
+                syslog_log(LOG_WARNING, String("shutdown_countdown_timer_enable: halting: timer expired after powerloss or undervoltage. Shutdown.."));
+              #endif
+              delay(2000);
+              #ifdef T_BEAM_V1_0
+                axp.setChgLEDMode(AXP20X_LED_OFF);
+              #elif T_BEAM_V1_2
+                axp.setChargingLedMode(XPOWERS_CHG_LED_OFF);
+              #endif
+              axp.shutdown();
+            } else {
+              writedisplaytext("((POWER))","","External Power","plugged off","Shutdown in",String((shutdown_countdown_timer-millis())/1000) + String("s"));
+              freeze_display = true;
             }
-            writedisplaytext("((HALT))","","Powering","down","","");
-            #ifdef ENABLE_WIFI
-              do_send_status_message_about_shutdown_to_aprsis();
-            #endif
-            #if defined(ENABLE_SYSLOG) && defined(ENABLE_WIFI)
-              syslog_log(LOG_WARNING, String("shutdown_countdown_timer_enable: halting: timer expired after powerloss or undervoltage. Shutdown.."));
-            #endif
-            delay(2000);
-            #ifdef T_BEAM_V1_0
-              axp.setChgLEDMode(AXP20X_LED_OFF);
-            #elif T_BEAM_V1_2
-              axp.setChargingLedMode(XPOWERS_CHG_LED_OFF);
-            #endif
-            axp.shutdown();
-          } else {
-            writedisplaytext("((POWER))","","External Power","plugged off","Shutdown in",String((shutdown_countdown_timer-millis())/1000) + String("s"));
-            freeze_display = true;
-            shutdown_process = true;
+          } else if (shutdown_countdown_timer - shutdown_delay_time + 15500L >= millis()) {
+            freeze_display = false;
           }
         }
       }
@@ -6340,9 +6320,6 @@ out:
           goto call_invalid_or_blacklisted;
         }
 
-        //int rssi = rf95.lastSNR();
-        //Serial.println(rssi);
-
         char *digipeatedflag = strchr(received_frame, '*');
         if (digipeatedflag && digipeatedflag > header_end)
           digipeatedflag = 0;
@@ -6433,7 +6410,7 @@ out:
         }
 #endif
 
-        // Third party traffic? - LH List is a LastPositionDistanceList, not a heard list. We'll skip third-party-packets.
+        // Third party traffic? - LH List is a LastPositionDistanceList, not a heard list. We'll ignore third-party-encoded packets.
         if (!our_packet && !(header_end[1] && header_end[1] == '}')) {
           struct ax25_frame* frame = tnc_format_to_ax25_frame(received_frame);
           if (frame) {
@@ -6781,8 +6758,8 @@ behind_position_tx:
           displayInvalidGPS();
       }
     } else {
-      // refresh  time
-          fillDisplayLine1(5);
+        // refresh  time
+        fillDisplayLine1(5);
     }
   }
 
