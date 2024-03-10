@@ -1,8 +1,12 @@
 #include "taskTNC.h"
 #include <esp_task_wdt.h>
 
+
+extern uint8_t usb_serial_data_type;
+
 #ifdef ENABLE_BLUETOOTH
   BluetoothSerial SerialBT;
+  extern boolean serial_bt_client_is_connected;
 #endif
 
 QueueHandle_t tncReceivedQueue = nullptr;
@@ -38,9 +42,11 @@ void handleKISSData(char character, int bufferIndex) {
 
     if (isDataFrame) {
       #ifdef LOCAL_KISS_ECHO
-      Serial.print(inTNCData);
+        if (!usb_serial_data_type) {
+          Serial.print(inTNCData);
+        }
         #ifdef ENABLE_BLUETOOTH
-        if (SerialBT.hasClient()) {
+        if (serial_bt_client_is_connected) {
           SerialBT.print(inTNCData);
         }
         #endif
@@ -73,17 +79,19 @@ void handleKISSData(char character, int bufferIndex) {
   tncReceivedQueue = xQueueCreate(4,sizeof(String *));
   String *loraReceivedFrameString = nullptr;
 
-  esp_task_wdt_init(120, true); //enable panic so ESP32 restarts
+  // esp_task_wdt_init() has already been done in main task during setup()
   esp_task_wdt_add(NULL); //add current thread to WDT watch
 
   while (true) {
     esp_task_wdt_reset();
-    while (Serial.available() > 0) {
-      char character = Serial.read();
-      handleKISSData(character, 0);
+    if (!usb_serial_data_type) {
+      while (Serial.available() > 0) {
+        char character = Serial.read();
+        handleKISSData(character, 0);
+      }
     }
     #ifdef ENABLE_BLUETOOTH
-      if (SerialBT.hasClient()) {
+      if (serial_bt_client_is_connected) {
         while (SerialBT.available() > 0) {
           char character = SerialBT.read();
           handleKISSData(character, 1);
@@ -103,9 +111,10 @@ void handleKISSData(char character, int bufferIndex) {
     #endif
     if (xQueueReceive(tncReceivedQueue, &loraReceivedFrameString, (1 / portTICK_PERIOD_MS)) == pdPASS) {
       const String &kissEncoded = encode_kiss(*loraReceivedFrameString);
-      Serial.print(kissEncoded);
+      if (!usb_serial_data_type)
+        Serial.print(kissEncoded);
       #ifdef ENABLE_BLUETOOTH
-        if (SerialBT.hasClient()){
+        if (serial_bt_client_is_connected){
           SerialBT.print(kissEncoded);
         }
       #endif

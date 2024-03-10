@@ -6,6 +6,8 @@
 
 SFE_UBLOX_GPS myGPS;
 
+extern uint8_t usb_serial_data_type;
+
 #ifdef ENABLE_WIFI
   #include "wifi_clients.h"
   #define MAX_GPS_WIFI_CLIENTS 6
@@ -13,12 +15,16 @@ SFE_UBLOX_GPS myGPS;
 #endif
 
 // Pins for GPS
-#ifdef T_BEAM_V1_0
+#if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
   static const int RXPin = 12, TXPin = 34;
-#else
+#else /* i.e. T_BEAM_V0_7, or lora32-device-with-self-attached-GPS */
   static const int RXPin = 15, TXPin = 12;
 #endif
+#ifndef LORA32_21
 static const uint32_t GPSBaud = 9600; //GPS
+#else /* one user played with self-attached GPS on his LORA32 device. TODO: gps speed choosable in Web-Interface */
+static const uint32_t GPSBaud = 57600; //GPS
+#endif
 HardwareSerial gpsSerial(1);        // TTGO has HW serial
 TinyGPSPlus gps;             // The TinyGPS++ object
 bool gpsInitialized = false;
@@ -45,7 +51,7 @@ bool gpsInitialized = false;
   }
 
 
-  esp_task_wdt_init(120, true); //enable panic so ESP32 restarts
+  // esp_task_wdt_init() has already been done in main task during setup()
   esp_task_wdt_add(NULL); //add current thread to WDT watch
 
   String gpsDataBuffer = "              ";
@@ -57,23 +63,25 @@ bool gpsInitialized = false;
     while (gpsSerial.available() > 0) {
       char gpsChar = (char)gpsSerial.read();
       gps.encode(gpsChar);
-      #ifdef ENABLE_WIFI
         if (gpsChar == '$') {
           gpsDataBuffer = String(gpsChar);
         } else {
           gpsDataBuffer += String(gpsChar);
 
           if (gpsChar == '\n') {
+	    if ((usb_serial_data_type & 4))
+	      Serial.println(gpsDataBuffer);
+      #ifdef ENABLE_WIFI
             iterateWifiClients([](WiFiClient *client, int clientIdx, const String *data){
               if (client->connected()){
                 client->print(*data);
                 client->flush();
               }
             }, &gpsDataBuffer, gps_clients, MAX_GPS_WIFI_CLIENTS);
+      #endif
             gpsDataBuffer = "";
           }
         }
-      #endif
     }
     vTaskDelay(100 / portTICK_PERIOD_MS);
   }

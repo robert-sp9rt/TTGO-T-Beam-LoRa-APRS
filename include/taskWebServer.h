@@ -27,5 +27,12 @@ typedef struct {
 
 extern QueueHandle_t webListReceivedQueue;
 
+// structure for AP Array
+struct AccessPoint {
+    char ssid[33];
+    char pw[64];
+    //uint8_t prio;
+};
+
 [[noreturn]] void taskWebServer(void *parameter);
 #endif
