@@ -95,6 +95,8 @@ extern String OledLine3;
 extern String OledLine4;
 extern String OledLine5;
 
+extern char compile_flags[];
+
 #ifdef IF_SEMAS_WOULD_WORK
 extern xSemaphoreHandle sema_lora_chip;
 #else
@@ -568,7 +570,8 @@ void refill_preferences_as_jsonData()
   s = s + "\n  " +  jsonLineFromString("OledLine3", s_tmp.c_str());
   s_tmp = String(OledLine4); s_tmp.replace("\xF7", "°");
   s = s + "\n  " +  jsonLineFromString("OledLine4", s_tmp.c_str());
-  s = s + "\n  " +  jsonLineFromString("OledLine5", OledLine5.c_str(), true);
+  s = s + "\n  " +  jsonLineFromString("OledLine5", OledLine5.c_str());
+  s = s + "\n  " +  jsonLineFromString("CompileFlags", compile_flags, true);
 
   s += "\n}\n";
   // Store copy of jsonData in our global variable

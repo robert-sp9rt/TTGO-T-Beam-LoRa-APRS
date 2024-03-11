@@ -291,6 +291,7 @@ String wifi_config_as_jsonData;
 // Variables and Constants
 String outString="";                      //The new Output String with GPS Conversion RAW
 String buildnr = "";
+char compile_flags[128];
 
 //Oled Display (DL3EL)
 // to implement the blinking ticker, we have to save the content of the OLED. Also the preparation of output to OLED is done via these variables
@@ -3716,6 +3717,49 @@ void setup_phase2_soft_reconfiguration(boolean runtime_reconfiguration) {
     digitalWrite(TXLED, HIGH);
 }
 
+void setup_compile_flags_info()
+{
+#ifdef  HELTEC_V1
+  strcpy(compile_flags, "Heltec-WiFi-v1 / HELTEC_V1");
+#elif   HELTEC_V2
+  strcpy(compile_flags, "Heltec-WiFi-v2 / HELTEC_V2");
+#elif   LORA32_1
+  strcpy(compile_flags, "ttgo-lora32-v1 / LORA32_1");
+#elif   LORA32_2
+  strcpy(compile_flags, "ttgo-lora32-v2 / LORA32_2");
+#elif   LORA32_21
+  strcpy(compile_flags, "ttgo-lora32-v2_1 / LORA32_21");
+#elif   T_BEAM_V0_7
+  strcpy(compile_flags, "ttgo-t-beam-v0_7 / T_BEAM_V0_7");
+#elif   T_BEAM_V1_0
+  strcpy(compile_flags, "ttgo-t-beam-v1_0 / T_BEAM_V1_0");
+#elif   T_BEAM_V1_2
+  strcpy(compile_flags, "ttgo-t-beam-v1_2 / T_BEAM_V1_2");
+#else
+  strcpy(compile_flags, "IcannotExist / UNKNOW");
+#endif
+
+#ifdef  ENABLE_BLUETOOTH
+  strcat(compile_flags, ",ENABLE_BLUETOOTH");
+#endif
+#ifdef  ENABLE_WIFI
+  strcat(compile_flags, ",ENABLE_WIFI");
+#endif
+#ifdef  KISS_PROTOCOL
+  strcat(compile_flags, ",KISS_PROTOCOL");
+#endif
+#ifdef  ENABLE_OLED 
+  strcat(compile_flags, ",ENABLE_OLED");
+#endif
+#ifdef  ENABLE_SYSLOG
+  strcat(compile_flags, ",ENABLE_SYSLOG");
+#endif
+
+#ifdef  DEVELOPMENT_DEBUG
+  strcat(compile_flags, ",DEVELOPMENT_DEBUG");
+#endif
+}
+
 
 // + SETUP --------------------------------------------------------------+//
 void setup()
@@ -3729,6 +3773,7 @@ void setup()
 
   // Our BUILD_NUMBER. The define is not available in the WEBSERVR -> we need to assign a global variable
   buildnr = BUILD_NUMBER;
+  setup_compile_flags_info();
 
   SPI.begin(SPI_sck,SPI_miso,SPI_mosi,SPI_ss);    //DO2JMG Heltec Patch
   Serial.begin(115200);
@@ -3887,6 +3932,9 @@ void setup()
   set_callsign();
   writedisplaytext("LoRa-APRS","by DL9SAU & DL3EL","Build:" + buildnr,"Hello de " + Tcall,"For Factory Reset:","  press middle Button");
   Serial.println("LoRa-APRS by DL9SAU & DL3EL Build:" + buildnr);
+  Serial.println("Hardware / compiled with features: ");
+  Serial.print("  ");
+  Serial.println(compile_flags);
   Serial.println("Time used since start (-2000ms delay): " + String(millis()-t_setup_entered-2000) + "ms");
   delay(2000);
 
@@ -5006,7 +5054,7 @@ void handle_usb_serial_input(void) {
         }
 
         if (arg == "" &&
-            (cmd == "?" || cmd == "beacon" || cmd == "converse" || cmd == "display" || cmd == "reboot" || cmd == "shutdown") ) {
+            (cmd == "?" || cmd == "beacon" || cmd == "converse" || cmd == "display" || cmd == "reboot" || cmd == "shutdown" || cmd == "version")) {
           if (cmd == "beacon") {
             Serial.println("*** beacon: sending");
             manBeacon = 2;
@@ -5045,6 +5093,7 @@ void handle_usb_serial_input(void) {
 #endif
 #ifdef ENABLE_WIFI
             Serial.println("  wifi <on|off>");
+            Serial.println("  version");
 #endif
             Serial.println("  ?                    (help)");
           } else if (cmd == "reboot") {
@@ -5084,6 +5133,11 @@ void handle_usb_serial_input(void) {
             #endif
             axp.shutdown();
 #endif // T_BEAM_V1_x
+          } else if (cmd == "version") {
+            Serial.print("*** version: ");
+            Serial.print(VERSION);
+            Serial.print(". Hardware / compiled with features: ");
+            Serial.println(compile_flags);
           }
 
         } else {
