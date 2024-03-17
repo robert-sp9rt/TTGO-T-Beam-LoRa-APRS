@@ -1890,11 +1890,9 @@ void fillDisplayLines3to5(int force) {
   OledLine5 = getSatAndBatInfo();
 }
 
-String compute_time_since_received(uint32_t recv) {
+String compute_time_since_received(uint32_t elapsed) {
   String recv_p;
-  uint32_t elapsed;
 
-  elapsed = millis()/1000 - recv;
   if (elapsed < 60) {
     recv_p = String(elapsed) + "s";
   } else if (elapsed < 3600) {
@@ -5607,14 +5605,14 @@ void write_last_heard_calls_with_distance_and_course_to_display() {
   for (int i=0; i < MAX_LH; i++) {
     if (LH[i].callsign != "") {
       courseTo = TinyGPSPlus::courseTo(aprsLatPresetDouble, aprsLonPresetDouble, LH[i].lat, LH[i].lng);
-      if (courseTo >= 22.5 && courseTo < 67.5) sprintf(course, "NE");
+      if (courseTo < 22.5 || courseTo >= 337.5) sprintf(course, "N");
+      else if (courseTo < 67.5) sprintf(course, "NE");
       else if (courseTo < 112.5) sprintf(course, "E");
       else if (courseTo < 157.5) sprintf(course, "SE");
       else if (courseTo < 202.5) sprintf(course, "S");
       else if (courseTo < 247.5) sprintf(course, "SW");
       else if (courseTo < 292.5) sprintf(course, "W");
-      else if (courseTo < 337.5) sprintf(course, "NW");
-      else sprintf(course, "N");
+      else /* if (courseTo < 337.5) */ sprintf(course, "NW");
 
       distTo = TinyGPSPlus::distanceBetween(aprsLatPresetDouble, aprsLonPresetDouble, LH[i].lat, LH[i].lng) / 1000.0f;
 
@@ -5640,7 +5638,7 @@ void write_last_heard_calls_with_distance_and_course_to_display() {
       } else {
         sprintf(dist_and_course, " >999 %s", course);
       }
-      line[i] = LH[i].callsign + (LH[i].direct ? ":" : "*") + compute_time_since_received(LH[i].time_received) + dist_and_course;
+      line[i] = LH[i].callsign + (LH[i].direct ? ":" : "*") + compute_time_since_received(millis()/1000.0L - LH[i].time_received) + dist_and_course;
     } else {
       line[i] = "";
     }
