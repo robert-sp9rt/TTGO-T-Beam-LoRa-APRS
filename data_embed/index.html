@@ -510,8 +510,16 @@ III: Values above are referring to latitude; distance between two latitudes is a
                     <input type="password" name="aprsis_pw" id="aprsis_pw" title="Your password for the APRS-IS connection.">
                   </div>
                   <div>
-                    <label for="aprsis_fltr">Filter (optional)</label>
+                    <label for="aprsis_fltr">Filter (server-site, optional)</label>
                     <input type="text" name="aprsis_fltr" id="aprsis_fltr" title="Request server-site filter (may be left empty). See http://www.aprs-is.net/javAPRSFilter.aspx ; Example: 't/mqs/YOURCALL/50' -> Gate only messages, query and status messages to RF, from a circle of 50km around your last known position. w, o and i may be of interest, but some people on 2m APRS or APRS-IS may send those packets much too frequently. Please trace the effect! Perhaps in combination with '-e/DB0FRI-10'. In our case, the digi positioning beacon from DB0FRI-10 (which is also an igate nearby, APRS-IS path qAI,DB0FRI-10) came from APRS-IS to us and we gated his beacon, encoded as third-party-trafffic, back to RF (which makes no sense: 1. His direct RF beacon is much better heard than ours -> all RF users heard it. 2. We needless consumed airtime). -> Using -e/IGATE1/IGATE2/.. , everything heard (and sent to APRS-IS) by our neighbor igates like DB0FRI-10 will not be re-gated by us. Please also check, if '-d/..' instead of (or additional to) '-e/..' is more suitiable in your environment; you may also consider -/b/.. ." placeholder="may be left blank">
+                  </div>
+                  <div>
+                    <label for="aprsis_fli">Filter type (local, optional)</label>
+                      <input type="text" name="aprsis_fli" id="aprsis_fli" title="Local aprsis-filter incoming for packet-types. We observed that if you have a server-site filter, i.e. for receive private messages only, 20km around you (t/m/MYCALL/20), aprsis sends also some location positions of users (if you heard them on RF), and even if \>20km away. Also we have seen packets of type objects telemetry, etc. With this option, you can filter incoming aprsis-packets localy in order to prevent them from gating to RF. Valid filters are poimqstunwb (Position packets, objects, items, message, query, status, telemetry, user-defined, NWS, weather, bulletin (bulletins are aprs-messages prefixed with BLN'). You can invert the filter ('all except ...') by adding a leading '-', i.e. '-mws'. If you leave this field empty, aprsis local filter is disabled." placeholder="[-]poimqstunwb">
+                  </div>
+                  <div>
+                    <label for="aprsis_fliw">Filter 'words' (local, optional)</label>
+                      <input type="text" name="aprsis_fliw" id="aprsis_fliw" title="Local aprsis-filter incoming for 'words': if this word is part of the header or message body of a packet coming from aprsis, the packet is filtered out. You can sepearate multiple word-filters by space. Leave empty to disable a word filter." placeholder="">
                   </div>
                   <div>
                     <label for="tx_aprsis_sm">Send status-message to APRS-IS</label>
@@ -989,7 +997,8 @@ Hard readable lengths / too long for our display:
     <center><b>This version runs the DL9SAU/DL3EL fork:</b> <a href=https://github.com/DL9SAU/TTGO-T-Beam-LoRa-APRS>https://github.com/DL9SAU/TTGO-T-Beam-LoRa-APRS</a></center>
     <center><b>Licensed under:</b> CC BY-NC-SA</center>
     <center><!--VERSION--></center>
-    <center><label for="CompileFlags">Hardware / compiled with features:</label>
+    <center>
+        <label for="CompileFlags">Hardware / compiled with features:</label>
         <input type="text" name="CompileFlags" id="CompileFlags" readonly title="CompileFlags">
     </center>
 </footer>

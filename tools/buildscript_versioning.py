@@ -22,9 +22,22 @@ try:
     git_id = Popen('git rev-parse --short HEAD', stdout=PIPE, shell=True).stdout.read().strip().decode('ascii')
     version_full = "%s-%s" % (version_full, git_id)
 except:
+    #git_id = "0000000"
+    git_id = "No_GIT.."
     pass
 
-version_string = "{} - {}".format(version_full, datetime.datetime.now())
+date_now = "%.16s" % datetime.datetime.now()
+version_string = "{} - {}".format(version_full, date_now)
+
+# dl9sau: build_no in base62 -> base62 (0-9, a-z, A-Z)
+# This gives us room for (62**2)-1 = 3843 builds between git commits. Should be enough
+# git_id: length of 5 has hopefully enough entropy.
+# VERS_XXSHORT_BN may also be sent on RF -> We keep it short. 8 bytes now, instead of typically 3 bytes before.
+s="0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+bnA=s[(int(build_no / len(s))) % len(s)]
+bnB=s[build_no % len(s)]
+vers_xxshort_bn="%.5s.%c%c" % (git_id, bnA, bnB)
+
 hf = """
 #ifndef BUILD_NUMBER
   #define BUILD_NUMBER "{}"
@@ -35,7 +48,10 @@ hf = """
 #ifndef VERSION_SHORT
   #define VERSION_SHORT "{}"
 #endif
-""".format(build_no, version_string, version_full)
+#ifndef VERS_XXSHORT_BN
+  #define VERS_XXSHORT_BN "{}"
+#endif
+""".format(build_no, version_string, version_full, vers_xxshort_bn)
 with open(FILENAME_VERSION_H, 'w+') as f:
     f.write(hf)
 

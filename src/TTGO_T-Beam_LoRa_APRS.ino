@@ -144,6 +144,9 @@ boolean aprsis_enabled = false;
 String aprsis_host = "euro.aprs2.net";
 uint16_t aprsis_port = 14580;
 String aprsis_filter = "";
+String aprsis_own_filters_in = "";
+boolean aprsis_own_filter_in_is_whitelist = true;
+String aprsis_own_filters_words_in = "";
 String aprsis_callsign = "";
 String aprsis_password = "-1";
 uint8_t aprsis_data_allow_inet_to_rf = 0;  // 0: disable (default). 1: gate to main qrg. 2: gate to secondary qrg. 3: gate to both frequencies
@@ -1996,7 +1999,7 @@ void set_callsign() {
       #endif
     #endif
   }
-  Tcall = s;
+  Tcall = String(s);
 }
 
 // telemetry frames
@@ -3099,6 +3102,8 @@ void load_preferences_cfg_file()
     aprsis_host = jsonElementFromPreferenceCFGString(PREF_APRSIS_SERVER_NAME,PREF_APRSIS_SERVER_NAME_INIT);
     aprsis_port = jsonElementFromPreferenceCFGInt(PREF_APRSIS_SERVER_PORT,PREF_APRSIS_SERVER_PORT_INIT);
     aprsis_filter = jsonElementFromPreferenceCFGString(PREF_APRSIS_FILTER,PREF_APRSIS_FILTER_INIT);
+    aprsis_own_filters_in = jsonElementFromPreferenceCFGString(PREF_APRSIS_FILTER_LOCAL_INCOMING,PREF_APRSIS_FILTER_LOCAL_INCOMING_INIT);
+    aprsis_own_filters_words_in = jsonElementFromPreferenceCFGString(PREF_APRSIS_FILTER_LOCAL_WORDS_INCOMING,PREF_APRSIS_FILTER_LOCAL_WORDS_INCOMING_INIT);
     aprsis_callsign = jsonElementFromPreferenceCFGString(PREF_APRSIS_CALLSIGN,PREF_APRSIS_CALLSIGN_INIT);
     aprsis_password = jsonElementFromPreferenceCFGString(PREF_APRSIS_PASSWORD,PREF_APRSIS_PASSWORD_INIT);
     aprsis_data_allow_inet_to_rf = jsonElementFromPreferenceCFGInt(PREF_APRSIS_ALLOW_INET_TO_RF,PREF_APRSIS_ALLOW_INET_TO_RF_INIT);
@@ -3612,6 +3617,27 @@ void load_preferences_from_flash()
     }
     aprsis_filter = preferences.getString(PREF_APRSIS_FILTER, "");
 
+    if (!preferences.getBool(PREF_APRSIS_FILTER_LOCAL_INCOMING_INIT)){
+      preferences.putBool(PREF_APRSIS_FILTER_LOCAL_INCOMING_INIT, true);
+      preferences.putString(PREF_APRSIS_FILTER_LOCAL_INCOMING, "");
+    }
+    aprsis_own_filters_in = preferences.getString(PREF_APRSIS_FILTER_LOCAL_INCOMING, "");
+    if (!aprsis_own_filters_in.isEmpty() && aprsis_own_filters_in.startsWith("-")) {
+      aprsis_own_filter_in_is_whitelist = false;
+      aprsis_own_filters_in = String((aprsis_own_filters_in.c_str())+1);
+      aprsis_own_filters_in.trim();
+      aprsis_own_filters_in.replace(" ", "");
+    } else {
+      aprsis_own_filter_in_is_whitelist = true;
+    }
+
+    if (!preferences.getBool(PREF_APRSIS_FILTER_LOCAL_WORDS_INCOMING_INIT)){
+      preferences.putBool(PREF_APRSIS_FILTER_LOCAL_WORDS_INCOMING_INIT, true);
+      preferences.putString(PREF_APRSIS_FILTER_LOCAL_WORDS_INCOMING, "");
+    }
+    aprsis_own_filters_words_in = preferences.getString(PREF_APRSIS_FILTER_LOCAL_WORDS_INCOMING, "");
+    aprsis_own_filters_words_in.trim();
+
     if (!preferences.getBool(PREF_APRSIS_CALLSIGN_INIT)){
       preferences.putBool(PREF_APRSIS_CALLSIGN_INIT, true);
       preferences.putString(PREF_APRSIS_CALLSIGN, aprsis_callsign);
@@ -3730,6 +3756,13 @@ void setup_phase2_soft_reconfiguration(boolean runtime_reconfiguration) {
 
   if (runtime_reconfiguration) {
     setup_oled_timer_values();
+    // fix exception: reference to free'd Tcall in OledHdr -> New copy of current Tcall
+    OledHdr = String(Tcall);
+    OledLine1 = "setup_phase2";
+    OledLine2 = String("");
+    OledLine3 = String("");
+    OledLine4 = String("");
+    OledLine5 = String("");
     writedisplaytext(OledHdr,OledLine1,OledLine2,OledLine3,OledLine4,OledLine5);
   } // else: in setup() during boot, we have several unpredictable delays. That's why it's not called here
 
@@ -3791,8 +3824,9 @@ void setup()
   // initialize ESP32 Process WDT, 120s T/O
   esp_task_wdt_init(120, true);
 
-  // Our BUILD_NUMBER. The define is not available in the WEBSERVR -> we need to assign a global variable
-  buildnr = BUILD_NUMBER;
+  // Our BUILD_NUMBER. The define is not available in the WEBSERVER -> we need to assign a global variable
+  //buildnr = BUILD_NUMBER;
+  buildnr = VERS_XXSHORT_BN;
   setup_compile_flags_info();
 
   SPI.begin(SPI_sck,SPI_miso,SPI_mosi,SPI_ss);    //DO2JMG Heltec Patch
@@ -3956,7 +3990,6 @@ void setup()
 
   set_callsign();
   writedisplaytext("LoRa-APRS","by DL9SAU & DL3EL","Build:" + buildnr,"Hello de " + Tcall,"For Factory Reset:","  press middle Button");
-  Serial.println("LoRa-APRS by DL9SAU & DL3EL Build:" + buildnr);
   Serial.println("Time used since start (-2000ms delay): " + String(millis()-t_setup_entered-2000) + "ms");
   delay(2000);
 

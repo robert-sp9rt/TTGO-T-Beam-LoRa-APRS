@@ -68,6 +68,9 @@ extern String to_aprsis_data;
 extern boolean aprsis_enabled;
 extern String aprsis_host;
 extern uint16_t aprsis_port;
+extern String aprsis_own_filters_in;
+extern boolean aprsis_own_filter_in_is_whitelist;
+extern String aprsis_own_filters_words_in;
 extern String aprsis_filter;
 extern String aprsis_callsign;
 extern String aprsis_password;
@@ -547,6 +550,8 @@ void refill_preferences_as_jsonData()
   s = s + "\n  " +  jsonLineFromPreferenceString(PREF_APRSIS_SERVER_NAME);
   s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_APRSIS_SERVER_PORT);
   s = s + "\n  " +  jsonLineFromPreferenceString(PREF_APRSIS_FILTER);
+  s = s + "\n  " +  jsonLineFromPreferenceString(PREF_APRSIS_FILTER_LOCAL_INCOMING);
+  s = s + "\n  " +  jsonLineFromPreferenceString(PREF_APRSIS_FILTER_LOCAL_WORDS_INCOMING);
   s = s + "\n  " +  jsonLineFromPreferenceString(PREF_APRSIS_CALLSIGN);
   s = s + "\n  " +  jsonLineFromPreferenceString(PREF_APRSIS_PASSWORD);
   s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_APRSIS_ALLOW_INET_TO_RF);
@@ -1203,6 +1208,17 @@ void handle_SaveAPRSCfg() {
     s.trim();
     preferences.putString(PREF_APRSIS_FILTER, s);
   }
+  if (server.hasArg(PREF_APRSIS_FILTER_LOCAL_INCOMING)){
+    String s = server.arg(PREF_APRSIS_FILTER_LOCAL_INCOMING);
+    s.trim();
+    s.replace(" ", "");
+    preferences.putString(PREF_APRSIS_FILTER_LOCAL_INCOMING, s);
+  }
+  if (server.hasArg(PREF_APRSIS_FILTER_LOCAL_WORDS_INCOMING)){
+    String s = server.arg(PREF_APRSIS_FILTER_LOCAL_WORDS_INCOMING);
+    s.trim();
+    preferences.putString(PREF_APRSIS_FILTER_LOCAL_WORDS_INCOMING, s);
+  }
   if (server.hasArg(PREF_APRSIS_CALLSIGN)){
     String s = server.arg(PREF_APRSIS_CALLSIGN);
     s.toUpperCase(); s.trim();
@@ -1762,6 +1778,79 @@ String generate_third_party_packet(String callsign, String packet_in) {
   return packet_out;
 }
 
+char aprsis_own_filter_check(const char *data) {
+  char *q;
+  int len;
+  char call[10];
+
+  switch (data[0]) {
+
+  case '!':
+  case '=':
+    len = strlen(data);
+    if ((len > 12 && data[12] == '_') || (len > 19 && data[19] == '_'))
+      return 'w';
+    return 'p';
+  case '/':
+  case '@':
+    len = strlen(data);
+    if ((len > 18 && data[18] == '_') || (len > 26 && data[26] == '_'))
+      return 'w';
+    return 'p';
+  case '[':
+  case '$':  case '\'':
+  case '`':
+    return 'p';
+  case ';':
+    len = strlen(data);
+    if ((len > 29 && data[29] == '_') || (len > 36 && data[36] == '_') ||
+        (len > 20 && data[20] == '_') || (len > 28 && data[27] == '_'))
+      return 'w';
+    return 'o';
+  case ')':
+    return 'i';
+  case '#':
+  case '*':
+  case '_':
+    return 'w';
+  case 'T':
+    return 't';
+  case ':':
+    if (strlen(data) < 11 || data[10] != ':')
+      return '~';
+    strncpy(call, data+1, 9);
+    call[9] = 0;
+    if ((q = strchr(call, ' ')))
+      *q = 0;
+    if (!strncmp(call, "BLN", 3))
+      return 'b';
+    else if (!strncmp(call, "NWS-", 4))
+      return 'n';
+    else if (is_call_blacklisted(call))
+      return '~';
+    else if (data[11] == '?')
+      return 'q';
+    else if (!strncmp(data + 11, "PARM.", 5) || !strncmp(data + 11, "UNIT.", 5) || !strncmp(data + 11, "EQNS.", 5) ||!strncmp(data + 11, "BITS.", 5))
+      return 't';
+    return 'm';
+  case '?':
+  case '<':
+    return 'q';
+  case '>':
+    return 's';
+  case '}':
+    if ((q = strchr(data+1, ':')) && q > strchr(data+1, '>'))
+      return aprsis_own_filter_check(q + 1);
+    return '~';
+  case '{':
+  case ',':
+    return 'u';
+  case '%':
+    return 'p';
+  }
+  return '~';
+}
+
 
 // read packets from APRSIS
 void read_from_aprsis(void) {
@@ -1947,6 +2036,44 @@ void read_from_aprsis(void) {
 
   if (is_call_blacklisted(s.c_str()))
     return;
+
+  if (!header_end[1])
+    return;
+
+
+  if (!aprsis_own_filters_in.isEmpty()) {
+    char aprs_data_type = aprsis_own_filter_check(header_end+1);
+
+    // Sometheing really negative, like a blacklisted call writing a message
+    if (aprs_data_type == '~')
+      return;
+
+    if (aprsis_own_filter_in_is_whitelist) {
+      if (aprsis_own_filters_in.indexOf(aprs_data_type) == -1) {
+        // Data type is not whitelisted
+        return;
+      // else: // Found in whitelist, may pass
+      }
+    } else {
+      if (aprsis_own_filters_in.indexOf(aprs_data_type) != -1) {
+        // Data type is blacklisted
+        return;
+      } // else: Not found in blacklist, may pass
+    }
+  }
+  if (!aprsis_own_filters_words_in.isEmpty()) {
+    char *p = strdup(aprsis_own_filters_words_in.c_str());
+    char *q = strtok(p, " ");
+    while(q) {
+      if (s.indexOf(q) > -1) {
+        free(p);
+        return;
+      }
+      q = strtok(NULL, " ");
+    }
+    if (p)
+      free(p);
+  }
 
   String answer_message = handle_aprs_messsage_addressed_to_us(s.c_str());
   boolean its_an_aprs_message_for_us = !answer_message.isEmpty();
