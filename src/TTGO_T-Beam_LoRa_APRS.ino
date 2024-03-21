@@ -5470,10 +5470,10 @@ String handle_aprs_messsage_addressed_to_us(const char *received_frame) {
       RXMessageTimeAndSender = RXMessageTimeAndSender + String(" ") + String(msg_from) + ":";
       String RXMessage = String(header_normal_or_third_party_end + 11+1);
       writedisplaytext(" ((MSG))",RXMessageTimeAndSender,RXMessage,"","","");
-      if (RXMessage.indexOf("foobar") > -1 || (add_winlink_notification &&
+      if (add_winlink_notification &&
           !strncmp(header_normal_or_third_party_start, "WLNK-1", 6) && header_normal_or_third_party_start[6] == '>' &&
           !strncmp(header_normal_or_third_party_end + 12, "You have ", 9) &&
-              strstr(header_normal_or_third_party_end + 20, " Winlink mail messages pending"))) {
+              strstr(header_normal_or_third_party_end + 20, " Winlink mail messages pending")) {
         // Don't overwrite a friend's nessage with winlinkInfo
         LastRXMessageInfo |= 2;
         if (!(LastRXMessageInfo & 1)) {
