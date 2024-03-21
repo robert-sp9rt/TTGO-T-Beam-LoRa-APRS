@@ -329,7 +329,7 @@ struct LastHeard LH[MAX_LH];
 String RX_RAW_PACKET_LIST[3];
 String LastRXMessage = "";
 String LastRXMessageTimeAndSender = "";
-uint8_t LastRXMessageInfo = 0;  # bitmask: 1 personal aprs text message. 2 winlink message. 3 both. => Display maker: 1: "m", 2: "W", 3: "M"
+uint8_t LastRXMessageInfo = 0;  // bitmask: 1 personal aprs text message. 2 winlink message. 3 both. => Display maker: 1: "m", 2: "W", 3: "M"
 
 //byte Variables
 byte  lora_TXStart;          //start of packet data in TXbuff
