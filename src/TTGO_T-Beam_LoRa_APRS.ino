@@ -327,6 +327,9 @@ struct LastHeard{
 struct LastHeard LH[MAX_LH];
 
 String RX_RAW_PACKET_LIST[3];
+String LastRXMessage = "";
+String LastRXMessageTimeAndSender = "";
+uint8_t LastRXMessageInfo = 0;  # bitmask: 1 personal aprs text message. 2 winlink message. 3 both. => Display maker: 1: "m", 2: "W", 3: "M"
 
 //byte Variables
 byte  lora_TXStart;          //start of packet data in TXbuff
@@ -1677,13 +1680,22 @@ void fillDisplayLine1(int caller) {
   OledLine1 = String("Up ") + String(s_uptime);
   if (*gps_time_s)
     OledLine1 = String(gps_time_s) + String(" ") + OledLine1;
-  if (winlink_notified != 0L) {
+  if (LastRXMessageInfo == 3) {
+    // winlink and personal message -> "M"
+    OledLine1 += " M";
+  } else if (LastRXMessageInfo == 1) {
+    // personal message -> "m"
+    OledLine1 += " m";
+  } else if (winlink_notified != 0L) {
     if (winlink_notified + 60*60*24*1000L > millis()) {
       // show winlink mail info for max 24h
       OledLine1 += " W";
     } else {
       // reset
       winlink_notified = 0L;
+      // Remove winlink indicator bit
+      if (LastRXMessageInfo & 2)
+        LastRXMessageInfo &= ~2;
     }
   }
 }
@@ -5450,7 +5462,32 @@ String handle_aprs_messsage_addressed_to_us(const char *received_frame) {
         *q = 0;
       enableOled_now(); // enable OLED
       freeze_display = true;
-      writedisplaytext(" ((MSG))","",String(msg_from) + String(": ") + String(header_normal_or_third_party_end + 11+1),"","","");
+      String RXMessageTimeAndSender;
+      if (*gps_time_s)
+        RXMessageTimeAndSender = String(gps_time_s);
+      else
+        RXMessageTimeAndSender = String("@up ") + compute_time_since_received(millis()/1000);
+      RXMessageTimeAndSender = RXMessageTimeAndSender + String(" ") + String(msg_from) + ":";
+      String RXMessage = String(header_normal_or_third_party_end + 11+1);
+      writedisplaytext(" ((MSG))",RXMessageTimeAndSender,RXMessage,"","","");
+      if (RXMessage.indexOf("foobar") > -1 || (add_winlink_notification &&
+          !strncmp(header_normal_or_third_party_start, "WLNK-1", 6) && header_normal_or_third_party_start[6] == '>' &&
+          !strncmp(header_normal_or_third_party_end + 12, "You have ", 9) &&
+              strstr(header_normal_or_third_party_end + 20, " Winlink mail messages pending"))) {
+        // Don't overwrite a friend's nessage with winlinkInfo
+        LastRXMessageInfo |= 2;
+        if (!(LastRXMessageInfo & 1)) {
+          // Store message
+          LastRXMessageTimeAndSender = String(RXMessageTimeAndSender);
+          LastRXMessage = String(RXMessage);
+        }
+        winlink_notified = millis();
+      } else {
+        // Store message
+        LastRXMessageInfo |= 1;
+        LastRXMessageTimeAndSender = String(RXMessageTimeAndSender);
+        LastRXMessage = String(RXMessage);
+      }
 #ifdef ENABLE_WIFI
       // TODO: add message to a new-to-implement web-received-list-for-aps-messages
 #endif
@@ -5470,12 +5507,6 @@ String handle_aprs_messsage_addressed_to_us(const char *received_frame) {
         }
         msg_from[9] = 0;
         answer_message = Tcall + ">" + MY_APRS_DEST_IDENTIFYER + "::" + String(msg_from) + ":ack" + String(q+1);
-      }
-      if (add_winlink_notification &&
-          !strncmp(header_normal_or_third_party_start, "WLNK-1", 6) && header_normal_or_third_party_start[6] == '>' &&
-          !strncmp(header_normal_or_third_party_end + 12, "You have ", 9) &&
-              strstr(header_normal_or_third_party_end + 20, " Winlink mail messages pending")) {
-        winlink_notified = millis();
       }
     }
   }
@@ -5722,12 +5753,22 @@ void loop()
             if (button_down_count == 1) {
               write_last_heard_calls_with_distance_and_course_to_display();
             } else if (button_down_count == 2) {
+              writedisplaytext("((MSG))",LastRXMessageTimeAndSender,LastRXMessage,"","","");
+            } else if (button_down_count == 2) {
               writedisplaytext("((BN))","","BuildNr:" + buildnr,"by DL9SAU & DL3EL","","");
             } else if (button_down_count < 6) {
               int n = button_down_count-3;
-              writedisplaytext(n == 0 ? "RX raw" : "RX raw-" + String(n+1),n == 2 ? "next press: tx bcn" : "",RX_RAW_PACKET_LIST[n],"","","");
+              writedisplaytext("RX raw-" + String(n+1),"",RX_RAW_PACKET_LIST[n],"","","");
               time_to_refresh = millis() + showRXTime;
             } else if (button_down_count == 6) {
+              writedisplaytext("((BN))","BuildNr:" + buildnr,"by DL9SAU & DL3EL","","next press: tx bcn","or wait ...");
+              // If we cycled through to this last page, we can remove the "new message-indicator"
+              if (LastRXMessageInfo & 2) {
+                // last received was a winlink notification and we just read that message
+                winlink_notified = 0L;
+              }
+              LastRXMessageInfo = 0;
+            } else if (button_down_count == 7) {
               button_down_count = 0;
               if (lora_tx_enabled || aprsis_enabled) {
                 freeze_display = false;
