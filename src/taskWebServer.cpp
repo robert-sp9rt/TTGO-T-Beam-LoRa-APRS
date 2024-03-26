@@ -2013,6 +2013,9 @@ void read_from_aprsis(void) {
     return;
   }
 
+  if (!header_end[1])
+    return;
+
   // packet has our call in i.E. ...,qAR,OURCALL:...
   q = strstr(s.c_str(), (',' + aprsis_callsign + ':').c_str());
   if (q && q < header_end) return;
@@ -2026,41 +2029,9 @@ void read_from_aprsis(void) {
     }
   }
 
-  // Don't gate, if packet has word TCPXX, NOGATE or RFONLY in header (TCPIP is allowed). See aprs-is iGateDetails spec
-  if (((q = strstr(s.c_str(), ",TCPXX")) && (q[6] == '*' || q[6] == ',' || q[6] == ':')) && q < header_end)
-    return;
-  if ((q = strstr(s.c_str(), ",NOGATE")) && (q[7] == '*' || q[7] == ',' || q[7] == ':') && q < header_end)
-    return;
-  if ((q = strstr(s.c_str(), ",RFONLY")) && (q[7] == '*' || q[7] == ',' || q[7] == ':') && q < header_end)
-    return;
-
   if (is_call_blacklisted(s.c_str()))
     return;
 
-  if (!header_end[1])
-    return;
-
-
-  if (!aprsis_own_filters_in.isEmpty()) {
-    char aprs_data_type = aprsis_own_filter_check(header_end+1);
-
-    // Sometheing really negative, like a blacklisted call writing a message
-    if (aprs_data_type == '~')
-      return;
-
-    if (aprsis_own_filter_in_is_whitelist) {
-      if (aprsis_own_filters_in.indexOf(aprs_data_type) == -1) {
-        // Data type is not whitelisted
-        return;
-      // else: // Found in whitelist, may pass
-      }
-    } else {
-      if (aprsis_own_filters_in.indexOf(aprs_data_type) != -1) {
-        // Data type is blacklisted
-        return;
-      } // else: Not found in blacklist, may pass
-    }
-  }
   if (!aprsis_own_filters_words_in.isEmpty()) {
     char *p = strdup(aprsis_own_filters_words_in.c_str());
     char *q = strtok(p, " ");
@@ -2083,78 +2054,124 @@ void read_from_aprsis(void) {
     answer_message = "";
   }
 
+
   // generate third party packet. Use aprs_callsign (deriving from webServerCfg->callsign), because aprsis_callsign may have a non-aprs (but only aprsis-compatible) ssid like '-L4'
   String third_party_packet = generate_third_party_packet(aprs_callsign, s);
-  if (!third_party_packet.isEmpty()) {
-    aprsis_status = "OK, fromAPRSIS: " + s + " => " + third_party_packet; aprsis_status.trim();
-    if (usb_serial_data_type & 2)
-      Serial.println(third_party_packet);
+  if (third_party_packet.isEmpty())
+    return;
 
-    esp_task_wdt_reset();
+  if (!its_an_aprs_message_for_us) {
+    if (!aprsis_own_filters_in.isEmpty()) {
+      char aprs_data_type = aprsis_own_filter_check(header_end+1);
+
+      // Sometheing really negative, like a blacklisted call writing a message
+      if (aprs_data_type == '~')
+        return;
+
+      if (aprsis_own_filter_in_is_whitelist) {
+        if (aprsis_own_filters_in.indexOf(aprs_data_type) == -1) {
+          // Data type is not whitelisted
+          return;
+        // else: // Found in whitelist, may pass
+        }
+      } else {
+        if (aprsis_own_filters_in.indexOf(aprs_data_type) != -1) {
+          // Data type is blacklisted
+          return;
+        } // else: Not found in blacklist, may pass
+      }
+    }
+
+    // Don't gate, if packet has word TCPXX, NOGATE or RFONLY in header (TCPIP is allowed). See aprs-is iGateDetails spec
+    if (((q = strstr(s.c_str(), ",TCPXX")) && (q[6] == '*' || q[6] == ',' || q[6] == ':')) && q < header_end)
+      return;
+    //if ((q = strstr(s.c_str(), ",NOGATE")) && (q[7] == '*' || q[7] == ',' || q[7] == ':') && q < header_end)
+      //return;
+    if ((q = strstr(s.c_str(), ",RFONLY")) && (q[7] == '*' || q[7] == ',' || q[7] == ':') && q < header_end)
+      return;
+
+  }
+
+  aprsis_status = "OK, fromAPRSIS: " + s + " => " + third_party_packet; aprsis_status.trim();
+
+  esp_task_wdt_reset();
+  if (usb_serial_data_type & 2)
+    Serial.println(third_party_packet);
+
 #ifdef KISS_PROTOCOL
-    if (!src_call_not_for_rf)
-      sendToTNC(third_party_packet);
+  if (!src_call_not_for_rf) {
+    if ((q = strstr(s.c_str(), ",NOGATE")) && (q[7] == '*' || q[7] == ',' || q[7] == ':') && q < header_end)
+      return;
+    sendToTNC(third_party_packet);
+  }
 #endif
 
-    if (its_an_aprs_message_for_us) {
-      if (!answer_message.isEmpty()) {
-        to_aprsis_data = String(answer_message);
-        send_queue_to_aprsis();
-        if (usb_serial_data_type & 2)
-          Serial.println(third_party_packet);
-      }
-      return; // Message was for us -> do not TX on RF
+  if (its_an_aprs_message_for_us) {
+    if (!answer_message.isEmpty()) {
+      to_aprsis_data = String(answer_message);
+      send_queue_to_aprsis();
+      if (usb_serial_data_type & 2)
+        Serial.println(third_party_packet);
     }
+    return; // Message was for us -> do not TX on RF
+  }
 
-    if (lora_tx_enabled && aprsis_data_allow_inet_to_rf && !src_call_not_for_rf) {
-      // not query or aprs-message addressed to our call (check both, aprs_callsign and aprsis_callsign)
-      // Format: "..::DL9SAU-15:..."
-      // check is in this code part, because we may like to see those packets via kiss (sent above)
-      q = header_end + 1;
-      if (*q == '?')
-        return;
-      if (*q == ':' && strlen(q) > 10 && q[10] == ':' &&
-          ((!strncmp(q+1, aprs_callsign.c_str(), aprs_callsign.length()) && (aprs_callsign.length() == 9 || q[9] == ' ')) ||
-          (!strncmp(q+1, aprsis_callsign.c_str(), aprsis_callsign.length()) && (aprsis_callsign.length() == 9 || q[9] == ' ')) ))
-        return;
-      // Give main loop a chance to finish loraSend and parse a new packet in the incoming queue.
-      // Sema locking is important because waitAvailableTimeout() calls available() which calls setModeRx() and this may cause a
-      // panic if the chip is currently transmitting. We can skip this, if lora rx is disabled (which, btw, would not make sense)
-      if (lora_rx_enabled) {
+  // not query
+  // Format: "..::DL9SAU-15:..."
+  //q = header_end + 1;
+  //if (*q == '?')
+    //return;
+  // aprs-message addressed to our call (check both, aprs_callsign and aprsis_callsign)?
+  // check is in this code part, because we may like to see those packets via kiss (sent above)
+  // was already checked with our new handle_aprs_messsage_addressed_to_us() function. checked at least for aprs_callsign
+  q = header_end + 1;
+  if (*q == ':' && strlen(q) > 10 && q[10] == ':' &&
+      //((!strncmp(q+1, aprs_callsign.c_str(), aprs_callsign.length()) && (aprs_callsign.length() == 9 || q[9] == ' ')) ||
+      //(!strncmp(q+1, aprsis_callsign.c_str(), aprsis_callsign.length()) && (aprsis_callsign.length() == 9 || q[9] == ' ')) ))
+      !strncmp(q+1, aprsis_callsign.c_str(), aprsis_callsign.length()) && (aprsis_callsign.length() == 9 || q[9] == ' ') )
+    return;
+
+   if (!(lora_tx_enabled && aprsis_data_allow_inet_to_rf && !src_call_not_for_rf))
+    return;
+
+  // Now, finally, we may gate to RF.
+
+  // Give main loop a chance to finish loraSend and parse a new packet in the incoming queue.
+  // Sema locking is important because waitAvailableTimeout() calls available() which calls setModeRx() and this may cause a
+  // panic if the chip is currently transmitting. We can skip this, if lora rx is disabled (which, btw, would not make sense)
+  if (lora_rx_enabled) {
+    esp_task_wdt_reset();
+    #ifdef IF_SEMAS_WOULD_WORK
+      while (xSemaphoreTake(sema_lora_chip, 100) != pdTRUE)
         esp_task_wdt_reset();
-        #ifdef IF_SEMAS_WOULD_WORK
-          while (xSemaphoreTake(sema_lora_chip, 100) != pdTRUE)
-            esp_task_wdt_reset();
-        #else
-          for (int n = 0; sema_lora_chip; n++) {
-            delay(10);
-            if (!(n % 100))
-              esp_task_wdt_reset();
-          }
-          sema_lora_chip = true;
-        #endif
-        boolean packet_available = rf95.waitAvailableTimeout(lora_speed_rx_curr > 300 ? 2500 : 10000);
-        esp_task_wdt_reset();
-        #ifdef IF_SEMAS_WOULD_WORK
-          xSemaphoreGive(sema_lora_chip);
-        #else
-          sema_lora_chip = false;
-        #endif
-        // After lock release, main thread could gather packet. Give him enough time to receive and parse the packet
-        if (packet_available) {
-          delay(250);
+    #else
+      for (int n = 0; sema_lora_chip; n++) {
+        delay(10);
+        if (!(n % 100))
           esp_task_wdt_reset();
-        }
       }
-      if (aprsis_data_allow_inet_to_rf % 2) {
-        esp_task_wdt_reset();
-        loraSend(txPower, lora_freq, lora_speed, 0, third_party_packet);
-      }
-      if (aprsis_data_allow_inet_to_rf > 1 && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq) {
-        esp_task_wdt_reset();
-        loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, 0, third_party_packet);
-      }
+      sema_lora_chip = true;
+    #endif
+    boolean packet_available = rf95.waitAvailableTimeout(lora_speed_rx_curr > 300 ? 2500 : 10000);
+    esp_task_wdt_reset();
+    #ifdef IF_SEMAS_WOULD_WORK
+      xSemaphoreGive(sema_lora_chip);
+    #else
+      sema_lora_chip = false;
+    #endif
+    // After lock release, main thread could gather packet. Give him enough time to receive and parse the packet
+    if (packet_available) {
+      delay(250);
+      esp_task_wdt_reset();
     }
+  }
+  if (aprsis_data_allow_inet_to_rf % 2) {
+    esp_task_wdt_reset();
+    loraSend(txPower, lora_freq, lora_speed, 0, third_party_packet);
+  }
+  if (aprsis_data_allow_inet_to_rf > 1 && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq) {
+    esp_task_wdt_reset();
+    loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, 0, third_party_packet);
   }
 }
 
