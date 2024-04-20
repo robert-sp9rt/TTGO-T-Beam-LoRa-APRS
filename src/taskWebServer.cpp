@@ -485,6 +485,7 @@ void refill_preferences_as_jsonData()
   s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_LORA_RX_ENABLE);
   s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_LORA_TX_ENABLE);
   s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_LORA_TX_POWER);
+  s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_LORA_TX_PREAMBLE_LEN);
   s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_LORA_AUTOMATIC_CR_ADAPTION_PRESET);
   s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_LORA_ADD_SNR_RSSI_TO_PATH_PRESET);
   s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_LORA_ADD_SNR_RSSI_TO_PATH_END_AT_KISS_PRESET);
@@ -960,6 +961,9 @@ void handle_SaveAPRSCfg() {
   preferences.putBool(PREF_LORA_TX_ENABLE, server.hasArg(PREF_LORA_TX_ENABLE));
   if (server.hasArg(PREF_LORA_TX_POWER)) {
     preferences.putInt(PREF_LORA_TX_POWER, server.arg(PREF_LORA_TX_POWER).toInt());
+  }
+  if (server.hasArg(PREF_LORA_TX_PREAMBLE_LEN)) {
+    preferences.putInt(PREF_LORA_TX_PREAMBLE_LEN, server.arg(PREF_LORA_TX_PREAMBLE_LEN).toInt());
   }
   preferences.putBool(PREF_LORA_AUTOMATIC_CR_ADAPTION_PRESET, server.hasArg(PREF_LORA_AUTOMATIC_CR_ADAPTION_PRESET));
   if (server.hasArg(PREF_LORA_ADD_SNR_RSSI_TO_PATH_PRESET)){

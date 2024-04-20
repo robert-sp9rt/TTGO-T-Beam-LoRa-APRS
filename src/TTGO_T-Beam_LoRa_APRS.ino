@@ -448,6 +448,8 @@ boolean lora_tx_enabled = true;
   uint8_t txPower_cross_digi = 23;
 #endif
 #endif
+uint32_t preambleLen = 64; // default tx preamble len
+constexpr uint32_t rxTimeoutSymbols = 1024; // extended rx timout to avoid rejecting packets with long preamble
 
 #define UNITS_SPEED_KMH 1
 #define UNITS_SPEED_MS  2
@@ -1208,6 +1210,7 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, uint8_t fla
   lora_set_speed(lora_SPEED);
   rf95.setFrequency(lora_FREQ);
   rf95.setTxPower(lora_LTXPower);
+  rf95.setPreambleLength(preambleLen);
 
   #ifdef ENABLE_LED_SIGNALING
     digitalWrite(TXLED, LOW);
@@ -3027,6 +3030,7 @@ void load_preferences_cfg_file()
   lora_rx_enabled = jsonElementFromPreferenceCFGBool(PREF_LORA_RX_ENABLE,PREF_LORA_RX_ENABLE_INIT);
   lora_tx_enabled = jsonElementFromPreferenceCFGBool(PREF_LORA_TX_ENABLE,PREF_LORA_TX_ENABLE_INIT);
   txPower = jsonElementFromPreferenceCFGInt(PREF_LORA_TX_POWER,PREF_LORA_TX_POWER_INIT);
+  preambleLen = jsonElementFromPreferenceCFGInt(PREF_LORA_TX_PREAMBLE_LEN, PREF_LORA_TX_PREAMBLE_LEN_INIT);
   lora_automatic_cr_adaption = jsonElementFromPreferenceCFGBool(PREF_LORA_AUTOMATIC_CR_ADAPTION_PRESET,PREF_LORA_AUTOMATIC_CR_ADAPTION_PRESET_INIT);
   lora_add_snr_rssi_to_path = jsonElementFromPreferenceCFGInt(PREF_LORA_ADD_SNR_RSSI_TO_PATH_PRESET,PREF_LORA_ADD_SNR_RSSI_TO_PATH_PRESET_INIT);
   kiss_add_snr_rssi_to_path_at_position_without_digippeated_flag = jsonElementFromPreferenceCFGBool(PREF_LORA_ADD_SNR_RSSI_TO_PATH_END_AT_KISS_PRESET,PREF_LORA_ADD_SNR_RSSI_TO_PATH_END_AT_KISS_PRESET_INIT);
@@ -3195,6 +3199,12 @@ void load_preferences_from_flash()
       preferences.putInt(PREF_LORA_TX_POWER, txPower);
     }
     txPower = lora_tx_enabled ? preferences.getInt(PREF_LORA_TX_POWER) : 0;
+
+    if (!preferences.getBool(PREF_LORA_TX_PREAMBLE_LEN_INIT)){
+      preferences.putBool(PREF_LORA_TX_PREAMBLE_LEN_INIT, true);
+      preferences.putInt(PREF_LORA_TX_PREAMBLE_LEN, preambleLen);
+    }
+    preambleLen = preferences.getInt(PREF_LORA_TX_PREAMBLE_LEN);
 
     if (!preferences.getBool(PREF_LORA_AUTOMATIC_CR_ADAPTION_PRESET_INIT)){
       preferences.putBool(PREF_LORA_AUTOMATIC_CR_ADAPTION_PRESET_INIT, true);
@@ -3740,9 +3750,12 @@ void setup_phase2_soft_reconfiguration(boolean runtime_reconfiguration) {
 
   // we tx on main and/or secondary frequency. For tx, loraSend is called (and always has desired txpower as argument)
   rf95.setTxPower((lora_digipeating_mode < 2 || lora_cross_digipeating_mode < 1) ? txPower : txPower_cross_digi);
-
+  
   Serial.printf("LoRa PWR: %d, LoRa PWR XDigi: %d, RX Enable: %d, TX Enable: %d\r\n", txPower, txPower_cross_digi, lora_rx_enabled, lora_tx_enabled);
-
+  
+  // setting rx TO, default to allow rx of long preamble packets
+  rf95.setPreambleLength(rxTimeoutSymbols);
+  
   // APRS fixed location and icon settings
   init_and_validate_aprs_position_and_icon();
 
@@ -6751,6 +6764,8 @@ invalid_packet:
         if (sema_lora_lock_success) {
           rf95.setFrequency(lora_freq_rx_curr);
           lora_set_speed(lora_speed_rx_curr);
+          // setting rx TO, default to allow rx of long preamble packets
+          rf95.setPreambleLength(rxTimeoutSymbols);
           // Avoid packet in rx queue from secondary qrg being interpreted to come from main qrg
           if (lora_freq_rx_curr == lora_freq)
              rf95.recvAPRS(0, 0);

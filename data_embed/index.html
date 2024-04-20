@@ -155,6 +155,10 @@ You like to enable, if you use your tracker portable and it should automatically
                         <input name="txPower" id="txPower" type="number" min="0" max="23" title="LoRa TX Power. Range 0 to 23dBm">
                     </div>
                     <div>
+                        <label for="preambleLen">TX preamble length [symbols]</label>
+                        <input name="preambleLen" id="preambleLen" type="number" min="8" max="4096" title="LoRa TX Preamble size. Range 8 to 4096 symbols">
+                    </div>
+                    <div>
                         <label for="lora_cradapt">Automatic CodeRate adaption on TX</label>
                         <input name="lora_cradapt" id="lora_cradapt" type="checkbox" value="1" title="Enable automatic CR adaption. Has only influence on TX (RX can decode every CR). Use this only if you are not a WIDE1 or WIDE2 digi (here you like to send always with higher speed). Still testing, if it behaves good to our network. Currently works only for SF12 modes, because for SF 10 and lower the code for programming CR+SF+BW-combination has not been written yet">
                     </div>
