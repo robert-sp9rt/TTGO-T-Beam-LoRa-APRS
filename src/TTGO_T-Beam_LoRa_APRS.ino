@@ -448,8 +448,8 @@ boolean lora_tx_enabled = true;
   uint8_t txPower_cross_digi = 23;
 #endif
 #endif
-uint32_t preambleLen = 64; // default tx preamble len
-constexpr uint32_t rxTimeoutSymbols = 1024; // extended rx timout to avoid rejecting packets with long preamble
+uint16_t preambleLen = 8; // default tx preamble len
+constexpr uint16_t rxTimeoutSymbols = 1024; // extended rx timout to avoid rejecting packets with long preamble
 
 #define UNITS_SPEED_KMH 1
 #define UNITS_SPEED_MS  2
