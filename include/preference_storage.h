@@ -136,6 +136,8 @@ static const char *const PREF_APRS_SB_TURN_TIME_PRESET_INIT = "sb_turn_time_i";
 // Device settings
 static const char *const PREF_APRS_GPS_EN = "gps_enabled";
 static const char *const PREF_APRS_GPS_EN_INIT = "gps_state_init";
+static const char *const PREF_GPS_POWERSAVE = "gps_pwrsve";
+static const char *const PREF_GPS_POWERSAVE_INIT = "gps_pwrsve_i";
 static const char *const PREF_ACCEPT_OWN_POSITION_REPORTS_VIA_KISS = "kiss_myloc_ok";
 static const char *const PREF_ACCEPT_OWN_POSITION_REPORTS_VIA_KISS_INIT = "kiss_myloc_ok_i";
 static const char *const PREF_GPS_ALLOW_SLEEP_WHILE_KISS = "gps_sleep_ok";

@@ -204,6 +204,12 @@ String aprsPresetShown = "P";
 #else
   boolean gps_state = false;
 #endif
+TaskHandle_t xHandle_GPS;	// needed for being able to suspend/resume task when GPS sleeps
+volatile boolean gps_task_enabled = false;
+uint8_t gps_may_sleep = 1;      // gps may go to sleep: 1 only if we are battery powered. 2 always
+uint32_t t_gps_powersave_operation_until_fix = 0L;
+uint32_t t_gps_fix_lost = 1L;
+
 // as we now collect the gps_data at the beginning of loop(), also the speed ist from there, we should not query gps.speed.kmph() directly later on
 // the same show be done with course and alti (later)
 // after successful data retrieval, gps_isValid becomes true (or turn false, if retrieval fails)
@@ -448,7 +454,9 @@ boolean lora_tx_enabled = true;
   uint8_t txPower_cross_digi = 23;
 #endif
 #endif
+
 uint16_t preambleLen = 8; // default tx preamble len
+constexpr uint16_t preambleLen_default = 8; // default tx preamble len
 constexpr uint16_t rxTimeoutSymbols = 1024; // extended rx timout to avoid rejecting packets with long preamble
 
 #define UNITS_SPEED_KMH 1
@@ -1210,7 +1218,7 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, uint8_t fla
   lora_set_speed(lora_SPEED);
   rf95.setFrequency(lora_FREQ);
   rf95.setTxPower(lora_LTXPower);
-  rf95.setPreambleLength(preambleLen);
+  rf95.setPreambleLength(lora_FREQ == lora_freq ? preambleLen : preambleLen_default);
 
   #ifdef ENABLE_LED_SIGNALING
     digitalWrite(TXLED, LOW);
@@ -1232,6 +1240,8 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, uint8_t fla
     // With no buffer / length called, recvAPRS directly calls clearRxBuf()
     rf95.recvAPRS(0, 0);
   }
+  // setting rx TO, default to allow rx of long preamble packets
+  rf95.setPreambleLength(rxTimeoutSymbols);
 
   #ifdef ENABLE_LED_SIGNALING
     digitalWrite(TXLED, HIGH);
@@ -1928,7 +1938,9 @@ void displayInvalidGPS() {
   if (gps_state) {
     //show GPS age (only if last retrieval was invalid)
     gpsage = gps.location.age()/1000;
-    if (gpsage > 49700) {
+    if (!gps_task_enabled) {
+      gpsage_p = " GPS: sleep";
+    } else if (gpsage > 49700) {
       gpsage_p = " GPS: no fix";
     } else {
       gpsage_p = " GPS age:" + compute_time_since_received(gpsage);
@@ -3054,6 +3066,7 @@ void load_preferences_cfg_file()
   altitude_ratio = jsonElementFromPreferenceCFGInt(PREF_APRS_ALTITUDE_RATIO,PREF_APRS_ALTITUDE_RATIO);
   always_send_cseSpd_AND_altitude = jsonElementFromPreferenceCFGBool(PREF_APRS_ALWAYS_SEND_CSE_SPEED_AND_ALTITUDE,PREF_APRS_ALWAYS_SEND_CSE_SPEED_AND_ALTITUDE_INIT);
   gps_state = jsonElementFromPreferenceCFGBool(PREF_APRS_GPS_EN,PREF_APRS_GPS_EN_INIT);
+  gps_may_sleep = jsonElementFromPreferenceCFGBool(PREF_GPS_POWERSAVE,PREF_GPS_POWERSAVE_INIT);
   acceptOwnPositionReportsViaKiss = jsonElementFromPreferenceCFGBool(PREF_ACCEPT_OWN_POSITION_REPORTS_VIA_KISS,PREF_ACCEPT_OWN_POSITION_REPORTS_VIA_KISS_INIT);
   gps_allow_sleep_while_kiss = jsonElementFromPreferenceCFGBool(PREF_GPS_ALLOW_SLEEP_WHILE_KISS,PREF_GPS_ALLOW_SLEEP_WHILE_KISS_INIT);
   showBattery = jsonElementFromPreferenceCFGBool(PREF_APRS_SHOW_BATTERY,PREF_APRS_SHOW_BATTERY_INIT);
@@ -3340,6 +3353,12 @@ void load_preferences_from_flash()
       preferences.putBool(PREF_APRS_GPS_EN, gps_state);
     }
     gps_state = preferences.getBool(PREF_APRS_GPS_EN);
+
+    if (!preferences.getBool(PREF_GPS_POWERSAVE_INIT)){
+      preferences.putBool(PREF_GPS_POWERSAVE_INIT, true);
+      preferences.putInt(PREF_GPS_POWERSAVE, gps_may_sleep);
+    }
+    gps_may_sleep = preferences.getInt(PREF_GPS_POWERSAVE);
 
     if (!preferences.getBool(PREF_ACCEPT_OWN_POSITION_REPORTS_VIA_KISS_INIT)){
       preferences.putBool(PREF_ACCEPT_OWN_POSITION_REPORTS_VIA_KISS_INIT, true);
@@ -3703,16 +3722,27 @@ void setup_phase2_soft_reconfiguration(boolean runtime_reconfiguration) {
       }
     #endif
 
-    if (gps_state){
-      #ifdef T_BEAM_V1_0
-        axp.setPowerOutPut(AXP192_LDO3, AXP202_ON);                           // switch on GPS
-      #elif T_BEAM_V1_2
-        axp.setButtonBatteryChargeVoltage(3300);			      // enable charge of the gps battery
-        axp.enableButtonBatteryCharge();
-        axp.setALDO3Voltage(3300);
-        axp.enableALDO3();                                                    // switch on GPS
-      #endif
+    if (gps_state) {
+      if (xHandle_GPS) {
+        if (!gps_task_enabled) {
+          #ifdef T_BEAM_V1_0
+            axp.setPowerOutPut(AXP192_LDO3, AXP202_ON);                           // switch on GPS
+          #elif T_BEAM_V1_2
+            axp.setButtonBatteryChargeVoltage(3300);			      // enable charge of the gps battery
+            axp.enableButtonBatteryCharge();
+            axp.setALDO3Voltage(3300);
+            axp.enableALDO3();                                                    // switch on GPS
+          #endif
+          gps_task_enabled = true;
+          vTaskResume(xHandle_GPS);
+        }
+        t_gps_powersave_operation_until_fix = 0L;
+      }
     } else {
+      gps_task_enabled = false;
+      t_gps_powersave_operation_until_fix = millis();
+      t_gps_fix_lost = millis();
+      gps_isValid = false;
       #ifdef T_BEAM_V1_0
         axp.setPowerOutPut(AXP192_LDO3, AXP202_OFF);                          // switch off GPS
       #elif T_BEAM_V1_2
@@ -3750,12 +3780,12 @@ void setup_phase2_soft_reconfiguration(boolean runtime_reconfiguration) {
 
   // we tx on main and/or secondary frequency. For tx, loraSend is called (and always has desired txpower as argument)
   rf95.setTxPower((lora_digipeating_mode < 2 || lora_cross_digipeating_mode < 1) ? txPower : txPower_cross_digi);
-  
-  Serial.printf("LoRa PWR: %d, LoRa PWR XDigi: %d, RX Enable: %d, TX Enable: %d\r\n", txPower, txPower_cross_digi, lora_rx_enabled, lora_tx_enabled);
-  
+
   // setting rx TO, default to allow rx of long preamble packets
   rf95.setPreambleLength(rxTimeoutSymbols);
-  
+
+  Serial.printf("LoRa PWR: %d, LoRa PWR XDigi: %d, RX Enable: %d, TX Enable: %d\r\n", txPower, txPower_cross_digi, lora_rx_enabled, lora_tx_enabled);
+
   // APRS fixed location and icon settings
   init_and_validate_aprs_position_and_icon();
 
@@ -4076,7 +4106,7 @@ void setup()
   // new process: GPS
   if (gps_state) {
     writedisplaytext(Tcall,"","Init:","Waiting for GPS","","");
-    xTaskCreate(taskGPS, "taskGPS", 5000, nullptr, 1, nullptr);
+    xTaskCreate(taskGPS, "taskGPS", 5000, nullptr, 1, &xHandle_GPS);
     writedisplaytext(Tcall,"","Init:","GPS Task Created!","","");
   }
 
@@ -5649,8 +5679,9 @@ void fill_lh(const String &rxcall, const char *digipeatedflag, const char *p) {
 }
 
 void write_last_heard_calls_with_distance_and_course_to_display() {
-  String line[5];
-  char dist_and_course[9];
+  String lines[5];
+  //char dist_and_course[9];
+  char line[22]; // Display length 21 + \0
   char course[3];
   double courseTo;
   double distTo;
@@ -5682,21 +5713,26 @@ void write_last_heard_calls_with_distance_and_course_to_display() {
       // space on display
       // 012345678901234567890
       // DB0ABC-10*10m 0001 SE
-      if (distTo < 1.0) {
-        sprintf(dist_and_course, " %4.2f %s", distTo, course);
-      } else if (distTo < 10.0) {
-        sprintf(dist_and_course, " %4.1f %s", distTo, course);
+      if (distTo < 10.0) {
+        //sprintf(dist_and_course, " %4.2f %-2s", distTo, course);
+        sprintf(line, "%-9s%c%3s  %4.2f%2s", LH[i].callsign.c_str(), LH[i].direct ? ':' : '*', compute_time_since_received(millis()/1000.0L - LH[i].time_received).c_str(), distTo, course);
+      } else if (distTo < 100.0) {
+        //sprintf(dist_and_course, " %4.1f %-2s", distTo, course);
+        sprintf(line, "%-9s%c%3s %4.1f %2s", LH[i].callsign.c_str(), LH[i].direct ? ':' : '*', compute_time_since_received(millis()/1000.0L - LH[i].time_received).c_str(), distTo, course);
       } else if (distTo < 999.49) {
-        sprintf(dist_and_course, " %03.0f  %s", distTo, course);
+        //sprintf(dist_and_course, "  %03.0f %-2s", distTo, course);
+        sprintf(line, "%-9s%c%3s %03.0f  %2s", LH[i].callsign.c_str(), LH[i].direct ? ':' : '*', compute_time_since_received(millis()/1000.0L - LH[i].time_received).c_str(), distTo, course);
       } else {
-        sprintf(dist_and_course, " >999 %s", course);
+        //sprintf(dist_and_course, " >999 %-2s", course);
+        sprintf(line, "%-9s%c%3s >999 %2s", LH[i].callsign.c_str(), LH[i].direct ? ':' : '*', compute_time_since_received(millis()/1000.0L - LH[i].time_received).c_str(), course);
       }
-      line[i] = LH[i].callsign + (LH[i].direct ? ":" : "*") + compute_time_since_received(millis()/1000.0L - LH[i].time_received) + dist_and_course;
+      //lines[i] = LH[i].callsign + (LH[i].direct ? ":" : "*") + compute_time_since_received(millis()/1000.0L - LH[i].time_received) + dist_and_course;
+      lines[i] = String(line);
     } else {
-      line[i] = "";
+      lines[i] = "";
     }
   }
-  writedisplaytext("((LH))",line[0],line[1],line[2],line[3],line[4]);
+  writedisplaytext("((LH))",lines[0],lines[1],lines[2],lines[3],lines[4]);
 }
 
 
@@ -5848,6 +5884,74 @@ void loop()
     }
   }
 
+
+  // time to wake up a sleeping GPS?
+  if (gps_state && gps_may_sleep && (gps_may_sleep > 1 ||
+          #ifdef T_BEAM_V1_0
+            !axp.isVBUSPlug()
+          #elif T_BEAM_V1_2
+            !axp.isVbusInsertOnSource()
+          #else
+            1
+          #endif
+      )) {
+    static uint32_t t_gps_powersave_operation_until_fix__next_action = 0L;
+    static uint8_t gps_wakeups = 0;
+    boolean do_suspend_gps = false;
+    boolean do_resume_gps = false;
+
+    if (t_gps_fix_lost > 0L) {
+
+      if (t_gps_powersave_operation_until_fix == 0L) {
+        if (millis() - t_gps_fix_lost > 10*60*1000L) {
+          t_gps_powersave_operation_until_fix = millis();
+          gps_wakeups = 0;
+          if (gps_task_enabled)
+            do_suspend_gps = true;
+        }
+      } else if (t_gps_powersave_operation_until_fix__next_action > 0L && millis() > t_gps_powersave_operation_until_fix__next_action) {
+        if (gps_task_enabled)
+          do_suspend_gps = true;
+        else
+          do_resume_gps = true;
+      }
+
+      if (do_suspend_gps && gps_task_enabled) {
+        gps_task_enabled = false;  // vTaskSuspend() is done by taskGPS itself (he needs to delete the wdt timer)
+        #ifdef T_BEAM_V1_0
+          axp.setPowerOutPut(AXP192_LDO3, AXP202_OFF);                          // switch off GPS
+        #elif T_BEAM_V1_2
+          axp.disableALDO3();                                                   // switch off GPS
+        #endif
+        gps_isValid = false;
+        // Sleep intervals 1min, 2min, 4min, 8min, 1min, 2min, ..
+        t_gps_powersave_operation_until_fix__next_action = millis() + (1 << (gps_wakeups % 4)) * 60*1000L;
+      } else if (do_resume_gps && !gps_task_enabled) {
+        if (xHandle_GPS) {
+          #ifdef T_BEAM_V1_0
+            axp.setPowerOutPut(AXP192_LDO3, AXP202_ON);                           // switch on GPS
+          #elif T_BEAM_V1_2
+            axp.setALDO3Voltage(3300);
+            axp.enableALDO3();                                                    // switch on GPS
+          #endif
+          gps_task_enabled = true;
+          vTaskResume(xHandle_GPS);
+          // Keep running first try: 120, next: 60s, next: 40, next: 30s
+          // No gps fix since 3 rounds? -> Give once (every 4 rounds) a higher grace time for getting a fix
+          gps_wakeups++;
+          t_gps_powersave_operation_until_fix__next_action = millis() + ((gps_wakeups % 12) ? (2*60*1000L / ((gps_wakeups % 4) + 1)) : 10*60*1000L);
+        }
+      }
+
+    } else {
+      if (t_gps_powersave_operation_until_fix > 0L) {
+        t_gps_powersave_operation_until_fix = 0L;
+        t_gps_powersave_operation_until_fix__next_action = 0L;
+      }
+    }
+
+  }
+
   // Time to adjust time?
   int8_t t_hour_adjust_next = -1;
   if (gps_state && gps.time.isValid() && gps.time.isUpdated() &&
@@ -5893,84 +5997,65 @@ void loop()
       gps_isValid = true;
     }
 
-  if (gps_isValid && gps.location.isUpdated()) {
+    if (gps_isValid && gps.location.isUpdated()) {
 
-    if (curr_hdop < bestHdop || millis() > t_interval_start + 5*60*1000L) {
-      // remember location with best hdop in this time range
-      bestRawLat = gps.location.rawLat();
-      bestRawLng = gps.location.rawLng();
-      bestDoubleLat = gps.location.lat();
-      bestDoubleLng = gps.location.lng();
-      bestHdop = curr_hdop;
-    }
-
-    uint32_t t_elapsed = millis() - t_interval_start;
-
-    //if (t_elapsed > 15000L && ((curr_hdop < 1.5 && curr_sats >= 5) || gps_isValid != gps_isValid_oldState || no_gps_position_since_boot)) {
-if (t_elapsed > 15000L && ((curr_hdop < 1.5 && curr_sats >= 4) || gps_isValid != gps_isValid_oldState || no_gps_position_since_boot)) {
-      // Approach to avoid gps inaccuracy (we observed bad gps positions in a range of 30m, or more):
-      // Resolution of GPS is +/- 3 to 5m. In 1s at 10m/s (= 36 km/h) we are in 'best' case still
-      // in behalf the resolution of GPS.
-      do_update = 1;
-    } else if (t_elapsed > 400L && gps.speed.isValid() &&
-          ( (curr_knots > 20.0 && curr_sats >= 4) ||
-            (curr_hdop < 1.5 && curr_sats >= 5 && curr_kmph > 1.8 && curr_kmph <= 16.0) ) ) {
-      // aprs resolution is 1sm/100 = 1852m/100 = 18.52m
-      // Updating this every 200ms would be enough for getting this resolution at speed of 18.52*3.6*5 = 333.36km/h.
-      do_update = 1;
-    } else if (millis() >= next_fixed_beacon && curr_sats >= 5 &&
-      TinyGPSPlus::distanceBetween(bestDoubleLat, bestDoubleLng, gps.location.lat(), gps.location.lng()) > 185.2)  {
-      // This hack tries to avoid position jumps due to inaccurate gps measurement, but it updates if we moved 185.2m in 10min
-      do_update = 1;
-    }
-
-    if (do_update) {
-      if (!no_gps_position_since_boot || (latlon_precision > 0 && bestHdop < 1.0 && gps.speed.age() < 2000 && curr_knots < 18.0)) {
-        // DAO: heigher precision 1/1000 arc-minute, if not > 36 knots (valid gps measurered speed). Idea behind:
-        // 18.52 m/s are 36kn. We need abt 1s-2s time for understanding the whole displayed line -> resolution of > 2 decimal points is not needed
-        // If we consider gps age of < 2s, we use 18kt as limit
-              storeLatLonPreset(create_lat_aprs("-", bestRawLat, (latlon_precision == 2 ? 4 : 3)),
-                              create_long_aprs("-", bestRawLng, (latlon_precision == 2 ? 4 : 3)),
-                          latlon_precision);
-      } else {
-        storeLatLonPreset(create_lat_aprs("-", bestRawLat, 2), create_long_aprs("-", bestRawLng, 2), 0);
+      if (curr_hdop < bestHdop || millis() > t_interval_start + 5*60*1000L) {
+        // remember location with best hdop in this time range
+        bestRawLat = gps.location.rawLat();
+        bestRawLng = gps.location.rawLng();
+        bestDoubleLat = gps.location.lat();
+        bestDoubleLng = gps.location.lng();
+        bestHdop = curr_hdop;
       }
-      // aprs compressed position has always a high precision (29.17 cm in latitude, 58.34 cm (or less) in longitude)
-      store_compressed_position(bestDoubleLat, bestDoubleLng);
 
-      aprsPresetShown = "";
+      uint32_t t_elapsed = millis() - t_interval_start;
 
-      bestHdop = 99.9;
-      t_interval_start = millis();
-      no_gps_position_since_boot = false;
-   }
-  }
+      //if (t_elapsed > 15000L && ((curr_hdop < 1.5 && curr_sats >= 5) || gps_isValid != gps_isValid_oldState || no_gps_position_since_boot)) {
+      if (t_elapsed > 15000L && ((curr_hdop < 1.5 && curr_sats >= 4) || gps_isValid != gps_isValid_oldState || no_gps_position_since_boot)) {
+        // Approach to avoid gps inaccuracy (we observed bad gps positions in a range of 30m, or more):
+        // Resolution of GPS is +/- 3 to 5m. In 1s at 10m/s (= 36 km/h) we are in 'best' case still
+        // in behalf the resolution of GPS.
+        do_update = 1;
+      } else if (t_elapsed > 400L && gps.speed.isValid() &&
+            ( (curr_knots > 20.0 && curr_sats >= 4) ||
+              (curr_hdop < 1.5 && curr_sats >= 5 && curr_kmph > 1.8 && curr_kmph <= 16.0) ) ) {
+        // aprs resolution is 1sm/100 = 1852m/100 = 18.52m
+        // Updating this every 200ms would be enough for getting this resolution at speed of 18.52*3.6*5 = 333.36km/h.
+        do_update = 1;
+      } else if (millis() >= next_fixed_beacon && curr_sats >= 5 &&
+        TinyGPSPlus::distanceBetween(bestDoubleLat, bestDoubleLng, gps.location.lat(), gps.location.lng()) > 185.2)  {
+        // This hack tries to avoid position jumps due to inaccurate gps measurement, but it updates if we moved 185.2m in 10min
+        do_update = 1;
+      }
 
-#ifdef notdef
-    static uint32_t lastTxdistance_millis = 0;
-    // code has no function, as currently gps_speed_kmph_oled is not used in getSpeedCourseAlti
-    if ((millis()-lastTxdistance_millis) > 1000) {
-      static double lastTxLat       = 0.0;
-      static double lastTxLng       = 0.0;
-      double currLat = gps.location.lat();
-      double currLng = gps.location.lng();
-      double dist = TinyGPSPlus::distanceBetween(currLat, currLng, lastTxLat, lastTxLng);
-      // test code to smoothen km/h in oled, does not work, because of weird data from gps. Has to be looked at
-      // get GPS Data, if valid and mark accordingly
-      if (dist > 15 || (millis()-lastTxdistance_millis) > 3*60*10000) {
-        lastTxLat = currLat;
-        lastTxLng = currLng;
-        gps_speed_kmph_oled = gps_speed;
-        lastTxdistance_millis = millis();
-      } else {
-        gps_speed_kmph_oled = 0;
+      if (do_update) {
+        t_gps_fix_lost = 0L;
+        if (!no_gps_position_since_boot || (latlon_precision > 0 && bestHdop < 1.0 && gps.speed.age() < 2000 && curr_knots < 18.0)) {
+          // DAO: heigher precision 1/1000 arc-minute, if not > 36 knots (valid gps measurered speed). Idea behind:
+          // 18.52 m/s are 36kn. We need abt 1s-2s time for understanding the whole displayed line -> resolution of > 2 decimal points is not needed
+          // If we consider gps age of < 2s, we use 18kt as limit
+                storeLatLonPreset(create_lat_aprs("-", bestRawLat, (latlon_precision == 2 ? 4 : 3)),
+                                create_long_aprs("-", bestRawLng, (latlon_precision == 2 ? 4 : 3)),
+                            latlon_precision);
+        } else {
+          storeLatLonPreset(create_lat_aprs("-", bestRawLat, 2), create_long_aprs("-", bestRawLng, 2), 0);
+        }
+        // aprs compressed position has always a high precision (29.17 cm in latitude, 58.34 cm (or less) in longitude)
+        store_compressed_position(bestDoubleLat, bestDoubleLng);
+
+        aprsPresetShown = "";
+
+        bestHdop = 99.9;
+        t_interval_start = millis();
+        no_gps_position_since_boot = false;
       }
     }
-#endif
   }
+
   if (gps_isValid != gps_isValid_oldState) {
     // String functions are cpu consuming. We adust string aprsPresetShown only if we changed status.
     if (!gps_isValid) {
+      t_gps_fix_lost = millis();
       // update to the old values
       update_speed_from_gps();
       if (gps_state && gps.speed.age() < 2000 && curr_knots > 4.0 && curr_hdop < 1.5) {
@@ -6130,9 +6215,15 @@ if (t_elapsed > 15000L && ((curr_hdop < 1.5 && curr_sats >= 4) || gps_isValid !=
           axp.setALDO3Voltage(3300);
           axp.enableALDO3();
         #endif
+        if (xHandle_GPS) {
+          gps_task_enabled = true;
+          vTaskResume(xHandle_GPS);
+          t_gps_powersave_operation_until_fix = 0L;
+        }
       }
 #endif
       gps_state = gps_state_before_autochange;
+      if (gps_state_before_autochange)
       dont_send_own_position_packets = false;
       time_last_own_position_via_kiss_received = 0L;
       time_last_frame_via_kiss_received = 0L;
@@ -6271,6 +6362,8 @@ if (t_elapsed > 15000L && ((curr_hdop < 1.5 && curr_sats >= 4) || gps_isValid !=
               if (gps_allow_sleep_while_kiss) {
                 #if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
                   if (gps_state) {
+                    gps_isValid = false;
+                    gps_task_enabled = false;  // vTaskSuspend() is done by taskGPS itself (he needs to delete the wdt timer)
                     #ifdef T_BEAM_V1_0
                       axp.setPowerOutPut(AXP192_LDO3, AXP202_OFF);                           // switch off GPS
                     #elif T_BEAM_V1_2
@@ -6279,6 +6372,8 @@ if (t_elapsed > 15000L && ((curr_hdop < 1.5 && curr_sats >= 4) || gps_isValid !=
                 }
                 #endif
                 gps_state = false;
+                t_gps_powersave_operation_until_fix = millis();
+                t_gps_fix_lost = millis();
               }
               dont_send_own_position_packets = true;
               // TODO: there are also tcp kiss devices. Instead of 'kiss_client_came_via_bluetooth', we should mark it in a session struct where we can iterate through
@@ -6764,8 +6859,6 @@ invalid_packet:
         if (sema_lora_lock_success) {
           rf95.setFrequency(lora_freq_rx_curr);
           lora_set_speed(lora_speed_rx_curr);
-          // setting rx TO, default to allow rx of long preamble packets
-          rf95.setPreambleLength(rxTimeoutSymbols);
           // Avoid packet in rx queue from secondary qrg being interpreted to come from main qrg
           if (lora_freq_rx_curr == lora_freq)
              rf95.recvAPRS(0, 0);

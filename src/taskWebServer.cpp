@@ -525,6 +525,7 @@ void refill_preferences_as_jsonData()
   s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_APRS_ALTITUDE_RATIO);
   s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_APRS_ALWAYS_SEND_CSE_SPEED_AND_ALTITUDE);
   s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_APRS_GPS_EN);
+  s = s + "\n  " +  jsonLineFromPreferenceInt(PREF_GPS_POWERSAVE);
   s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_ACCEPT_OWN_POSITION_REPORTS_VIA_KISS);
   s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_GPS_ALLOW_SLEEP_WHILE_KISS);
   s = s + "\n  " +  jsonLineFromPreferenceBool(PREF_ENABLE_TNC_SELF_TELEMETRY);
@@ -963,7 +964,9 @@ void handle_SaveAPRSCfg() {
     preferences.putInt(PREF_LORA_TX_POWER, server.arg(PREF_LORA_TX_POWER).toInt());
   }
   if (server.hasArg(PREF_LORA_TX_PREAMBLE_LEN)) {
-    preferences.putInt(PREF_LORA_TX_PREAMBLE_LEN, server.arg(PREF_LORA_TX_PREAMBLE_LEN).toInt());
+    int i = server.arg(PREF_LORA_TX_PREAMBLE_LEN).toInt();
+    if (i < 8) i = 8; else if (i > 4096) i = 4096;
+    preferences.putInt(PREF_LORA_TX_PREAMBLE_LEN, i);
   }
   preferences.putBool(PREF_LORA_AUTOMATIC_CR_ADAPTION_PRESET, server.hasArg(PREF_LORA_AUTOMATIC_CR_ADAPTION_PRESET));
   if (server.hasArg(PREF_LORA_ADD_SNR_RSSI_TO_PATH_PRESET)){
@@ -1248,6 +1251,7 @@ void handle_SaveAPRSCfg() {
   preferences.putBool(PREF_APRS_ALWAYS_SEND_CSE_SPEED_AND_ALTITUDE, server.hasArg(PREF_APRS_ALWAYS_SEND_CSE_SPEED_AND_ALTITUDE));
   preferences.putBool(PREF_APRS_FIXED_BEACON_PRESET, server.hasArg(PREF_APRS_FIXED_BEACON_PRESET));
   preferences.putBool(PREF_APRS_GPS_EN, server.hasArg(PREF_APRS_GPS_EN));
+  preferences.putInt(PREF_GPS_POWERSAVE, server.arg(PREF_GPS_POWERSAVE).toInt());
   preferences.putBool(PREF_ACCEPT_OWN_POSITION_REPORTS_VIA_KISS, server.hasArg(PREF_ACCEPT_OWN_POSITION_REPORTS_VIA_KISS));
   preferences.putBool(PREF_GPS_ALLOW_SLEEP_WHILE_KISS, server.hasArg(PREF_GPS_ALLOW_SLEEP_WHILE_KISS));
   preferences.putBool(PREF_APRS_SHOW_CMT, server.hasArg(PREF_APRS_SHOW_CMT));

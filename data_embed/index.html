@@ -156,7 +156,7 @@ You like to enable, if you use your tracker portable and it should automatically
                     </div>
                     <div>
                         <label for="preambleLen">TX preamble length [symbols]</label>
-                        <input name="preambleLen" id="preambleLen" type="number" min="8" max="4096" title="A larger preamble size improves packet detection but increases transmission time. Range 8 to 4096 symbols." placeholder="8">
+                        <input name="preambleLen" id="preambleLen" type="number" min="8" max="4096" title="A larger preamble size improves packet detection but increases transmission time. Range 8 to 4096 symbols. 8 is default. Please experiment with 12. This setting only affects transmission on Main frequency." placeholder="8">
                     </div>
                     <div>
                         <label for="lora_cradapt">Automatic CodeRate adaption on TX</label>
@@ -376,7 +376,7 @@ III: Values above are referring to latitude; distance between two latitudes is a
                 <div class="grid-container thirds">
                     <div>
                         <label for="sb_angle">Course change [degrees]</label>
-                        <input name="sb_angle" id="sb_angle" type="number" min="5" max="360" title="Angle of course change to speed up beacon transmission. Recommended value: 28. Range 0 to 360.">
+                        <input name="sb_angle" id="sb_angle" type="number" min="5" max="360" title="Angle of course change to speed up beacon transmission. Recommended value: 28. Range 5 to 360.">
                     </div>
                     <div>
                         <label for="sb_turn_slope">Turn Slope [degrees]</label>
@@ -391,6 +391,14 @@ III: Values above are referring to latitude; distance between two latitudes is a
                     <div>
                         <label for="gps_enabled">GPS enabled *</label>
                         <input name="gps_enabled" id="gps_enabled" type="checkbox" value="1" title="enable or disable GPS">
+                    </div>
+                    <div>
+                        <label for="gps_pwrsve">GPS powersaving mode</label>
+                        <select id="gps_pwrsve" name="gps_pwrsve" title="If there's no GPS fix, allow GPS to go to sleep (chip powered off; taskGPS will suspend). Chip awakes for 1 minute, looking for a fix; if no ifx, sleeps again. Sleep interval is: 1min, 2min, 4min, 8min, 1min, ... You can decide if it may always sleep, or only when you run on battery (default), or if GPS should always be on (according to GPS enabled setting).">
+                          <option value="1">GPS may sleep when running on battery (default)</option>
+                          <option value="2">GPS always may sleep</option>
+                          <option value="0">Ignore this feature</option>
+                        </select>
                     </div>
                     <div>
                         <label for="kiss_myloc_ok">Accept own positions via KISS</label>

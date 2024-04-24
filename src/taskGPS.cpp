@@ -7,6 +7,7 @@
 SFE_UBLOX_GPS myGPS;
 
 extern uint8_t usb_serial_data_type;
+extern volatile boolean gps_task_enabled;
 
 #ifdef ENABLE_WIFI
   #include "wifi_clients.h"
@@ -30,7 +31,10 @@ TinyGPSPlus gps;             // The TinyGPS++ object
 bool gpsInitialized = false;
 
 [[noreturn]] void taskGPS(void *parameter) {
+
+reinitialize:
   if (!gpsInitialized){
+
     gpsSerial.begin(GPSBaud, SERIAL_8N1, TXPin, RXPin);        //Startup HW serial for GPS
 
     // set GPS parameters on restart
@@ -49,13 +53,20 @@ bool gpsInitialized = false;
           delay(1000);
     }
   }
-
+  gps_task_enabled = true;
 
   // esp_task_wdt_init() has already been done in main task during setup()
   esp_task_wdt_add(NULL); //add current thread to WDT watch
 
   String gpsDataBuffer = "              ";
   for (;;) {
+    if (!gps_task_enabled) {
+      //gpsSerial.end();  // No, raises exception
+      esp_task_wdt_delete(NULL);
+      gpsInitialized = false;
+      vTaskSuspend(NULL);
+      goto reinitialize;
+    }
     esp_task_wdt_reset();
     #ifdef ENABLE_WIFI
     check_for_new_clients(&gpsServer, gps_clients, MAX_GPS_WIFI_CLIENTS);
@@ -69,8 +80,8 @@ bool gpsInitialized = false;
           gpsDataBuffer += String(gpsChar);
 
           if (gpsChar == '\n') {
-	    if ((usb_serial_data_type & 4))
-	      Serial.println(gpsDataBuffer);
+            if ((usb_serial_data_type & 4))
+              Serial.println(gpsDataBuffer);
       #ifdef ENABLE_WIFI
             iterateWifiClients([](WiFiClient *client, int clientIdx, const String *data){
               if (client->connected()){
