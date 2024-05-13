@@ -1616,10 +1616,15 @@ String getSpeedCourseAlti() {
 String getSatAndBatInfo() {
   String line5;
 
-  if (gps_state)
-    line5 = "S:" + String(gps.satellites.value()) + "/" + String((int ) gps.hdop.hdop());
-  else
+  if (gps_state) {
+    if (gps_task_enabled) {
+      line5 = "S:" + String(gps.satellites.value()) + "/" + String((int ) gps.hdop.hdop());
+    } else {
+      line5 = "S:zzz";
+    }
+  } else {
     line5 = "S:-/-";
+  }
 #ifdef T_BEAM_V1_0
   int b_c_out = (int ) axp.getBattDischargeCurrent();
   int b_c_in = (int ) axp.getBattChargeCurrent();
@@ -1732,7 +1737,7 @@ void fillDisplayLine2() {
 
   if (dont_send_own_position_packets) {
     OledLine2 = wifi_info + " Own Bcn: dis";
-  } else if (!(lora_tx_enabled || aprsis_enabled)) {
+  } else if (!(lora_tx_enabled || aprsis_enabled || usb_serial_data_type == 0 || usb_serial_data_type & 2)) {
     OledLine2 = wifi_info + " LoRa-TX: dis";
   } else {
     if (gps_isValid) {
@@ -1938,9 +1943,7 @@ void displayInvalidGPS() {
   if (gps_state) {
     //show GPS age (only if last retrieval was invalid)
     gpsage = gps.location.age()/1000;
-    if (!gps_task_enabled) {
-      gpsage_p = " GPS: sleep";
-    } else if (gpsage > 49700) {
+    if (gpsage > 49700) {
       gpsage_p = " GPS: no fix";
     } else {
       gpsage_p = " GPS age:" + compute_time_since_received(gpsage);
@@ -2621,7 +2624,10 @@ boolean readFile(fs::FS &fs, const char *filename) {
             apcnt++;
           }
         } else {
-            Serial.printf("readFile: wifi.cfg, Preferences AP %s found with PW %s in wifi.cfg and not stored again\r\n", wifi_ModeSTA_SSID.c_str(), wifi_ModeSTA_PASS.c_str());
+            if (wifi_ModeSTA_SSID == "")
+              Serial.printf("readFile: wifi.cfg, No AP configured\r\n");
+            else
+              Serial.printf("readFile: wifi.cfg, Preferences AP %s found with PW %s in wifi.cfg and not stored again\r\n", wifi_ModeSTA_SSID.c_str(), wifi_ModeSTA_PASS.c_str());
         }
         if (apcnt == MAX_AP_CNT) {
           Serial.printf("readFile: wifi.cfg, maximum Number of possible APs (%d) reached.\r\n", MAX_AP_CNT);
@@ -2632,7 +2638,10 @@ boolean readFile(fs::FS &fs, const char *filename) {
       delay(3000); // something is wrong, make sure, that msg is displayed
       Serial.println("readFile: wifi.cfg, no valid AP found)");
     }
-    Serial.printf("readFile: wifi.cfg, %d valid entries found. AP %s is selected as frist priority\r\n", apcnt, wifi_ModeSTA_SSID.c_str());
+    Serial.printf("readFile: wifi.cfg, %d valid entries found.", apcnt);
+    if (apcnt)
+      Serial.printf(" AP %s is selected as frist priority", wifi_ModeSTA_SSID.c_str());
+    Serial.println("");
     goto end;
   }
 
@@ -5836,7 +5845,7 @@ void loop()
               writedisplaytext("((BN))","BuildNr:" + buildnr,"by DL9SAU & DL3EL","","next press: tx bcn","or wait ...");
             } else if (button_down_count == 7) {
               button_down_count = 0;
-              if (lora_tx_enabled || aprsis_enabled) {
+              if (lora_tx_enabled || aprsis_enabled || usb_serial_data_type == 0 || usb_serial_data_type & 2) {
                 freeze_display = false;
                 fillDisplayLines3to5(1);
                 if (gps_state && gps_isValid) {
@@ -5899,11 +5908,27 @@ void loop()
     static uint8_t gps_wakeups = 0;
     boolean do_suspend_gps = false;
     boolean do_resume_gps = false;
+    boolean gps_may_sleep_because_we_dont_move = false;
 
-    if (t_gps_fix_lost > 0L) {
+    if (t_gps_fix_lost == 0L && t_gps_powersave_operation_until_fix == 0L && gps_isValid) {
+      static uint32_t last_tests = millis();
+      static double lastDoubleLat = 0.0f;
+      static double lastDoubleLng = 0.0f;
+      if (last_tests + 5*60*1000L < millis()) {
+        if (curr_kmph < 3.6 || TinyGPSPlus::distanceBetween(lastDoubleLat, lastDoubleLng, bestDoubleLat, bestDoubleLng) < 185.2) {
+          // gps may sleep
+          gps_may_sleep_because_we_dont_move = true;
+        }
+        lastDoubleLat = bestDoubleLat;
+        lastDoubleLng = bestDoubleLng;
+        last_tests = millis();
+      }
+    }
+
+    if (t_gps_fix_lost > 0L || gps_may_sleep_because_we_dont_move) {
 
       if (t_gps_powersave_operation_until_fix == 0L) {
-        if (millis() - t_gps_fix_lost > 10*60*1000L) {
+        if (gps_may_sleep_because_we_dont_move || millis() - t_gps_fix_lost > 10*60*1000L) {
           t_gps_powersave_operation_until_fix = millis();
           gps_wakeups = 0;
           if (gps_task_enabled)
@@ -5924,8 +5949,14 @@ void loop()
           axp.disableALDO3();                                                   // switch off GPS
         #endif
         gps_isValid = false;
-        // Sleep intervals 1min, 2min, 4min, 8min, 1min, 2min, ..
-        t_gps_powersave_operation_until_fix__next_action = millis() + (1 << (gps_wakeups % 4)) * 60*1000L;
+        t_gps_fix_lost = millis();
+        // No fix? Sleep intervals 1min, 2min, 4min, 8min, 1min, 2min, .. No-movement-case: Ratio 5min:5min
+        if (gps_may_sleep_because_we_dont_move) {
+          t_gps_powersave_operation_until_fix__next_action = millis() + 5*60*1000L;
+          gps_wakeups = 2; // make gps to be awake also 5min
+        } else {
+          t_gps_powersave_operation_until_fix__next_action = millis() + (1 << (gps_wakeups % 4)) * 60*1000L;
+        }
       } else if (do_resume_gps && !gps_task_enabled) {
         if (xHandle_GPS) {
           #ifdef T_BEAM_V1_0
@@ -5935,11 +5966,13 @@ void loop()
             axp.enableALDO3();                                                    // switch on GPS
           #endif
           gps_task_enabled = true;
+          t_gps_fix_lost = millis();
           vTaskResume(xHandle_GPS);
-          // Keep running first try: 120, next: 60s, next: 40, next: 30s
-          // No gps fix since 3 rounds? -> Give once (every 4 rounds) a higher grace time for getting a fix
+          // Keep running first try: 6.25min, 5.41min, 5min, 8.75min, 6.25min, ..
+          // No gps fix since 3 rounds? -> Give once (every 4 rounds) a higher grace time for getting a fix (10min)
           gps_wakeups++;
-          t_gps_powersave_operation_until_fix__next_action = millis() + ((gps_wakeups % 12) ? (2*60*1000L / ((gps_wakeups % 4) + 1)) : 10*60*1000L);
+          //t_gps_powersave_operation_until_fix__next_action = millis() + ((gps_wakeups % 12) ? (2*60*1000L / ((gps_wakeups % 4) + 1)) : 10*60*1000L);
+          t_gps_powersave_operation_until_fix__next_action = millis() + ((gps_wakeups % 12) ? ((5*60*1000L / ((gps_wakeups % 4) + 1))+3.75*60*1000L) : 10*60*1000L);
         }
       }
 
@@ -6108,7 +6141,7 @@ void loop()
   }
 #endif
 
-  if (manBeacon && (lora_tx_enabled || aprsis_enabled)) {
+  if (manBeacon && (lora_tx_enabled || aprsis_enabled || usb_serial_data_type == 0 || usb_serial_data_type & 2)) {
     // Manually sending beacon from html page
     enableOled_now();
 #ifdef ENABLE_WIFI
@@ -6237,7 +6270,7 @@ void loop()
 
   // fixed beacon, or if smartbeaconing with lost gps fix (but had at least one gps fix).
   // smartbeaconing also ensures correct next_fixed_beacon time
-  if ((lora_tx_enabled || aprsis_enabled) && !dont_send_own_position_packets && millis() >= next_fixed_beacon &&
+  if ((lora_tx_enabled || aprsis_enabled || usb_serial_data_type == 0 || usb_serial_data_type & 2) && !dont_send_own_position_packets && millis() >= next_fixed_beacon &&
        (fixed_beacon_enabled ||
        ((!gps_state || !gps_isValid) && lastPositionTX && lastPositionTX + sb_max_interval < millis()) ) ) {
     enableOled_now(); // enable OLED
