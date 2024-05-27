@@ -8,29 +8,59 @@
 //#include <TTGO_T-Beam_LoRa_APRS_config.h> // to config user parameters
 #include <Arduino.h>
 #include <SPI.h>
-#include <BG_RF95.h>         // library from OE1ACM
+#ifdef HAS_SX126X
+    #include <RadioLib.h>
+#else
+  #if !defined(HAS_SX127X)
+    #define HAS_SX127X
+  #endif
+  #include <BG_RF95.h>         // library from OE1ACM
+#endif
 #include <math.h>
 #include <driver/adc.h>
 #include <Wire.h>
 #include <Adafruit_I2CDevice.h>
-#include <Adafruit_SSD1306.h>
-#include <splash.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_SPITFT.h>
-#include <Adafruit_SPITFT_Macros.h>
-#include <gfxfont.h>
-#ifdef T_BEAM_V1_2
-#define XPOWERS_CHIP_AXP2101
-#include <XPowersLib.h>
+#ifdef HAS_TFT
+  #include <TFT_eSPI.h>
 #else
-#include <axp20x.h>
+  #include <Adafruit_SSD1306.h>
+  #include <Adafruit_GFX.h>
+  #include <splash.h>
+  #include <Adafruit_SPITFT.h>
+  #include <Adafruit_SPITFT_Macros.h>
+  #include <gfxfont.h>
+#endif
+#ifdef T_BEAM_V1_2
+  #define XPOWERS_CHIP_AXP2101
+  #include <XPowersLib.h>
+#elif T_BEAM_V1_0
+  #include <axp20x.h>
 #endif
 #include <esp_task_wdt.h>
 #include <sys/time.h>
-#include "taskGPS.h"
-#include "version.h"
 #include "preference_storage.h"
 #include "syslog_log.h"
+#include "ArduinoJson.h"
+// Access to SPIFFS for wifi.cfg
+#include "esp_spiffs.h"
+#include "SPIFFS.h"
+#include "FS.h" // SPIFFS is declared
+#define FORMAT_SPIFFS_IF_FAILED true
+
+// "brown out" (bad usb cable or insufficient usb power capacity):
+// https://iotespresso.com/how-to-disable-brownout-detector-in-esp32-in-arduino/
+// If you power your ESP32, open your Serial Monitor, and see the ESP32 rebooting continuously, with the following message: 'Brownout detector was triggered' Then you are probably providing insufficient power to the ESP32. It is generally observed in applications requiring higher power, like WiFi or BLE. The dictionary meaning of the term ‘brownout’ is
+#include "soc/soc.h"
+#include "soc/rtc_cntl_reg.h"
+
+#include "version.h"
+#include "taskGPS.h"
+#ifdef KISS_PROTOCOL
+  #include "taskTNC.h"
+#endif
+#ifdef ENABLE_WIFI
+  #include "taskWebServer.h"
+#endif
 
 // Enable verbose debug output, level 2 on compile (-D DEVELOPMENT_DEBUG via plaformio.ini) or by finetuning it here.
 // debug_verbose 1 currently affects syslog level LOG_DEBUG. 0 disables verbose output.
@@ -40,31 +70,31 @@ int debug_verbose = 1;
 int debug_verbose = 0;
 #endif
 
-// Access to SPIFFS for wifi.cfg
-#include "ArduinoJson.h"
-#include "SPIFFS.h"
-#include "FS.h" // SPIFFS is declared
-#define FORMAT_SPIFFS_IF_FAILED true
-
-#ifdef KISS_PROTOCOL
-  #include "taskTNC.h"
-#endif
-#ifdef ENABLE_WIFI
-  #include "taskWebServer.h"
-#endif
 String wifi_info;                // saving wifi info (CLI|AP|dis) for Oled. If WIFI not compiled in, we still need this variable
 
 String RemoteDebug;
 uint32_t RemoteDebugNr = 0L;
 
+
 // oled address
 #define SSD1306_ADDRESS 0x3C
 
 // SPI config
-#define SPI_sck 5
-#define SPI_miso 19
-#define SPI_mosi 27
-#define SPI_ss 18
+#ifdef HELTEC_WIRELESS_TRACKER
+  #define SPI_sck 9
+  #define SPI_miso 11
+  #define SPI_mosi 10
+  #define SPI_ss 8
+  #define SPI_irq 14
+  #define SPI_rst 12
+  #define SPI_busy 13
+#else
+  #define SPI_sck 5
+  #define SPI_miso 19
+  #define SPI_mosi 27
+  #define SPI_ss 18
+  #define SPI_irq 26
+#endif
 
 // IO config
 #if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
@@ -77,6 +107,7 @@ uint32_t RemoteDebugNr = 0L;
   #define I2C_SDA 21
   #define I2C_SCL 22
   #define BUTTON  39                //pin number for Button on TTGO T-Beam
+  #define BATTERY_PIN 35
   #define BUZZER 15                 // enter your buzzer pin gpio
   const byte TXLED  = 4;            //pin number for LED on TX Tracker
 /* Original LORA32 V2.1 Setup
@@ -91,32 +122,59 @@ uint32_t RemoteDebugNr = 0L;
   #define I2C_SDA 21
   #define I2C_SCL 22
   #define BUTTON 2                  //pin number for BUTTO
+  #define BATTERY_PIN 35
   #define BUZZER 13                 // enter your buzzer pin gpio
   const byte TXLED  = 4;            //pin number for LED on TX Tracker
 #elif LORA32_2
   #define I2C_SDA 21
   #define I2C_SCL 22
   #define BUTTON 2                  //pin number for BUTTO
+  #define BATTERY_PIN 35
   #define BUZZER 13                 // enter your buzzer pin gpio
   const byte TXLED  = 4;            //pin number for LED on TX Tracker
 #elif LORA32_1
   #define I2C_SDA 21
   #define I2C_SCL 22
   #define BUTTON 2                  //pin number for BUTTO
+  #define BATTERY_PIN 35
   #define BUZZER 13                 // enter your buzzer pin gpio
   const byte TXLED  = 4;            //pin number for LED on TX Tracker
 #elif HELTEC_V1
   #define I2C_SDA 4
   #define I2C_SCL 15
   #define BUTTON 2                  //pin number for BUTTO
+  #define BATTERY_PIN 35
   #define BUZZER 13                 // enter your buzzer pin gpio
   const byte TXLED  = 4;            //pin number for LED on TX Tracker
 #elif HELTEC_V2
   #define I2C_SDA 4
   #define I2C_SCL 15
   #define BUTTON 2                  //pin number for BUTTO
+  #define BATTERY_PIN 35
   #define BUZZER 13                 // enter your buzzer pin gpio
   const byte TXLED  = 4;            //pin number for LED on TX Tracker
+#elif HELTEC_WIRELESS_TRACKER
+  #define I2C_SDA 7                 // Not used by OLED. It has TFT
+  #define I2C_SCL 6                 // Not used by OLED. It has TFT
+  #define BUTTON 0                  //pin number for BUTTO
+  #define BATTERY_PIN 1
+  #define ADC_CTRL    2             // HELTEC Wireless Tracker ADC_CTRL = HIGH powers the voltage divider to read BatteryPin. Only on V05 = V1.1
+  #define VEXT_CTRL   3             // this is for GPS and TFT screen on Wireless_Tracker and only for
+  #define BUZZER 5                  // enter your buzzer pin gpio
+  const byte TXLED  = 18;           //pin number for LED on TX Tracker. White LED
+  #ifdef HAS_TFT
+    #define TFT_BACKLIGHT  21           //pin number for BATTERY LED
+  #endif
+#else
+  #define BATTERY_PIN 35
+#endif
+
+#ifdef HELTEC_WIRELESS_TRACKER
+  #define TXLED_HIGH HIGH
+  #define TXLED_LOW LOW
+#else
+  #define TXLED_HIGH LOW
+  #define TXLED_LOW HIGH
 #endif
 
 // Variables for LoRa settings
@@ -137,6 +195,8 @@ double lora_freq_cross_digi = 433.900;
 
 double lora_freq_rx_curr = lora_freq;
 ulong lora_speed_rx_curr = lora_speed;
+
+volatile boolean flag_lora_packet_available = false;
 
 // Variables for WIFI APRS-IS connection. Requires ENABLE_WIFI
 #ifdef ENABLE_WIFI
@@ -198,7 +258,7 @@ int position_ambiguity = 0; // 0: default, compressed. -1: uncompressed. -2: unc
 String aprsPresetShown = "P";
 //double lastTxdistance = 0;
 
-#if defined(T_BEAM_V1_2) || defined(T_BEAM_V1_0) || defined(T_BEAM_V0_7) || defined(FORCE_ENABLE_GPS)
+#if defined(T_BEAM_V1_2) || defined(T_BEAM_V1_0) || defined(T_BEAM_V0_7) || defined(HELTEC_WIRELESS_TRACKER) || defined(FORCE_ENABLE_GPS)
 									         // ^ may used as compile time define
   boolean gps_state = true;
 #else
@@ -218,8 +278,6 @@ int gps_speed = 0;
 //int gps_speed_kmph_oled = 0;
 char gps_time_s[20];// Room for len(01:02:03 04.05.2022) + 1 /* \0 */  -> 20
 
-boolean key_up = true;
-boolean t_lock = false;
 boolean fixed_beacon_enabled = false;
 boolean show_cmt = true;
 // Telemetry sequence, current value
@@ -310,16 +368,19 @@ String OledLine2 = "";    // WebServer Info (CLI|AP|dis), next beacon (SB|FB), G
 String OledLine3 = "";    // Position
 String OledLine4 = "";    // speed, course, altitude
 String OledLine5 = "";    // sat info, batt info
+boolean display_do_full_refresh = true;
 int oled_line3and4_format = 0; // 0: original format of line3 and line4; Lat/Lon in aprs format. Alternative format: 1: classic. 2: nautical. 3: classic lat/lon left 4: nautical lat/lon left
 int oled_show_locator = 0;    // 0: show always locator (and never lat/lon). 1: show never locator (and always Lat/lon). 2: 10:50 ratio. 6: with 20:100 ratio. 5: 20:20 ratio
 int oled_loc_amb = 0;     // display locator not more precise than 0: RR99XX. -1: RR99XX99. -2: RR99XX99XX
-
 #if defined(ENABLE_TNC_SELF_TELEMETRY)
   uint32_t nextTelemetryFrame = 60*1000L;  // first possible start of telemetry 60s after boot.
 #endif
 
 // cycle through the menu with by pressing the middle button multible times
 int button_down_count = 0;
+boolean button_key_up = true;
+boolean button_t_lock = false;
+ulong button_time_delay = 0;
 
 // structure for LastHeard Array. Used for displaying course and distance to them.
 #define MAX_LH 5                  // max lastheard
@@ -383,7 +444,6 @@ ulong time_to_refresh = 1000;            // typical time display lines are shown
 ulong next_fixed_beacon = 75000L;    // first fixed beacon approx 125s after system start (DL3EL)
 ulong fix_beacon_interval = FIX_BEACON_INTERVAL;
 ulong showRXTime = SHOW_RX_TIME;
-ulong time_delay = 0;
 ulong shutdown_delay = 0;
 ulong shutdown_delay_time = 10000;
 ulong shutdown_countdown_timer = 0;
@@ -444,15 +504,15 @@ float avg_c_y, avg_c_x;
   boolean lora_tx_enabled = false;
   uint8_t txPower = 0;
   uint8_t txPower_cross_digi = 0;
-  #else
-boolean lora_tx_enabled = true;
-#ifdef TXdbmW
-  uint8_t txPower = TXdbmW;
-  uint8_t txPower_cross_digi = TXdbmW;
-  #else
-  uint8_t txPower = 23;
-  uint8_t txPower_cross_digi = 23;
-#endif
+#else
+  boolean lora_tx_enabled = true;
+  #ifdef TXdbmW
+    uint8_t txPower = TXdbmW;
+    uint8_t txPower_cross_digi = TXdbmW;
+    #else
+    uint8_t txPower = 23;
+    uint8_t txPower_cross_digi = 23;
+  #endif
 #endif
 
 uint16_t preambleLen = 8; // default tx preamble len
@@ -521,8 +581,6 @@ uint32_t time_last_status_packet_sent = 0L;
 uint16_t lora_automaic_cr_adoption_rf_transmissions_heard_in_timeslot = 0;
 uint16_t lora_packets_received_in_timeslot_on_main_freq = 0;
 uint16_t lora_packets_received_in_timeslot_on_secondary_freq = 0;
-char lora_TXBUFF_for_digipeating[BG_RF95_MAX_MESSAGE_LEN+1] = "";		// buffer for digipeating
-uint32_t time_lora_TXBUFF_for_digipeating_was_filled = 0L;
 boolean sendpacket_was_called_twice = false;
 // bits for sendpacket()
 #define SP_POS_FIXED 1
@@ -547,14 +605,61 @@ static const adc_unit_t unit = ADC_UNIT_1;
 
 
 // Singleton instance of the radio driver
-BG_RF95 rf95(18, 26);        // TTGO T-Beam has NSS @ Pin 18 and Interrupt IO @ Pin26
-
+//BG_RF95 rf95(18, 26);        // TTGO T-Beam has NSS @ Pin 18 and Interrupt IO @ Pin26
+#ifdef HAS_SX127X
+  BG_RF95 rf95(SPI_ss, SPI_irq);
+  #define LORA_MAX_MESSAGE_LEN BG_RF95_MAX_MESSAGE_LEN
+#elif HAS_SX126X
+  #if defined(HELTEC_WIRELESS_TRACKER)
+    SX1262 radio = new Module(SPI_ss, SPI_irq, SPI_rst, SPI_busy);
+  #endif
+  #define LORA_MAX_MESSAGE_LEN 255-4 // 255 byte chip buffer - header
+#else
+  #define LORA_MAX_MESSAGE_LEN 255-4
+#endif
+char lora_TXBUFF_for_digipeating[LORA_MAX_MESSAGE_LEN+1] = "";		// buffer for digipeating
+uint32_t time_lora_TXBUFF_for_digipeating_was_filled = 0L;
 
 char blacklist_calls[256] = "";
 
-// initialize OLED display
-#define OLED_RESET 16         // not used
-Adafruit_SSD1306 display(128, 64, &Wire, OLED_RESET);
+#ifdef HAS_TFT
+  TFT_eSPI tft = TFT_eSPI();
+  #ifdef HELTEC_WIRELESS_TRACKER
+    #define bigSizeFont     2
+    #define smallSizeFont   1
+    #define lineSpacing     9
+  #endif
+
+  #if !defined(WHITE)
+    #define WHITE TFT_WHITE
+  #endif
+
+  #define OLED_LINE_LEN_MAX 25
+
+  class Emulated_SSD1306 {
+    public:
+      //void dim(bool do_dim) { if (do_dim) tft.fillScreen(TFT_BLACK); }
+      void dim(bool do_dim) { digitalWrite(TFT_BACKLIGHT, do_dim ? TXLED_LOW : TXLED_HIGH); }
+      void clearDisplay(void) { tft.fillScreen(TFT_BLACK); }
+      void setTextColor(int textColor) { tft.setTextColor(textColor, TFT_BLACK); }
+      void setTextSize(uint8_t textSize) { tft.setTextSize(textSize < 2 ? smallSizeFont : bigSizeFont); }
+      void setCursor(uint8_t x, uint8_t y) { tft.setCursor(x, y ? (y+2 / lineSpacing) +8 : 0); }
+      void println(String &s) { tft.print(s); }
+      void display(void) { return; }
+  };
+  Emulated_SSD1306 display;
+
+#else
+  #ifdef HELTEC_WIRELESS_TRACKER
+    #define OLED_RESET 21         // not used
+  #else
+    #define OLED_RESET 16         // not used
+   #endif
+  // initialize OLED display
+  Adafruit_SSD1306 display(128, 64, &Wire, OLED_RESET);
+
+  #define OLED_LINE_LEN_MAX 21
+#endif
 
 
 #ifdef IF_SEMAS_WOULD_WORK
@@ -594,6 +699,11 @@ void do_serial_println(const String &msg)
   }
 }
 
+#ifdef HAS_SX126X
+void signal_new_packet_received() {
+  flag_lora_packet_available = true;
+}
+#endif
 
 char *ax25_base91enc(char *s, uint8_t n, uint32_t v){
   /* Creates a Base-91 representation of the value in v in the string */
@@ -990,6 +1100,7 @@ void buzzer(int* melody, int array_size){
 
 
 void lora_set_speed(ulong lora_speed) {
+#ifdef HAS_SX127X
   if(lora_speed==1200){
     rf95.setModemConfig(BG_RF95::Bw125Cr47Sf512);
   }
@@ -1008,6 +1119,29 @@ void lora_set_speed(ulong lora_speed) {
   else {
     rf95.setModemConfig(BG_RF95::Bw125Cr45Sf4096);
   }
+#elif HAS_SX126X
+  if (lora_speed == 1200) {
+    radio.setCodingRate(7);
+    radio.setSpreadingFactor(9);
+  } else if (lora_speed == 610) {
+    radio.setCodingRate(8);
+    radio.setSpreadingFactor(10);
+  } else if (lora_speed == 180) {
+    radio.setCodingRate(8);
+    radio.setSpreadingFactor(12);
+  } else if (lora_speed == 210) {
+    radio.setCodingRate(7);
+    radio.setSpreadingFactor(12);
+  } else if (lora_speed == 240) {
+    radio.setCodingRate(6);
+    radio.setSpreadingFactor(12);
+  } else {
+    radio.setCodingRate(6);
+    radio.setSpreadingFactor(12);
+  }
+  radio.setBandwidth(125);
+  radio.setCRC(true);
+#endif
 }
 
 #if defined(ENABLE_WIFI)
@@ -1169,17 +1303,33 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, uint8_t fla
   // sema lock for lora chip operations
   esp_task_wdt_reset();
 #ifdef IF_SEMAS_WOULD_WORK
-  while (xSemaphoreTake(sema_lora_chip, 100) != pdTRUE)
+  int n = 0;
+  while (xSemaphoreTake(sema_lora_chip, 100) != pdTRUE) {
     esp_task_wdt_reset();
+    if (n++ > 3000)
+      ESP.restart();
+  }
 #else
   for (int n = 0; sema_lora_chip; n++) {
     delay(10);
     if (!(n % 100))
       esp_task_wdt_reset();
+    if (n > 30000)
+      ESP.restart();
   }
   sema_lora_chip = true;
 #endif
+
   esp_task_wdt_reset();
+#ifdef T_BEAM_V1_0
+  axp.setPowerOutPut(AXP192_LDO2, AXP202_ON);                           // switch LoRa chip on
+#elif T_BEAM_V1_2
+  axp.setALDO2Voltage(3300);
+  axp.enableALDO2();                                                    // switch LoRa chip on
+#endif
+#if HAS_SX126X
+  radio.standby(); // wake up if was set to sleep()
+#endif
 
   randomSeed(millis());
 
@@ -1194,39 +1344,47 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, uint8_t fla
       // send without delay (on turn), we may wait one round for checking ifg channel is free
       break;
     }
-    if (rf95.SignalDetected()) {
-      continue;
-    }
+    #ifdef HAS_SX127X
+      if (rf95.SignalDetected()) {
+        continue;
+      }
+    #endif
     delay(100);
-    if (!rf95.SignalDetected() && random(256) < 64) {
-      break;
-    }
+    #ifdef HAS_SX127X
+      if (!rf95.SignalDetected() && random(256) < 64) break;
+    #else
+      if (random(256) < 64) break;
+    #endif
   }
-
   esp_task_wdt_reset();
-#ifdef T_BEAM_V1_0
-  axp.setPowerOutPut(AXP192_LDO2, AXP202_ON);                           // switch LoRa chip on
-#elif T_BEAM_V1_2
-  axp.setALDO2Voltage(3300);
-  axp.enableALDO2();                                                    // switch LoRa chip on
-#endif
-
-  //byte array
-  byte  lora_TXBUFF[BG_RF95_MAX_MESSAGE_LEN];      //buffer for packet to send
-  int messageSize = min(message.length(), sizeof(lora_TXBUFF) - 1);
-  message.toCharArray((char*)lora_TXBUFF, messageSize + 1, 0);
-  lora_set_speed(lora_SPEED);
-  rf95.setFrequency(lora_FREQ);
-  rf95.setTxPower(lora_LTXPower);
-  rf95.setPreambleLength(lora_FREQ == lora_freq ? preambleLen : preambleLen_default);
 
   #ifdef ENABLE_LED_SIGNALING
-    digitalWrite(TXLED, LOW);
+    digitalWrite(TXLED, TXLED_HIGH);
+  #endif
+
+  esp_task_wdt_reset();
+  lora_set_speed(lora_SPEED);
+  #ifdef HAS_SX127X
+    //byte array
+    byte  lora_TXBUFF[LORA_MAX_MESSAGE_LEN];      //buffer for packet to send
+    int messageSize = min(message.length(), sizeof(lora_TXBUFF) - 1);
+    message.toCharArray((char*)lora_TXBUFF, messageSize + 1, 0);
+
+    rf95.setFrequency(lora_FREQ);
+    rf95.setTxPower(lora_LTXPower);
+    rf95.setPreambleLength(lora_FREQ == lora_freq ? preambleLen : preambleLen_default);
+    rf95.sendAPRS(lora_TXBUFF, messageSize);
+    delay(100);
+    rf95.waitPacketSent();
+  #elif HAS_SX126X
+    radio.setFrequency(lora_FREQ);
+    radio.setOutputPower(lora_LTXPower);
+    radio.setPreambleLength(lora_FREQ == lora_freq ? preambleLen : preambleLen_default);
+    radio.setCurrentLimit(140);
+    radio.transmit("\x3c\xff\x01" + message);
   #endif
   esp_task_wdt_reset();
-  rf95.sendAPRS(lora_TXBUFF, messageSize);
-  rf95.waitPacketSent();
-  esp_task_wdt_reset();
+
 
   if (lora_SPEED != lora_speed_rx_curr || lora_FREQ != lora_freq_rx_curr) {
     // cross-digipeating may have altered our LoRa Speed and RX-frequency. Revert frequency change needed for this transmission.
@@ -1234,20 +1392,34 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, uint8_t fla
       lora_set_speed(lora_speed_rx_curr);
     }
     if (lora_FREQ != lora_freq_rx_curr) {
-      rf95.setFrequency(lora_freq_rx_curr);
+      #ifdef HAS_SX127X
+        // flush cache. just to be sure, so that no cross-digi-qrg packet comes in the input-buffer of the main qrg.
+        // With no buffer / length called, recvAPRS directly calls clearRxBuf()
+        rf95.recvAPRS(0, 0);
+        rf95.setFrequency(lora_freq_rx_curr);
+      #elif HAS_SX126X
+        // if packet is in queue, throw away
+        if (flag_lora_packet_available) {
+          String tmp_buf;
+          radio.readData(tmp_buf);
+        }
+        radio.setFrequency(lora_freq_rx_curr);
+      #endif
     }
-    // flush cache. just to be sure, so that no cross-digi-qrg packet comes in the input-buffer of the main qrg.
-    // With no buffer / length called, recvAPRS directly calls clearRxBuf()
-    rf95.recvAPRS(0, 0);
   }
+  flag_lora_packet_available = false;
   // setting rx TO, default to allow rx of long preamble packets
-  rf95.setPreambleLength(rxTimeoutSymbols);
-
-  #ifdef ENABLE_LED_SIGNALING
-    digitalWrite(TXLED, HIGH);
+  #ifdef HAS_SX127X
+    rf95.setPreambleLength(rxTimeoutSymbols);
+  #elif HAS_SX126X
+    radio.setPreambleLength(rxTimeoutSymbols);
+    radio.setRxBoostedGainMode(true);
   #endif
 
-#if defined (T_BEAM_V1_0) || defined(T_BEAM_V1_2)
+  #ifdef ENABLE_LED_SIGNALING
+    digitalWrite(TXLED, TXLED_LOW);
+  #endif
+
   // if lora_rx is disabled AND lora_digipeating_mode == 0 AND no SerialBT.hasClient is connected,
   // we can savely go to sleep
   if ( !lora_rx_enabled && lora_digipeating_mode == 0
@@ -1255,14 +1427,24 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, uint8_t fla
             && (!enable_bluetooth || serial_bt_client_is_connected)
           #endif
       ) {
+    #ifdef HAS_SX126X
+      radio.sleep();
+    #endif
     #ifdef T_BEAM_V1_0
       axp.setPowerOutPut(AXP192_LDO2, AXP202_OFF);                           // switch LoRa chip off
-    #else
+    #elif T_BEAM_V1_2
       axp.disableALDO2();                                                    // switch LoRa chip off
     #endif
+  } else {
+    #ifdef HAS_SX126X
+      radio.standby();
+      radio.startReceive();
+    #endif
   }
-#endif
 
+  // Mitigate locking problem when we called too early for digipeating to the second qrg
+  esp_task_wdt_reset();
+  delay(1000);
   esp_task_wdt_reset();
   // release lock
 #ifdef IF_SEMAS_WOULD_WORK
@@ -1270,7 +1452,6 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, uint8_t fla
 #else
   sema_lora_chip = false;
 #endif
-
 }
 
 
@@ -1281,8 +1462,17 @@ void batt_read(){
 #elif T_BEAM_V0_7
   InpVolts = (((float)analogRead(35) / 8192.0) * 2.0 * 3.3 * (1100.0 / 1000.0))+0.41;    // fixed thanks to Luca IU2FRL
   //InpVolts = adc1_get_raw(ADC1_CHANNEL_7)/1000;
+#elif HELTEC_WIRELESS_TRACKER
+  digitalWrite(ADC_CTRL, HIGH);
+  //InpVolts = analogRead(BATTERY_PIN)*4.9/1000.0; // Values from the data sheet.
+  // ..but the result seems to high. This approach is from richonguzman
+  int adc_value = analogRead(BATTERY_PIN);
+  digitalWrite(ADC_CTRL, LOW);
+  double voltage = (adc_value * 3.3 ) / 4095.0;
+  double inputDivider = (1.0 / (390.0 + 100.0)) * 100.0;  // The voltage divider is a 390k + 100k resistor in series, 100k on the low side.
+  InpVolts = (voltage / inputDivider) + 0.285; // Yes, this offset is excessive, but the ADC on the ESP32s3 is quite inaccurate and noisy. Adjust to own measurements.
 #else
-  InpVolts = analogRead(35)*7.221/4096;
+  InpVolts = analogRead(BATTERY_PIN)*7.221/4096;
 #endif
 }
 
@@ -1353,36 +1543,37 @@ void writedisplaytext(String HeaderTxt, String Line1, String Line2, String Line3
   }
 #endif
   // some assurances
-  if (Line1.length() > 21) Line1.remove(21, Line1.length()-21);
+  // Line1 has a larger font
+  if (Line1.length() > OLED_LINE_LEN_MAX) Line1.remove(OLED_LINE_LEN_MAX, Line1.length()-OLED_LINE_LEN_MAX);
   // line 2 can grow in some cases. Then the other lines are empty. TODO: algorithmic approach
-  if (Line2.length() > 21 && Line3.length() == 0 && Line4.length() == 0 && Line5.length() == 0) {
-      if (Line2.length() > 21*4)
-        Line2.remove(21*4, Line2.length()-21*4);
+  if (Line2.length() > OLED_LINE_LEN_MAX && Line3.length() == 0 && Line4.length() == 0 && Line5.length() == 0) {
+      if (Line2.length() > OLED_LINE_LEN_MAX*4)
+        Line2.remove(OLED_LINE_LEN_MAX*4, Line2.length()-OLED_LINE_LEN_MAX*4);
   } else {
-    if (Line2.length() > 21) Line2.remove(21, Line2.length()-21);
-    if (Line3.length() > 21) Line3.remove(21, Line3.length()-21);
-    if (Line4.length() > 21) Line4.remove(21, Line4.length()-21);
-    if (Line5.length() > 21) Line5.remove(21, Line5.length()-21);
+    if (Line2.length() > OLED_LINE_LEN_MAX) Line2.remove(OLED_LINE_LEN_MAX, Line2.length()-OLED_LINE_LEN_MAX);
+    if (Line3.length() > OLED_LINE_LEN_MAX) Line3.remove(OLED_LINE_LEN_MAX, Line3.length()-OLED_LINE_LEN_MAX);
+    if (Line4.length() > OLED_LINE_LEN_MAX) Line4.remove(OLED_LINE_LEN_MAX, Line4.length()-OLED_LINE_LEN_MAX);
+    if (Line5.length() > OLED_LINE_LEN_MAX) Line5.remove(OLED_LINE_LEN_MAX, Line5.length()-OLED_LINE_LEN_MAX);
   }
 
 #ifdef DEVELOPMENT_DEBUG
   if (debug_verbose > 1) {
-    if (HeaderTxt.length() > 21) {
+    if (HeaderTxt.length() > OLED_LINE_LEN_MAX) {
       Serial.printf("HeaderTxt: %s (%d)\r\n", HeaderTxt.c_str(), HeaderTxt.length());
     }
-    if (Line1.length() > 21) {
+    if (Line1.length() > OLED_LINE_LEN_MAX) {
       Serial.printf("Line1: %s (%d)\r\n", Line1.c_str(), Line1.length());
     }
-    if (Line2.length() > 21) {
+    if (Line2.length() > OLED_LINE_LEN_MAX) {
       Serial.printf("Line2: %s (%d)\r\n", Line2.c_str(), Line2.length());
     }
-    if (Line3.length() > 21) {
+    if (Line3.length() > OLED_LINE_LEN_MAX) {
       Serial.printf("Line3: %s (%d)\r\n", Line3.c_str(), Line3.length());
     }
-    if (Line4.length() > 21) {
+    if (Line4.length() > OLED_LINE_LEN_MAX) {
       Serial.printf("Line4: %s (%d)\r\n", Line4.c_str(), Line4.length());
     }
-    if (Line5.length() > 21) {
+    if (Line5.length() > OLED_LINE_LEN_MAX) {
       Serial.printf("Line5: %s (%d)\r\n", Line5.c_str(), Line5.length());
     }
   }
@@ -1472,37 +1663,39 @@ void timer_once_a_second() {
     if (!freeze_display)
       fillDisplayLine1(0); //update time & uptime
 
+#ifdef notdef  // Unfortunately destroys line3-5 of currently displayed ((RX)) packet
     // some assurances
-    if (OledLine1.length() > 21) OledLine1.remove(21, OledLine1.length()-21);
+    // Line1 has a larger font
+    if (OledLine1.length() > OLED_LINE_LEN_MAX) OledLine1.remove(OLED_LINE_LEN_MAX, OledLine1.length()-OLED_LINE_LEN_MAX);
     // line 2 can grow in some cases. Then the other lines are empty. TODO: algorithmic approach
-    if (OledLine2.length() > 21 && OledLine3.length() == 0 && OledLine4.length() == 0 && OledLine5.length() == 0) {
-      if (OledLine2.length() > 21*4)
-        OledLine2.remove(21*4, OledLine2.length()-21*4);
+    if (OledLine2.length() > OLED_LINE_LEN_MAX && OledLine3.length() == 0 && OledLine4.length() == 0 && OledLine5.length() == 0) {
+      if (OledLine2.length() > OLED_LINE_LEN_MAX*4)
+        OledLine2.remove(OLED_LINE_LEN_MAX*4, OledLine2.length()-OLED_LINE_LEN_MAX*4);
     } else {
-      if (OledLine2.length() > 21) OledLine2.remove(21, OledLine2.length()-21);
-      if (OledLine3.length() > 21) OledLine3.remove(21, OledLine3.length()-21);
-      if (OledLine4.length() > 21) OledLine4.remove(21, OledLine4.length()-21);
-      if (OledLine5.length() > 21) OledLine5.remove(21, OledLine5.length()-21);
+      if (OledLine2.length() > OLED_LINE_LEN_MAX) OledLine2.remove(OLED_LINE_LEN_MAX, OledLine2.length()-OLED_LINE_LEN_MAX);
+      if (OledLine3.length() > OLED_LINE_LEN_MAX) OledLine3.remove(OLED_LINE_LEN_MAX, OledLine3.length()-OLED_LINE_LEN_MAX);
+      if (OledLine4.length() > OLED_LINE_LEN_MAX) OledLine4.remove(OLED_LINE_LEN_MAX, OledLine4.length()-OLED_LINE_LEN_MAX);
+      if (OledLine5.length() > OLED_LINE_LEN_MAX) OledLine5.remove(OLED_LINE_LEN_MAX, OledLine5.length()-OLED_LINE_LEN_MAX);
     }
 
 #ifdef DEVELOPMENT_DEBUG
     if (debug_verbose > 1) {
-      if (OledHdr.length() > 21) {
+      if (OledHdr.length() > OLED_LINE_LEN_MAX) {
         Serial.printf("OledHdr [timer_once_a_second]: %s (%d)\r\n", OledHdr.c_str(), OledHdr.length());
       }
-      if (OledLine1.length() > 21) {
+      if (OledLine1.length() > OLED_LINE_LEN_MAX) {
         Serial.printf("OledLine1 [timer_once_a_second]: %s (%d)\r\n", OledLine1.c_str(), OledLine1.length());
       }
-      if (OledLine2.length() > 21) {
+      if (OledLine2.length() > OLED_LINE_LEN_MAX) {
         Serial.printf("OledLine2 [timer_once_a_second]: %s (%d)\r\n", OledLine2.c_str(), OledLine2.length());
       }
-      if (OledLine3.length() > 21) {
+      if (OledLine3.length() > OLED_LINE_LEN_MAX) {
         Serial.printf("OledLine3 [timer_once_a_second]: %s (%d)\r\n", OledLine3.c_str(), OledLine3.length());
       }
-      if (OledLine4.length() > 21) {
+      if (OledLine4.length() > OLED_LINE_LEN_MAX) {
         Serial.printf("OledLine4 [timer_once_a_second]: %s (%d)\r\n", OledLine4.c_str(), OledLine4.length());
       }
-      if (OledLine5.length() > 21) {
+      if (OledLine5.length() > OLED_LINE_LEN_MAX) {
         Serial.printf("OledLine5 [timer_once_a_second]: %s (%d)\r\n", OledLine5.c_str(), OledLine5.length());
       }
     }
@@ -1527,27 +1720,103 @@ void timer_once_a_second() {
     display.println(OledLine5);
     display.display();
 #endif
+#endif
   }
 }
 
-void write2display() {
-    display.clearDisplay();
+String display_cache_lines[6];
+
+int write2display_cached(int line_number) {
+  String OledLineCurr = "";
+  int lines_modified = 0;
+  if (line_number == 0)
+    OledLineCurr = OledHdr;
+  else if (line_number == 1)
+    OledLineCurr = OledLine1;
+  else if (line_number == 2)
+    OledLineCurr = OledLine2;
+  else if (line_number == 3)
+    OledLineCurr = OledLine3;
+  else if (line_number == 4)
+    OledLineCurr = OledLine4;
+  else if (line_number == 5)
+    OledLineCurr = OledLine5;
+
+  #ifdef HAS_TFT
+    if (line_number > 5)
+      return lines_modified;
+
+    // Nothing has changed? Good ;)
+    if (display_cache_lines[line_number] == OledLineCurr)
+      return lines_modified;
+
+    String S = OledLineCurr;
+    // make a local copy before any modification
+    display_cache_lines[line_number] = String(OledLineCurr);
+    // Modify chaced lines copy instead of the original OledLineX
     display.setTextColor(WHITE);
-    display.setTextSize(2);
-    display.setCursor(0,0);
-    display.println(OledHdr);
-    display.setTextSize(1);
-    display.setCursor(0,16);
-    display.println(OledLine1);
-    display.setCursor(0,26);
-    display.println(OledLine2);
-    display.setCursor(0,36);
-    display.println(OledLine3);
-    display.setCursor(0,46);
-    display.println(OledLine4);
-    display.setCursor(0,56);
-    display.println(OledLine5);
-    display.display();
+
+    do {
+      display.setTextSize(line_number == 0 ? 2 : 1);
+
+      // TFT cannot handle long lines poperly. We have to cut them
+      display.setCursor(0, line_number == 0 ? 0 : 6+10*line_number);
+      String Snext = String(S);
+      Snext.remove(0, (line_number ? OLED_LINE_LEN_MAX : OLED_LINE_LEN_MAX/2+1));
+      if (S.length() > (line_number ? OLED_LINE_LEN_MAX : OLED_LINE_LEN_MAX/2+1))  {
+        S.remove(OLED_LINE_LEN_MAX, S.length()-OLED_LINE_LEN_MAX);
+      } else {
+        // fill rest of line with blanks, else TFT will keep them :(
+        for (int i = S.length(); i < (line_number ? OLED_LINE_LEN_MAX : OLED_LINE_LEN_MAX/2+1); i++)
+          S +=  " ";
+      }
+      display.println(S);
+//Serial.println("display >" + S + "<");
+      S = Snext;
+      line_number++;
+      lines_modified++;
+      if (!Snext.isEmpty() && line_number < 6) {
+        // Mark next cache entry with " ", so the split lines may be updated if needed
+        display_cache_lines[line_number] = " ";
+      }
+    } while (!S.isEmpty() && line_number < 6);
+
+  #else
+    // OLED allows no caching because we alwayas need to call display.display()
+    display.setTextColor(WHITE);
+    display.setTextSize(line_number == 0 ? 2 : 1);
+    display.setCursor(0, line_number == 0 ? 0 : 6+10*line_number);
+    display.println(OledLineCurr);
+    lines_modified++;
+  #endif
+
+  return lines_modified;
+}
+
+void write2display() {
+    // Only update changed lines. Avoids flickering.
+    // do a full refresh i.e. if display was powered off
+    boolean line_changed = false;
+    #ifdef HAS_TFT
+      if (display_do_full_refresh) {
+        for (int i = 0; i < 6; i++)
+          display_cache_lines[i] = "";
+        line_changed = true;
+        display_do_full_refresh = false;
+      }
+    #else // with oled, always call clearDisplay() -> no caching possible
+      display.clearDisplay();
+    #endif
+    for (int i = 0; i < 6; i++) {
+      int n;
+      if ((n = write2display_cached(i))) {
+        line_changed = true;
+        if (n > 1)
+          i = i+n-1;
+      }
+    }
+    if (line_changed)
+      display.display();
 }
 
 
@@ -1660,7 +1929,7 @@ String getSatAndBatInfo() {
   line5 = line5 + " P:" + String(InpVolts, 2) + "V";
 #endif
 #if defined(ENABLE_BLUETOOTH) && defined(KISS_PROTOCOL)
-  if (line5.length() < 21-3 && serial_bt_client_is_connected) {
+  if (line5.length() < OLED_LINE_LEN_MAX-3 && serial_bt_client_is_connected) {
     // ^ "S:0/99 B:3.52V/-190mA BT" would be too long for one oled line
     line5 += " BT";
   }
@@ -1677,8 +1946,13 @@ void fillDisplayLine1(int caller) {
   uint32_t t = millis() / 1000;
   char s_uptime[6];  // room for 49d17 + \0 -> 6 bytes
 
+  if (*gps_time_s)
+    OledLine1 = String(gps_time_s) + " ";
+  else
+    OledLine1 = "";
+
   // > 49d 17h 2min? millis-overflow -> mark it
-  if (t < old_time)
+  if (old_time != ~0 && t < old_time)
     old_time = ~0;
 
   if (old_time == ~0) {
@@ -1693,17 +1967,18 @@ void fillDisplayLine1(int caller) {
       sprintf(s_uptime, "%2.2d:%2.2d", h, m);
     old_time = t;
   }
-  OledLine1 = String("Up:") + String(s_uptime);
+
+  String SMessageInfo = "";
   if (LastRXMessageInfo == 3) {
     // winlink and personal message -> "M"
-    OledLine1 += " M";
+    SMessageInfo = "  M";
   } else if (LastRXMessageInfo == 1) {
     // personal message -> "m"
-    OledLine1 += " m";
+    SMessageInfo = "  m";
   } else if (winlink_notified != 0L) {
     if (winlink_notified + 60*60*24*1000L > millis()) {
       // show winlink mail info for max 24h
-      OledLine1 += " w";
+      SMessageInfo = "  w";
     } else {
       // reset
       winlink_notified = 0L;
@@ -1712,8 +1987,7 @@ void fillDisplayLine1(int caller) {
         LastRXMessageInfo &= ~2;
     }
   }
-  if (*gps_time_s)
-    OledLine1 = String(gps_time_s) + String(" ") + OledLine1;
+  OledLine1 = OledLine1 + String("Up:") + String(s_uptime) + SMessageInfo;
 }
 
 void fillDisplayLine2() {
@@ -2026,6 +2300,10 @@ void set_callsign() {
     #endif
   }
   Tcall = String(s);
+  if (Tcall == "N0CALL") {
+    lora_tx_enabled = false;
+    txPower = txPower_cross_digi = 0;
+  }
 }
 
 // telemetry frames
@@ -2341,7 +2619,7 @@ void sendTelemetryFrame() {
 
   // Flash the light when telemetry is being sent
   #ifdef ENABLE_LED_SIGNALING
-    digitalWrite(TXLED, LOW);
+    digitalWrite(TXLED, TXLED_HIGH);
   #endif
 
   // Show when telemetry is being sent
@@ -2373,7 +2651,7 @@ void sendTelemetryFrame() {
 
   // Flash the light when telemetry is being sent
   #ifdef ENABLE_LED_SIGNALING
-    digitalWrite(TXLED, HIGH);
+    digitalWrite(TXLED, TXLED_LOW);
   #endif
 }
 
@@ -3712,66 +3990,108 @@ void load_preferences_from_flash()
 void setup_phase2_soft_reconfiguration(boolean runtime_reconfiguration) {
 
   if (runtime_reconfiguration) {
-    digitalWrite(TXLED, LOW);
+    digitalWrite(TXLED, TXLED_LOW);
     Serial.printf("Init after reloading preferences for Callsign: %s\r\n", Tcall.c_str());
     set_callsign();
     Serial.printf("APRS Callsign: %s\r\n", Tcall.c_str());
   }
 
-  #if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
-    // switch LoRa chip on or off
-    #ifdef T_BEAM_V1_0
-      axp.setPowerOutPut(AXP192_LDO2, (lora_rx_enabled || lora_digipeating_mode > 0) ? AXP202_ON : AXP202_OFF);
-    #elif T_BEAM_V1_2
-      if (lora_rx_enabled || lora_digipeating_mode > 0) {
-        axp.setALDO2Voltage(3300);
-        axp.enableALDO2();                            // switch LoRa chip on
-      } else {
-        axp.disableALDO2();                           // switch LoRa chip off
-      }
-    #endif
-
-    if (gps_state) {
-      if (xHandle_GPS) {
-        if (!gps_task_enabled) {
-          #ifdef T_BEAM_V1_0
-            axp.setPowerOutPut(AXP192_LDO3, AXP202_ON);                           // switch on GPS
-          #elif T_BEAM_V1_2
-            axp.setButtonBatteryChargeVoltage(3300);			      // enable charge of the gps battery
-            axp.enableButtonBatteryCharge();
-            axp.setALDO3Voltage(3300);
-            axp.enableALDO3();                                                    // switch on GPS
-          #endif
-          gps_task_enabled = true;
-          vTaskResume(xHandle_GPS);
-        }
-        t_gps_powersave_operation_until_fix = 0L;
-      }
-    } else {
-      gps_task_enabled = false;
-      t_gps_powersave_operation_until_fix = millis();
-      t_gps_fix_lost = millis();
-      gps_isValid = false;
-      #ifdef T_BEAM_V1_0
-        axp.setPowerOutPut(AXP192_LDO3, AXP202_OFF);                          // switch off GPS
-      #elif T_BEAM_V1_2
-        axp.disableALDO3();                                                   // switch off GPS
-        axp.disableButtonBatteryCharge();				      // disable charge of the gps battery
+  // switch LoRa chip on or off
+  #ifdef T_BEAM_V1_0
+    axp.setPowerOutPut(AXP192_LDO2, (lora_rx_enabled || lora_digipeating_mode > 0) ? AXP202_ON : AXP202_OFF);
+  #elif T_BEAM_V1_2
+    if (lora_rx_enabled || lora_digipeating_mode > 0) {
+      axp.setALDO2Voltage(3300);
+      axp.enableALDO2();                            // switch LoRa chip on
+      #if HAS_SX126X
+        radio.standby();
+        radio.startReceive();
       #endif
+    } else {
+      #if HAS_SX126X
+        radio.sleep();
+      #endif
+      axp.disableALDO2();                           // switch LoRa chip off
     }
-    Serial.printf("GPS powered %s\r\n", gps_state ? "on" : "off");
-
-    //#ifdef T_BEAM_V1_0
-    //  axp.setPowerOutPut(AXP192_EXTEN, AXP202_ON);                          // switch this on if you need it
-    //#elif T_BEAM_V1_2
-    // axp.enableXXX();                                                       // switch this on if you need it
-    //#endif
+  #elif HAS_SX126X
+    if (lora_rx_enabled || lora_digipeating_mode > 0) {
+      radio.standby();
+      radio.startReceive();
+    } else {
+      radio.sleep();
+    }
   #endif
+
+  if (gps_state) {
+    if (!gps_task_enabled) {
+      #ifdef T_BEAM_V1_0
+        axp.setPowerOutPut(AXP192_LDO3, AXP202_ON);                           // switch on GPS
+      #elif T_BEAM_V1_2
+        axp.setButtonBatteryChargeVoltage(3300);			      // enable charge of the gps battery
+        axp.enableButtonBatteryCharge();
+        axp.setALDO3Voltage(3300);
+        axp.enableALDO3();                                                    // switch on GPS
+      #elif HELTEC_WIRELESS_TRACKER
+        #ifdef VEXT_CTRL
+          digitalWrite(VEXT_CTRL, HIGH);
+          // Display was also turned off. Reinitialize..
+          #ifdef HAS_TFT
+            tft.init();
+            tft.begin();
+            tft.setRotation(1);
+            tft.setTextFont(0);
+            tft.fillScreen(TFT_BLACK);
+
+            tft.setTextColor(TFT_WHITE,TFT_BLACK);
+            tft.setTextSize(bigSizeFont);
+            tft.setCursor(0, 0);
+            display_do_full_refresh = true;
+            fillDisplayLine1(5);
+            fillDisplayLine2();
+            fillDisplayLines3to5(1);
+          #endif
+        #endif
+      #endif
+      gps_task_enabled = true;
+    }
+    t_gps_powersave_operation_until_fix = 0L;
+    if (!xHandle_GPS) {
+      // new process: GPS
+      writedisplaytext(Tcall,"","Init:","Waiting for GPS","","");
+      xTaskCreate(taskGPS, "taskGPS", 5000, nullptr, 1, &xHandle_GPS);
+      writedisplaytext(Tcall,"","Init:","GPS Task Created!","","");
+    } else {
+      vTaskResume(xHandle_GPS);
+    }
+  } else {
+    gps_task_enabled = false;
+    t_gps_powersave_operation_until_fix = millis();
+    t_gps_fix_lost = millis();
+    gps_isValid = false;
+    #ifdef T_BEAM_V1_0
+      axp.setPowerOutPut(AXP192_LDO3, AXP202_OFF);                          // switch off GPS
+    #elif T_BEAM_V1_2
+      axp.disableALDO3();                                                   // switch off GPS
+      axp.disableButtonBatteryCharge();				            // disable charge of the gps battery
+    #elif HELTEC_WIRELESS_TRACKER
+      #ifdef VEXT_CTRL
+        digitalWrite(VEXT_CTRL, LOW);
+      #endif
+    #endif
+  }
+  Serial.printf("GPS powered %s\r\n", gps_state ? "on" : "off");
   gps_state_before_autochange = false;
 
+  //#ifdef T_BEAM_V1_0
+  //  axp.setPowerOutPut(AXP192_EXTEN, AXP202_ON);                          // switch this on if you need it
+  //#elif T_BEAM_V1_2
+  // axp.enableXXX();                                                       // switch this on if you need it
+  //#endif
+
   // can reduce cpu power consumtion up to 20 %
+
   if (adjust_cpuFreq_to > 0) {
-    Serial.print("CPU Freq ad"); Serial.flush();
+    Serial.print("CPU Freq ad");
     setCpuFrequencyMhz(adjust_cpuFreq_to);
     // ..survived
     Serial.printf("justed to: %d MHz\r\n", adjust_cpuFreq_to);
@@ -3784,14 +4104,45 @@ void setup_phase2_soft_reconfiguration(boolean runtime_reconfiguration) {
   Serial.printf("LoRa Speed:\t%lu\r\n", lora_speed_rx_curr);
 
   lora_freq_rx_curr = (rx_on_frequencies != 2 || lora_digipeating_mode > 1) ? lora_freq : lora_freq_cross_digi;
-  rf95.setFrequency(lora_freq_rx_curr);
   Serial.printf("LoRa FREQ:\t%f\r\n", lora_freq_rx_curr);
 
-  // we tx on main and/or secondary frequency. For tx, loraSend is called (and always has desired txpower as argument)
-  rf95.setTxPower((lora_digipeating_mode < 2 || lora_cross_digipeating_mode < 1) ? txPower : txPower_cross_digi);
+  if (Tcall == "N0CALL" && lora_tx_enabled) {
+    Serial.println("Disabling lora TX for SWLs");
+    lora_tx_enabled = false;
+    txPower = txPower_cross_digi = 0;
+  }
 
-  // setting rx TO, default to allow rx of long preamble packets
-  rf95.setPreambleLength(rxTimeoutSymbols);
+  #ifdef HAS_SX127X
+    rf95.setFrequency(lora_freq_rx_curr);
+
+    // we tx on main and/or secondary frequency. For tx, loraSend is called (and always has desired txpower as argument)
+    if (lora_tx_enabled)
+      rf95.setTxPower((lora_digipeating_mode < 2 || lora_cross_digipeating_mode < 1) ? txPower : txPower_cross_digi);
+    else
+      rf95.setTxPower(0);
+
+    // setting rx TO, default to allow rx of long preamble packets
+    rf95.setPreambleLength(rxTimeoutSymbols);
+  #endif
+  #ifdef HAS_SX126X
+    radio.setFrequency(lora_freq_rx_curr);
+
+    // we tx on main and/or secondary frequency. For tx, loraSend is called (and always has desired txpower as argument)
+    if (lora_tx_enabled)
+      radio.setOutputPower((lora_digipeating_mode < 2 || lora_cross_digipeating_mode < 1) ? txPower : txPower_cross_digi);
+    else
+      radio.setOutputPower(0);
+
+    // setting rx TO, default to allow rx of long preamble packets
+    radio.setPreambleLength(rxTimeoutSymbols);
+
+    radio.setRxBoostedGainMode(true);
+    radio.setCurrentLimit(140);
+
+    radio.setDio1Action(signal_new_packet_received);
+    radio.startReceive();
+  #endif
+  flag_lora_packet_available = false;
 
   Serial.printf("LoRa PWR: %d, LoRa PWR XDigi: %d, RX Enable: %d, TX Enable: %d\r\n", txPower, txPower_cross_digi, lora_rx_enabled, lora_tx_enabled);
 
@@ -3813,7 +4164,6 @@ void setup_phase2_soft_reconfiguration(boolean runtime_reconfiguration) {
   if (!fixed_beacon_enabled && gps_state && fix_beacon_interval < sb_max_interval)
     fix_beacon_interval = (sb_max_interval > 120000 ? sb_max_interval : 120000);
 
-
   if (runtime_reconfiguration) {
     setup_oled_timer_values();
     // fix exception: reference to free'd Tcall in OledHdr -> New copy of current Tcall
@@ -3826,9 +4176,8 @@ void setup_phase2_soft_reconfiguration(boolean runtime_reconfiguration) {
     writedisplaytext(OledHdr,OledLine1,OledLine2,OledLine3,OledLine4,OledLine5);
   } // else: in setup() during boot, we have several unpredictable delays. That's why it's not called here
 
-
   if (runtime_reconfiguration)
-    digitalWrite(TXLED, HIGH);
+    digitalWrite(TXLED, TXLED_HIGH);
 }
 
 void setup_compile_flags_info()
@@ -3837,6 +4186,8 @@ void setup_compile_flags_info()
   strcpy(compile_flags, "Heltec-WiFi-v1 / HELTEC_V1");
 #elif   HELTEC_V2
   strcpy(compile_flags, "Heltec-WiFi-v2 / HELTEC_V2");
+#elif   HELTEC_WIRELESS_TRACKER
+  strcpy(compile_flags, "heltec-wireless-tracker / HELTEC_WIRELESS_TRACKER_V3");
 #elif   LORA32_1
   strcpy(compile_flags, "ttgo-lora32-v1 / LORA32_1");
 #elif   LORA32_2
@@ -3874,12 +4225,16 @@ void setup_compile_flags_info()
 #endif
 }
 
+
 // + SETUP --------------------------------------------------------------+//
 void setup()
 {
 
   // for diagnostics
   uint32_t t_setup_entered = millis();
+
+  // https://iotespresso.com/how-to-disable-brownout-detector-in-esp32-in-arduino/
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); //disable brownout detector
 
   // initialize ESP32 Process WDT, 120s T/O
   esp_task_wdt_init(120, true);
@@ -3889,23 +4244,47 @@ void setup()
   buildnr = VERS_XXSHORT_BN;
   setup_compile_flags_info();
 
-  SPI.begin(SPI_sck,SPI_miso,SPI_mosi,SPI_ss);    //DO2JMG Heltec Patch
   Serial.begin(115200);
+  delay(2000);  // 2s delay to be safe that serial.print works
+  Serial.println("System Start-Up");
 
-  // Enable OLED as soon as possible, for better disgnostics
+  #ifdef HAS_SX127X
+    SPI.begin(SPI_sck,SPI_miso,SPI_mosi,SPI_ss);    //DO2JMG Heltec Patch
+  #elif HAS_SX126X
+    SPI.begin(SPI_sck, SPI_miso, SPI_mosi);
+    radio.begin(lora_freq);
+    radio.setOutputPower(0);
+  #endif
+
+  // Start I2C. Useful if we have an OLED. But may be needed anyway.
   Wire.begin(I2C_SDA, I2C_SCL);
-  if (!display.begin(SSD1306_SWITCHCAPVCC, SSD1306_ADDRESS)) {
-      for(;;);                                                             // Don't proceed, loop forever
+
+#ifdef HAS_TFT
+  tft.init();
+  tft.begin();
+  tft.setRotation(1);
+  tft.setTextFont(0);
+  tft.fillScreen(TFT_BLACK);
+
+  tft.setTextColor(TFT_WHITE,TFT_BLACK);
+  tft.setTextSize(bigSizeFont);
+  tft.setCursor(0, 0);
+  display_do_full_refresh = true;
+#else
+  // Enable OLED as soon as possible, for better disgnostics
+   if (!display.begin(SSD1306_SWITCHCAPVCC, SSD1306_ADDRESS)) {
+     //for(;;);                                                             // Don't proceed, loop forever
+     delay(30000);
+     ESP.restart();
   }
+  display_do_full_refresh = true;
+#endif
+
   writedisplaytext("LoRa-APRS","by DL9SAU & DL3EL","Build:" + buildnr,"Hello!","For Factory Reset:","  press middle Button");
   Serial.println("LoRa-APRS by DL9SAU & DL3EL Build:" + buildnr);
   Serial.println("Hardware / compiled with features: ");
   Serial.print("  ");
   Serial.println(compile_flags);
-  Serial.println("Time used since start (-2000ms delay): " + String(millis()-t_setup_entered-2000) + "ms");
-  delay(2000);  // 2s delay to be safe that serial.print works
-  Serial.println("System Start-Up");
-
 
   #ifdef BUZZER
     // framwork-arduinoespressif32 library now warns if frequency is too high:
@@ -3997,10 +4376,15 @@ void setup()
     pinMode(BUTTON, INPUT);
   #elif T_BEAM_V0_7
     pinMode(BUTTON, INPUT);
+  #elif HELTEC_WIRELESS_TRACKER
+    pinMode(BUTTON, INPUT);
+    #ifdef HAS_TFT
+      pinMode(TFT_BACKLIGHT, INPUT);
+    #endif
   #else
     pinMode(BUTTON, INPUT_PULLUP);
   #endif
-  digitalWrite(TXLED, LOW);                                               // turn blue LED off
+  digitalWrite(TXLED, TXLED_HIGH);                                               // turn blue LED on
 
   #ifdef T_BEAM_V1_0
     if (!axp.begin(Wire, AXP192_SLAVE_ADDRESS)) {
@@ -4042,7 +4426,34 @@ void setup()
     axp.setPrechargeCurr(XPOWERS_AXP2101_PRECHARGE_200MA);
     // Set the charging termination current
     axp.setChargerTerminationCurr(XPOWERS_AXP2101_CHG_ITERM_25MA);
+  #elif T_BEAM_V0_7
+    //adcAttachPin(35);
+    //adcStart(35);
+    //analogReadResolution(10);
+    //analogSetAttenuation(ADC_6db);
+    pinMode(BATTERY_PIN, INPUT);
+    //adc1_config_width(ADC_WIDTH_BIT_12);
+    //adc1_config_channel_atten(ADC1_CHANNEL_7,ADC_ATTEN_DB_11);
+    adc1_config_width(ADC_WIDTH_BIT_12);
+    adc1_config_channel_atten(ADC1_CHANNEL_7,ADC_ATTEN_DB_6);
+  #elif HELTEC_WIRELESS_TRACKER
+    #ifdef BATTERY_PIN
+      pinMode(BATTERY_PIN, INPUT);
+    #endif
+    #ifdef ADC_CTRL
+      pinMode(ADC_CTRL, OUTPUT);
+    #endif
+    #ifdef VEXT_CTRL
+      pinMode(VEXT_CTRL, OUTPUT); // this is for GPS and TFT screen on Wireless_Tracker and only for Oled in Heltec V3
+    #endif
+  #else
+    pinMode(BATTERY_PIN, INPUT);
+    adc1_config_width(ADC_WIDTH_BIT_12);
+    adc1_config_channel_atten(ADC1_CHANNEL_7,ADC_ATTEN_DB_6);
   #endif
+
+  batt_read();
+  writedisplaytext("LoRa-APRS","","Init:","ADC OK!","P: "+String(InpVolts, 2)+"V, BAT: "+String(BattVolts,2)+"V","");
 
   // can reduce cpu power consumtion up to 20 %
   if (adjust_cpuFreq_to > 0)
@@ -4050,7 +4461,6 @@ void setup()
 
   set_callsign();
   writedisplaytext("LoRa-APRS","by DL9SAU & DL3EL","Build:" + buildnr,"Hello de " + Tcall,"For Factory Reset:","  press middle Button");
-  Serial.println("Time used since start (-2000ms delay): " + String(millis()-t_setup_entered-2000) + "ms");
   delay(2000);
 
   #ifdef ENABLE_PREFERENCES
@@ -4071,34 +4481,24 @@ void setup()
     }
   #endif
 
-
-  #ifdef T_BEAM_V0_7
-    //adcAttachPin(35);
-    //adcStart(35);
-    //analogReadResolution(10);
-    //analogSetAttenuation(ADC_6db);
-    pinMode(35, INPUT);
-    //adc1_config_width(ADC_WIDTH_BIT_12);
-    //adc1_config_channel_atten(ADC1_CHANNEL_7,ADC_ATTEN_DB_11);
-  #endif
-  #if !defined(T_BEAM_V1_0) && !defined(T_BEAM_V1_2)
-    adc1_config_width(ADC_WIDTH_BIT_12);
-    adc1_config_channel_atten(ADC1_CHANNEL_7,ADC_ATTEN_DB_6);
-  #endif
-  batt_read();
-  writedisplaytext("LoRa-APRS","","Init:","ADC OK!","P: "+String(InpVolts, 2)+"V, BAT: "+String(BattVolts,2)+"V","");
   delay(500);
 
-
-  if (!rf95.init()) {
-    writedisplaytext("LoRa-APRS","","Init:","RF95 FAILED!",":-(","");
-    for(;;); // Don't proceed, loop forever
-  }
-  writedisplaytext("LoRa-APRS","","Init:","RF95 OK!","","");
+  #ifdef HAS_SX127X
+    if (!rf95.init()) {
+      writedisplaytext("LoRa-APRS","","Init:","RF95 FAILED!",":-(","");
+      Serial.println("Init: RF95 FAILED!");
+      //for(;;); // Don't proceed, loop forever
+      delay(30000);
+      ESP.restart();
+    }
+    writedisplaytext("LoRa-APRS","","Init:","RF95 OK!","","");
+  #elif HAS_SX126X
+    // todo: how to verify?
+    writedisplaytext("LoRa-APRS","","Init:","SX126X OK!","","");
+  #endif
 
   setup_phase2_soft_reconfiguration(0);
   delay(500);
-
 
   // Avoid concurrent access of processes to lora our chip
 #ifdef IF_SEMAS_WOULD_WORK
@@ -4111,19 +4511,10 @@ void setup()
   sema_is_call_blacklisted = false;
 #endif
 
-
-  // new process: GPS
-  if (gps_state) {
-    writedisplaytext(Tcall,"","Init:","Waiting for GPS","","");
-    xTaskCreate(taskGPS, "taskGPS", 5000, nullptr, 1, &xHandle_GPS);
-    writedisplaytext(Tcall,"","Init:","GPS Task Created!","","");
-  }
-
   // new process: TNC
   #ifdef KISS_PROTOCOL
     xTaskCreatePinnedToCore(taskTNC, "taskTNC", 10000, nullptr, 1, nullptr, xPortGetCoreID());
   #endif
-
 
   // We could start process webServer here.
   // But:
@@ -4133,12 +4524,14 @@ void setup()
   // -> We already finished variable stuff above, or do it right before end of setup().
   //    Now we are prepared to start the webserver process (if needed). First, we may start bluetooth.
 
-#if defined(KISS_PROTOCOL) && defined(ENABLE_BLUETOOTH)
+#if defined(KISS_PROTOCOL)
+#if defined(ENABLE_BLUETOOTH)
   // TTGO: webserver cunsumes abt 80mA. User may not start the webserver
   // if bt-client is connected. We'll also wait here for clients.
   // If enable_webserver on LORA32_21 is set to 2 (or aprsis connection is
   // configured in webserver mode 1), user likes the webserver always
   // to be started -> do not start bluetooth.
+
 #if defined(ENABLE_WIFI)
 #if defined(LORA32_21)
   if (enable_bluetooth && enable_webserver < 2 && !aprsis_enabled) {
@@ -4148,13 +4541,13 @@ void setup()
 #else
   if (enable_bluetooth) {
 #endif /* ENABLE_WIFI */
-#ifdef BLUETOOTH_PIN
-    SerialBT.setPin(BLUETOOTH_PIN);
-#endif
+    #if defined(BLUETOOTH_PIN)
+      SerialBT.setPin(BLUETOOTH_PIN);
+    #endif
     SerialBT.begin(String("TTGO LORA APRS ") + Tcall);
     writedisplaytext("LoRa-APRS","","Init:","BT OK!","","");
 
-#if defined(ENABLE_WIFI)
+  #if defined(ENABLE_WIFI)
     if (enable_webserver == 1 && !aprsis_enabled) {
       writedisplaytext("LoRa-APRS","","Init:","Waiting for BT-client","","");
       // wait 60s until BT client connects
@@ -4165,20 +4558,23 @@ void setup()
         delay(100);
       }
       if (!SerialBT.hasClient()) {
-  #if defined(LORA32_21)
-        writedisplaytext("LoRa-APRS","","Init:","Waiting for BT-client","Disabling BT!","");
-        SerialBT.end();
-        serial_bt_client_is_connected = false;
-        enable_bluetooth = false;
-  #endif
+        #if defined(LORA32_21)
+          writedisplaytext("LoRa-APRS","","Init:","Waiting for BT-client","Disabling BT!","");
+          SerialBT.end();
+          serial_bt_client_is_connected = false;
+          enable_bluetooth = false;
+        #endif
       } else {
         writedisplaytext("LoRa-APRS","","Init:","Waiting for BT-clients","BT-client connected","Will NOT start WiFi!");
       }
       delay(1500);
     }
-#endif /* ENABLE_WIFI */
+  #endif /* ENABLE_WIFI */
   }
-#endif /* KISS_PROTOCOL && ENABLE_BLUETOOTH */
+
+#endif // BLUETOOTH not enabled
+  enable_bluetooth = 0;
+#endif // KISS_PROTOCOL not enabled
 
 
 #ifdef ENABLE_WIFI
@@ -4213,16 +4609,17 @@ void setup()
     LH[ii].callsign = "";
   }
 
-
   esp_task_wdt_add(NULL); //add current thread to WDT watch
   esp_task_wdt_reset();
 
   writedisplaytext("LoRa-APRS","","Init:","FINISHED OK!","   =:-)   ","");
+  Serial.println("Time used since start (-2000ms delay): " + String(millis()-t_setup_entered-2000) + "ms");
+
   fillDisplayLine1(2);
   fillDisplayLine2();
   displayInvalidGPS();
 
-  digitalWrite(TXLED, HIGH);
+  digitalWrite(TXLED, TXLED_LOW);
 }
 
 
@@ -4264,14 +4661,20 @@ int is_call_blacklisted(const char *frame_start) {
 
   esp_task_wdt_reset();
   #ifdef IF_SEMAS_WOULD_WORK
-    while (xSemaphoreTake(sema_is_call_blacklisted, 100) != pdTRUE)
+    int n = 0;
+    while (xSemaphoreTake(sema_is_call_blacklisted, 100) != pdTRUE) {
       esp_task_wdt_reset();
+      if (n++ > 3000)
+        ESP.restart();
+    }
   #else
     for (int n = 0; sema_is_call_blacklisted; n++) {
       delay(10);
       if (!(n % 100))
         esp_task_wdt_reset();
-      }
+      if (n > 30000)
+        ESP.restart();
+    }
     sema_is_call_blacklisted = true;
   #endif
 
@@ -4443,7 +4846,7 @@ int bg_rf95rssi_to_rssi(int rf95_lastRssi, int _lastSNR)
   if (_usingHFport)
     _lastRssi -= 157;
   else
-     _lastRssi -= 164;
+    _lastRssi -= 164;
   return _lastRssi;
 }
 
@@ -4481,7 +4884,7 @@ char *encode_snr_rssi_in_path(int snr, int rssi)
 
 char *add_element_to_path(const char *data, const char *element)
 {
-  static char buf[BG_RF95_MAX_MESSAGE_LEN+1];
+  static char buf[LORA_MAX_MESSAGE_LEN+1];
   if (strlen(data) + 1 /* ',' */ + strlen(element) + 1 /* '*' */ > sizeof(buf)-1)
     return 0;
   char *p = strchr(data, '>');
@@ -4530,7 +4933,7 @@ char *add_element_to_path(const char *data, const char *element)
 // append element to path, regardless if it will exceed max digipeaters. It's for snr encoding for aprs-is. We don't use
 // add_element_to_path, because we will append at the last position, and do not change digipeated bit.
 char *append_element_to_path(const char *data, const char *element) {
-  static char buf[BG_RF95_MAX_MESSAGE_LEN+10+1];
+  static char buf[LORA_MAX_MESSAGE_LEN+10+1];
   if (strlen(data) + 1 /* ',' */ + strlen(element) > sizeof(buf)-1)
     return 0;
   char *p = strchr(data, '>');
@@ -4566,7 +4969,7 @@ struct ax25_frame {
 
 struct ax25_frame *tnc_format_to_ax25_frame(const char *s)
 {
-  static char data[BG_RF95_MAX_MESSAGE_LEN+1];
+  static char data[LORA_MAX_MESSAGE_LEN+1];
   static struct ax25_frame frame;
   char *p;
   char *q;
@@ -5466,13 +5869,19 @@ String handle_aprs_messsage_addressed_to_us(const char *received_frame) {
   char *q;
 
   #ifdef IF_SEMAS_WOULD_WORK
-    while (xSemaphoreTake(sema_handle_aprs_message_addressed_to_us, 100) != pdTRUE)
+    int n = n;
+    while (xSemaphoreTake(sema_handle_aprs_message_addressed_to_us, 100) != pdTRUE) {
       esp_task_wdt_reset();
+      if (n++ > 3000)
+        ESP.restart();
+    }
   #else
     for (int n = 0; sema_handle_aprs_message_addressed_to_us; n++) {
       delay(10);
       if (!(n % 100))
         esp_task_wdt_reset();
+      if (n > 30000)
+         ESP.restart();
     }
     sema_handle_aprs_message_addressed_to_us = true;
   #endif
@@ -5690,7 +6099,7 @@ void fill_lh(const String &rxcall, const char *digipeatedflag, const char *p) {
 void write_last_heard_calls_with_distance_and_course_to_display() {
   String lines[5];
   //char dist_and_course[9];
-  char line[22]; // Display length 21 + \0
+  char line[OLED_LINE_LEN_MAX+1]; // Display length 21 + \0
   char course[3];
   double courseTo;
   double distTo;
@@ -5782,8 +6191,8 @@ void loop()
   }
 #endif
 
-  if (digitalRead(BUTTON) == LOW && key_up == true) {
-    key_up = false;
+  if (digitalRead(BUTTON) == LOW && button_key_up == true) {
+    button_key_up = false;
     delay(50);
     Serial.println("Tracker: Button pressed...");
 
@@ -5793,7 +6202,7 @@ void loop()
     #endif
     if (digitalRead(BUTTON) == LOW) {
       delay(300);
-      time_delay = millis() + 1500;
+      button_time_delay = millis() + 1500;
       #ifdef DEVELOPMENT_DEBUG
         if (debug_verbose > 1) Serial.printf("Button has been pressed %dx (2)\r\n", button_down_count);
       #endif
@@ -5803,7 +6212,7 @@ void loop()
             enableOled_now(); // turn ON OLED now
             shutdown_countdown_timer_enable = false;
             writedisplaytext("((ABORT))","","Shutdown aborted:","middle Button","was pressed","");
-            key_up = true;
+            button_key_up = true;
             button_down_count = 0;
           } else
         #endif
@@ -5819,6 +6228,11 @@ void loop()
             #endif
             if (button_down_count == 1) {
               write_last_heard_calls_with_distance_and_course_to_display();
+              // double click? -> Send beacon
+              delay(500);
+              if (digitalRead(BUTTON) == LOW) {
+                goto send_beacon;
+              }
             } else if (button_down_count == 2) {
               String RXMessageTimeAndSender = "";
               if (!LastRXMessageSender.isEmpty()) {
@@ -5844,6 +6258,7 @@ void loop()
             } else if (button_down_count == 6) {
               writedisplaytext("((BN))","BuildNr:" + buildnr,"by DL9SAU & DL3EL","","next press: tx bcn","or wait ...");
             } else if (button_down_count == 7) {
+send_beacon:
               button_down_count = 0;
               if (lora_tx_enabled || aprsis_enabled || usb_serial_data_type == 0 || usb_serial_data_type & 2) {
                 freeze_display = false;
@@ -5874,7 +6289,7 @@ void loop()
               #endif
               button_down_count = 0;
             }
-            key_up = true;
+            button_key_up = true;
           }
           #ifdef DEVELOPMENT_DEBUG
             if (debug_verbose > 1) Serial.printf("Button still down %dx \r\n", button_down_count);
@@ -5947,6 +6362,10 @@ void loop()
           axp.setPowerOutPut(AXP192_LDO3, AXP202_OFF);                          // switch off GPS
         #elif T_BEAM_V1_2
           axp.disableALDO3();                                                   // switch off GPS
+        #elif HELTEC_WIRELESS_TRACKER
+          #ifdef VEXT_CTRL
+            digitalWrite(VEXT_CTRL, LOW);
+          #endif
         #endif
         gps_isValid = false;
         t_gps_fix_lost = millis();
@@ -5964,6 +6383,26 @@ void loop()
           #elif T_BEAM_V1_2
             axp.setALDO3Voltage(3300);
             axp.enableALDO3();                                                    // switch on GPS
+          #elif HELTEC_WIRELESS_TRACKER
+            #ifdef VEXT_CTRL
+              // Display was also turned off. Reinitialize..
+              digitalWrite(VEXT_CTRL, HIGH);
+              #ifdef HAS_TFT
+                tft.init();
+                tft.begin();
+                tft.setRotation(1);
+                tft.setTextFont(0);
+                tft.fillScreen(TFT_BLACK);
+
+                tft.setTextColor(TFT_WHITE,TFT_BLACK);
+                tft.setTextSize(bigSizeFont);
+                tft.setCursor(0, 0);
+                display_do_full_refresh = true;
+                fillDisplayLine1(5);
+                fillDisplayLine2();
+                fillDisplayLines3to5(1);
+              #endif
+            #endif
           #endif
           gps_task_enabled = true;
           t_gps_fix_lost = millis();
@@ -6185,13 +6624,13 @@ void loop()
     } // else: enabled_oled == false: never turn on. enabled_oled == true and oled_timer == 0L: recently turned off -> also no need to be turned on.
   }
 
-  if (digitalRead(BUTTON)==LOW && key_up == false && millis() >= time_delay && t_lock == false) {
+  if (digitalRead(BUTTON)==LOW && button_key_up == false && millis() >= button_time_delay && button_t_lock == false) {
     // enable OLED
     enableOled_now();
     button_down_count = 0;
     freeze_display = false;
     //---------------
-    t_lock = true;
+    button_t_lock = true;
     // re-enable webserver, if was set to off.
 #ifdef ENABLE_WIFI
     if (!webserverStarted) {
@@ -6212,19 +6651,41 @@ void loop()
       delay(3000);
       esp_task_wdt_reset();
     } else {
-      writedisplaytext("LoRa-APRS","","Button:","Rebooting,","for stoping WiFi.","Release Button now!");
-#ifdef ENABLE_WIFI
-      do_send_status_message_about_reboot_to_aprsis();
-#endif
-      delay(3000);
-      ESP.restart();
+      #ifdef HELTEC_WIRELESS_TRACKER
+        writedisplaytext("LoRa-APRS","","Button:","Shutdown","","Release Button now!");
+        delay(3000);
+        display.dim(true);
+        #ifdef VEXT_CTRL
+          digitalWrite(VEXT_CTRL, LOW);
+        #endif
+        esp_deep_sleep_start();
+      #else
+        writedisplaytext("LoRa-APRS","","Button:","Rebooting,","for stoping WiFi.","Release Button now!");
+        do_send_status_message_about_reboot_to_aprsis();
+        delay(3000);
+        ESP.restart();
+      #endif
     }
+#else
+  #ifdef HELTEC_WIRELESS_TRACKER
+    writedisplaytext("LoRa-APRS","","Button:","Shutdown","","Release Button now!");
+    delay(3000);
+    display.dim(true);
+    #ifdef VEXT_CTRL
+      digitalWrite(VEXT_CTRL, LOW);
+    #endif
+    esp_deep_sleep_start();
+  #else
+    writedisplaytext("LoRa-APRS","","Button:","Rebooting","","Release Button now!");
+    delay(3000);
+    ESP.restart();
+  #endif
 #endif
   }
 
-  if(digitalRead(BUTTON)==HIGH && !key_up){
-    key_up = true;
-    t_lock = false;
+  if(digitalRead(BUTTON)==HIGH && !button_key_up){
+    button_key_up = true;
+    button_t_lock = false;
   }
 
   if (dont_send_own_position_packets) {
@@ -6247,6 +6708,26 @@ void loop()
         #elif T_BEAM_V1_2
           axp.setALDO3Voltage(3300);
           axp.enableALDO3();
+        #elif HELTEC_WIRELESS_TRACKER
+          #ifdef VEXT_CTRL
+            // Display was also turned off. Reinitialize..
+            digitalWrite(VEXT_CTRL, HIGH);
+            #ifdef HAS_TFT
+              tft.init();
+              tft.begin();
+              tft.setRotation(1);
+              tft.setTextFont(0);
+              tft.fillScreen(TFT_BLACK);
+
+              tft.setTextColor(TFT_WHITE,TFT_BLACK);
+              tft.setTextSize(bigSizeFont);
+              tft.setCursor(0, 0);
+              display_do_full_refresh = true;
+              fillDisplayLine1(5);
+              fillDisplayLine2();
+              fillDisplayLines3to5(1);
+            #endif
+          #endif
         #endif
         if (xHandle_GPS) {
           gps_task_enabled = true;
@@ -6309,7 +6790,8 @@ void loop()
 #endif
 
   #if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
-    if (InpVolts > 4.3) {
+    //if (InpVolts > 4.3) {  // No, my usb hub suddenly only made 4.1V
+    if (InpVolts > 4.0) {
       if (!usb_status_before) {
         enableOled_now(); // Turn Oled on as indicatior that external power is plugged on
         if (shutdown_active && shutdown_countdown_timer_enable) {
@@ -6401,6 +6883,10 @@ void loop()
                       axp.setPowerOutPut(AXP192_LDO3, AXP202_OFF);                           // switch off GPS
                     #elif T_BEAM_V1_2
                       axp.disableALDO3();
+                    #elif HELTEC_WIRELESS_TRACKER
+                      #ifdef VEXT_CTRL
+                        digitalWrite(VEXT_CTRL, LOW);
+                      #endif
                     #endif
                 }
                 #endif
@@ -6514,38 +7000,52 @@ out:
 
   // sema lock for lora chip operations
   boolean sema_lora_lock_success = false;
-  boolean packet_available = false;
 
   esp_task_wdt_reset();
   // lora chip is in mode RX
-  #ifdef IF_SEMAS_WOULD_WORK
-    if (xSemaphoreTake(sema_lora_chip, 100) == pdTRUE)
-      sema_lora_lock_success = true;
-  #else
-    for (int n = 0; n < 10; n++) {
-      if (!sema_lora_chip) {
-        sema_lora_chip = true;
+#ifdef HAS_SX126X
+  // We need the sema lock later for non-blocking receive
+  if (flag_lora_packet_available) {
+#else
+  {
+#endif
+    #ifdef IF_SEMAS_WOULD_WORK
+      if (xSemaphoreTake(sema_lora_chip, 100) == pdTRUE)
         sema_lora_lock_success = true;
-        break;
+    #else
+      for (int n = 0; n < 10; n++) {
+        if (!sema_lora_chip) {
+          sema_lora_chip = true;
+          sema_lora_lock_success = true;
+          break;
+        }
+        delay(10);
       }
-      delay(10);
-    }
-  #endif
-  esp_task_wdt_reset();
-
-  if (sema_lora_lock_success) {
-    if (rf95.waitAvailableTimeout(10)) {
-      packet_available = true;
-      esp_task_wdt_reset();
-    } else {
+    #endif
+    esp_task_wdt_reset();
+    if (!sema_lora_lock_success) {
       #ifdef IF_SEMAS_WOULD_WORK
         xSemaphoreGive(sema_lora_chip);
       #else
         sema_lora_chip = false;
       #endif
+    #ifdef HAS_SX127X
+    } else {
+      //if (rf95.waitAvailableTimeout(10)) {
+      if (rf95.available()) {
+        flag_lora_packet_available = true;
+        esp_task_wdt_reset();
+        // keep sema up
+      } else {
+        flag_lora_packet_available = false;
+      }
+    #elif HAS_SX126X
+      // no else. Elegant: radio.setDio1Action() sets flag_lora_packet_available via signal_new_packet_received() if a packet was received.
+      // keep sema up
+    #endif
     }
   }
-  if (packet_available) {
+  if (flag_lora_packet_available) {
     // we still take the lock
     #ifdef ENABLE_LED_SIGNALING
       #ifdef T_BEAM_V1_0
@@ -6561,11 +7061,32 @@ out:
 
     // we need to read the received packt, even if rx is set to disable. else rf95.waitAvailableTimeout() will always show, data is available
     //byte array
-    byte  lora_RXBUFF[BG_RF95_MAX_MESSAGE_LEN];      //buffer for packet to send
-    uint8_t loraReceivedLength = sizeof(lora_RXBUFF); // (implicit ) reset max length before receiving!
-    boolean lora_rx_data_available = rf95.recvAPRS(lora_RXBUFF, &loraReceivedLength);
-    int lastSNR = bg_rf95snr_to_snr(rf95.lastSNR());
-    int lastRssi = bg_rf95rssi_to_rssi(rf95.lastRssi(), lastSNR);
+    #ifdef HAS_SX127X
+      byte  lora_RXBUFF[LORA_MAX_MESSAGE_LEN];      //buffer for packet
+      uint8_t loraReceivedLength = sizeof(lora_RXBUFF); // (implicit ) reset max length before receiving!
+      boolean lora_rx_data_available = rf95.recvAPRS(lora_RXBUFF, &loraReceivedLength);
+      int lastSNR = bg_rf95snr_to_snr(rf95.lastSNR());
+      int lastRssi = bg_rf95rssi_to_rssi(rf95.lastRssi(), lastSNR);
+    #elif HAS_SX126X
+      String str_lora_RXBUFF;
+      const char *lora_RXBUFF = 0;
+      boolean lora_rx_data_available = false;
+      size_t loraReceivedLength = 0;
+      int state = radio.readData(str_lora_RXBUFF);
+      if (state == RADIOLIB_ERR_NONE) {
+        loraReceivedLength = str_lora_RXBUFF.length();
+        // SX126X packets start with the PHY header containing our well-known address
+        if (loraReceivedLength > 4 && str_lora_RXBUFF.startsWith("\x3c\xff\x01")) {
+          lora_rx_data_available = true;
+          lora_RXBUFF = str_lora_RXBUFF.c_str() +3;
+          loraReceivedLength -=3;
+        } // else: leave loraReceivedLength 0 and lora_rx_data_available false
+      }
+      int lastSNR = radio.getSNR();
+      int lastRssi = radio.getRSSI();
+      float freqError = radio.getFrequencyError();
+    #endif
+    flag_lora_packet_available = false;
 
     // release lock here. We read the data from the lora chip. And we may call later loraSend (which should not be blocked by ourself)
     #ifdef IF_SEMAS_WOULD_WORK
@@ -6709,7 +7230,7 @@ out:
           do_not_repeat_to_secondary_freq = true; // no ping pong to secondary freq
         }
 
- #if defined(ENABLE_WIFI)
+     #if defined(ENABLE_WIFI)
         if (aprsis_enabled && !do_not_gate) {
           // No word "NOGATE" or "RFONLY" or "TCPIP" or "TCPXX" in header and not third_party-traffic=? -> may be sent to aprs-is
           s = 0;
@@ -6718,7 +7239,7 @@ out:
             s = append_element_to_path(received_frame, rssi_for_path);
           send_to_aprsis(s ? String(s) : loraReceivedFrameString);
         }
-#endif
+      #endif
 
         // Third party traffic? - LH List is a LastPositionDistanceList, not a heard list. We'll ignore third-party-encoded packets.
         if (!our_packet && !(header_end[1] && header_end[1] == '}')) {
@@ -6890,11 +7411,24 @@ invalid_packet:
         #endif
         esp_task_wdt_reset();
         if (sema_lora_lock_success) {
-          rf95.setFrequency(lora_freq_rx_curr);
           lora_set_speed(lora_speed_rx_curr);
-          // Avoid packet in rx queue from secondary qrg being interpreted to come from main qrg
-          if (lora_freq_rx_curr == lora_freq)
-             rf95.recvAPRS(0, 0);
+          #ifdef HAS_SX127X
+            // Avoid packet in rx queue from secondary qrg being interpreted to come from main qrg
+            if (lora_freq_rx_curr == lora_freq) {
+              rf95.recvAPRS(0, 0);
+              flag_lora_packet_available = false;
+            }
+            rf95.setFrequency(lora_freq_rx_curr);
+          #elif HAS_SX126X
+            // Avoid packet in rx queue from secondary qrg being interpreted to come from main qrg
+            if (lora_freq_rx_curr == lora_freq && flag_lora_packet_available) {
+              String tmp_buf;
+              radio.readData(tmp_buf);
+              flag_lora_packet_available = false;
+            }
+            radio.setFrequency(lora_freq_rx_curr);
+            radio.startReceive();
+          #endif
           #ifdef IF_SEMAS_WOULD_WORK
             xSemaphoreGive(sema_lora_chip);
           #else
@@ -7042,7 +7576,7 @@ if (nextTX > 1 && tmp_t_since_last_sb_tx > (sb_turn_time*1000L) && average_speed
         //writedisplaytext(" ((TX))","","LAT: "+LatShownP,"LON: "+LongShownP,"SPD: "+String(gps.speed.kmph(),1)+"  CRS: "+String(gps.course.deg(),1),getSatAndBatInfo());
         fillDisplayLine1(3);
         fillDisplayLine2();
-        fillDisplayLines3to5(0);
+        fillDisplayLines3to5(1);
         writedisplaytext("  ((TX))","",OledLine2,OledLine3,OledLine4,OledLine5);
       }
       sendpacket(SP_POS_GPS | (nextTX == 1 ? SP_ENFORCE_COURSE : 0));

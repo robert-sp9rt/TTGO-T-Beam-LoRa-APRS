@@ -106,6 +106,8 @@ extern xSemaphoreHandle sema_lora_chip;
 extern volatile boolean sema_lora_chip;
 #endif
 
+extern volatile boolean flag_lora_packet_available;
+
 extern boolean enable_bluetooth;
 
 QueueHandle_t webListReceivedQueue = nullptr;
@@ -1454,7 +1456,7 @@ void restart_AP_or_STA(void) {
 
     log_msg = "WiFi: Running AP. SSID: " + oled_wifi_SSID_curr + ". IP: " + oled_wifi_IP_curr;
     #ifdef ENABLE_SYSLOG
-        syslog_log(LOG_INFO, log_msg);
+      syslog_log(LOG_INFO, log_msg);
     #endif
     do_serial_println(log_msg);
     wifi_connection_status = WIFI_RUNNING_AS_AP;
@@ -2149,26 +2151,37 @@ void read_from_aprsis(void) {
   // panic if the chip is currently transmitting. We can skip this, if lora rx is disabled (which, btw, would not make sense)
   if (lora_rx_enabled) {
     esp_task_wdt_reset();
-    #ifdef IF_SEMAS_WOULD_WORK
-      while (xSemaphoreTake(sema_lora_chip, 100) != pdTRUE)
-        esp_task_wdt_reset();
-    #else
-      for (int n = 0; sema_lora_chip; n++) {
-        delay(10);
-        if (!(n % 100))
+    #ifdef HAS_SX127X
+      #ifdef IF_SEMAS_WOULD_WORK
+        int n = 0;
+        while (xSemaphoreTake(sema_lora_chip, 100) != pdTRUE) {
           esp_task_wdt_reset();
-      }
-      sema_lora_chip = true;
-    #endif
-    boolean packet_available = rf95.waitAvailableTimeout(lora_speed_rx_curr > 300 ? 2500 : 10000);
-    esp_task_wdt_reset();
-    #ifdef IF_SEMAS_WOULD_WORK
-      xSemaphoreGive(sema_lora_chip);
-    #else
-      sema_lora_chip = false;
+          if (n++ > 3000)
+            ESP.restart();
+         }
+      #else
+        for (int n = 0; sema_lora_chip; n++) {
+          delay(10);
+          if (!(n % 100))
+            esp_task_wdt_reset();
+          if (n > 30000)
+            ESP.restart();
+        }
+        sema_lora_chip = true;
+      #endif
+      //flag_lora_packet_available = rf95.waitAvailableTimeout(lora_speed_rx_curr > 300 ? 2500 : 10000);
+      flag_lora_packet_available = rf95.available();
+      esp_task_wdt_reset();
+      #ifdef IF_SEMAS_WOULD_WORK
+        xSemaphoreGive(sema_lora_chip);
+      #else
+        sema_lora_chip = false;
+      #endif
+    #elif HAS_SX126X
+      // RadioLib driver sets the flag if a packet is received
     #endif
     // After lock release, main thread could gather packet. Give him enough time to receive and parse the packet
-    if (packet_available) {
+    if (flag_lora_packet_available) {
       delay(250);
       esp_task_wdt_reset();
     }
@@ -2176,6 +2189,7 @@ void read_from_aprsis(void) {
   if (aprsis_data_allow_inet_to_rf % 2) {
     esp_task_wdt_reset();
     loraSend(txPower, lora_freq, lora_speed, 0, third_party_packet);
+    esp_task_wdt_reset();
   }
   if (aprsis_data_allow_inet_to_rf > 1 && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq) {
     esp_task_wdt_reset();
@@ -2308,21 +2322,34 @@ void send_queue_to_aprsis()
       }
       aprsis_enabled = false;
       #ifdef IF_SEMAS_WOULD_WORK
-        while (xSemaphoreTake(sema_lora_chip, 100) != pdTRUE)
+        int n = 0;
+        while (xSemaphoreTake(sema_lora_chip, 100) != pdTRUE) {
           esp_task_wdt_reset();
+          if (n++ > 3000)
+            ESP.restart();
+        }
       #else
         for (int n = 0; sema_lora_chip; n++) {
           delay(10);
           if (!(n % 100))
             esp_task_wdt_reset();
+          if (n > 30000)
+            ESP.restart();
         }
         sema_lora_chip = true;
       #endif
       esp_task_wdt_reset();
-      rf95.setTxPower(0);
-      // hack to circumvent crash on interrupt handler isr0():
-      rf95.setFrequency(lora_freq_rx_curr + 1);
-      rf95.sleep(); // disable rf95 before update
+      #ifdef HAS_SX127X
+        rf95.setTxPower(0);
+        // hack to circumvent crash on interrupt handler isr0():
+        rf95.setFrequency(lora_freq_rx_curr + 1);
+        rf95.sleep(); // disable rf95 before update
+      #elif HAS_SX126X
+        radio.setOutputPower(0);
+        // hack to circumvent crash on interrupt handler isr0():
+        radio.setFrequency(lora_freq_rx_curr + 1);
+        radio.sleep(); // disable rf95 before update
+      #endif
       // switch LORA chip off during firmware upload
       #ifdef T_BEAM_V1_0
         axp.setPowerOutPut(AXP192_LDO2, AXP202_OFF);
@@ -2352,9 +2379,14 @@ void send_queue_to_aprsis()
           axp.enableALDO2();
         #endif
         // hack to circumvent crash on interrupt handler isr0():
-        rf95.setFrequency(lora_freq_rx_curr);
+        #ifdef HAS_SX127X
+          rf95.setFrequency(lora_freq_rx_curr);
+          rf95.setTxPower(txPower);
+        #elif HAS_SX126X
+          radio.setFrequency(lora_freq_rx_curr);
+          radio.setOutputPower(txPower);
+        #endif
         lora_set_speed(lora_speed_rx_curr);
-        rf95.setTxPower(txPower);
         lora_tx_enabled = lora_tx_enabled_prev;
         lora_rx_enabled = lora_rx_enabled_prev;
         aprsis_enabled = aprsis_enabled_prev;

@@ -104,7 +104,7 @@ You like to enable, if you use your tracker portable and it should automatically
                     </div>
                     <div>
                         <label for="tncsrvr_en">Enable TNC-Server</label>
-                        <input name="tncsrvr_en" id="tncsrvr_en" type="checkbox" value="1" title="Enable TNC-Server (KISS over TCP) on port tcp 8001. If your device in open networks like HAMNET, enable it only when needed and consider firewalling.">
+                        <input name="tncsrvr_en" id="tncsrvr_en" type="checkbox" value="1" title="Enable TNC-Server (KISS over TCP) on port tcp 8001. If your device in open networks like HAMNET, enable it only when needed and consider firewalling. If you use aprsdroid connected to this devices in WiFi-mode-AP, configure: 'Protocol' 'TNC (KISS)', 'Connection type' 'TCP/IP' and 'Server' '192.168.4.1:8001'">
                     </div>
                     <div>
                         <label for="gpssrv_en">Enable GPS-Server</label>
@@ -129,7 +129,7 @@ You like to enable, if you use your tracker portable and it should automatically
                 <div class="grid-container halves">
                     <div>
                         <label for="lora_freq">Main Frequency [MHz]</label>
-                        <input name="lora_freq" id="lora_freq" type="number" min="433.0000" max="928.0000" step="0.0001" title="LoRa center frequency between 433.0001 and 928.0000. I.e. 433.775">
+                        <input name="lora_freq" id="lora_freq" type="number" min="430.1000" max="928.0000" step="0.0001" title="LoRa center frequency between 430.1000 and 928.0000. I.e. 433.775">
                     </div>
                     <div>
                         <label for="lora_speed">Speed</label>
@@ -419,7 +419,7 @@ III: Values above are referring to latitude; distance between two latitudes is a
                     <div>
                         <label for="lora_freq_x">Secondary Frequency [MHz]</label>
                         (for cross-repeating or listening transmissions from igates)</label>
-                        <input name="lora_freq_x" id="lora_freq_x" type="number" min="0.0000" max="928.0000" step="0.0001" title="LoRa center frequency - must be different from main frequency and between 433.0001 and 928.0000 or 0 if not needed. I.e. 433.900">
+                        <input name="lora_freq_x" id="lora_freq_x" type="number" min="430.1000" max="928.0000" step="0.0001" title="LoRa center frequency - must be different from main frequency and between 430.0000 and 928.0000 or 0 if not needed. I.e. 433.900">
                     </div>
                     <div>
                         <label for="txPower_x">TX power on secondary frequency [dBm]</label>
@@ -615,7 +615,7 @@ III: Values above are referring to latitude; distance between two latitudes is a
                 </div>
                 <div>
                     <label for="shutdown_act">Auto power off</label>
-                    <input name="shutdown_act" id="shutdown_act" type="checkbox" value="1" title="activate auto shutdown after usb plug off (not for T-BEAM 0.7). The evice will powered down. You can interrupt this by pressing the middle button in time (right after pluging of or short before it powers down). Default: 'yes' (power off). Consider if you need to switch it to 'no' (keep power on), i.e. if you are an additionaly battery-connected igate, or if you have a not reliable power source.Please also look at the option 'Send Status-packet when shutdown' above.">
+                    <input name="shutdown_act" id="shutdown_act" type="checkbox" value="1" title="activate auto shutdown after usb plug off (not for T-BEAM 0.7). The device will powered down. You can interrupt this by pressing the middle button in time (right after pluging of or short before it powers down). Default: 'yes' (power off). Consider if you need to switch it to 'no' (keep power on), i.e. if you are an additionaly battery-connected igate, or if you have a not reliable power source. Please also look at the option 'Send Status-packet when shutdown' above.">
                 </div>
                 <div>
                     <label for="shutdown_dt">Auto power off delay [s]</label>
@@ -895,7 +895,7 @@ Hard readable lengths / too long for our display:
                </ul>
                <h6 class="u-full-width">long press</h6>
                <ul>
-                   <li>toggle on or off WiFi and WebServer</li>
+                   <li>toggle on or off WiFi and WebServer. Switching off WebServer will cause the device to reboot (or on a heltec wireless tracker device: shutdown (deep sleep)).</li>
                    <li><b>Cave</b>: if you long-press during boot, your <b>settings are purged!</b></li>
                </ul>
             </div>

@@ -3,13 +3,21 @@
 #include <WebServer.h>
 #include <ESPmDNS.h>
 #include <Update.h>
-#include <BG_RF95.h>
 #include <esp_wifi.h>
 
 #ifndef TASK_WEBSERVER
 #define TASK_WEBSERVER
 
-extern BG_RF95 rf95;
+#ifdef HAS_SX127X
+  #include <BG_RF95.h>
+  extern BG_RF95 rf95;
+#elif HAS_SX126X
+  #include <RadioLib.h>
+  #if defined(HELTEC_WIRELESS_TRACKER)
+    extern SX1262 radio;
+  #endif
+#endif
+
 #ifdef KISS_PROTOCOL
   extern WiFiServer tncServer;
 #endif

@@ -60,5 +60,5 @@ with open("data_embed/index.html", "r") as f:
 
 index_html_content = index_html_content.replace('<!--VERSION-->', version_string)
 
-with open("data_embed/index.html.out", "w") as f:
+with open("data_embed/index.html.tmp", "w") as f:
     f.write(index_html_content)

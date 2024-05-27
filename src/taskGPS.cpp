@@ -18,13 +18,18 @@ extern volatile boolean gps_task_enabled;
 // Pins for GPS
 #if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
   static const int RXPin = 12, TXPin = 34;
+#elif defined(HELTEC_WIRELESS_TRACKER)
+  static const int RXPin = 34, TXPin = 33;
 #else /* i.e. T_BEAM_V0_7, or lora32-device-with-self-attached-GPS */
   static const int RXPin = 15, TXPin = 12;
 #endif
-#ifndef LORA32_21
-static const uint32_t GPSBaud = 9600; //GPS
-#else /* one user played with self-attached GPS on his LORA32 device. TODO: gps speed choosable in Web-Interface */
-static const uint32_t GPSBaud = 57600; //GPS
+#ifdef LORA32_21
+  /* one user played with self-attached GPS on his LORA32 device. TODO: gps speed choosable in Web-Interface */
+  static const uint32_t GPSBaud = 57600; //GPS
+#elif HELTEC_WIRELESS_TRACKER
+  static const uint32_t GPSBaud = 115200; //GPS
+#else
+  static const uint32_t GPSBaud = 9600; //GPS
 #endif
 HardwareSerial gpsSerial(1);        // TTGO has HW serial
 TinyGPSPlus gps;             // The TinyGPS++ object
@@ -81,7 +86,7 @@ reinitialize:
 
           if (gpsChar == '\n') {
             if ((usb_serial_data_type & 4))
-              Serial.println(gpsDataBuffer);
+              Serial.print(gpsDataBuffer);
       #ifdef ENABLE_WIFI
             iterateWifiClients([](WiFiClient *client, int clientIdx, const String *data){
               if (client->connected()){

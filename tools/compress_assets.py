@@ -1,8 +1,8 @@
 import gzip
 assets_list = {
-    'data_embed/index.html.out': 'data_embed/index.html.out',
-    'data_embed/js.js': 'data_embed/js.js.out',
-    'data_embed/style.css': 'data_embed/style.css.out',
+    'data_embed/index.html.tmp2': 'data_embed/index.html.out',
+    'data_embed/js.js.tmp': 'data_embed/js.js.out',
+    'data_embed/style.css.tmp': 'data_embed/style.css.out',
 }
 
 
