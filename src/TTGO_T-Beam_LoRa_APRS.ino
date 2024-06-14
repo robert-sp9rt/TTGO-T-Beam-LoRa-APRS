@@ -163,7 +163,7 @@ uint32_t RemoteDebugNr = 0L;
   #define BUZZER 5                  // enter your buzzer pin gpio
   const byte TXLED  = 18;           //pin number for LED on TX Tracker. White LED
   #ifdef HAS_TFT
-    #define TFT_BACKLIGHT  21           //pin number for BATTERY LED
+    #define TFT_BACKLIGHT  21           //pin number for TFT Backlight
   #endif
 #else
   #define BATTERY_PIN 35
@@ -211,9 +211,7 @@ String aprsis_callsign = "";
 String aprsis_password = "-1";
 uint8_t aprsis_data_allow_inet_to_rf = 0;  // 0: disable (default). 1: gate to main qrg. 2: gate to secondary qrg. 3: gate to both frequencies
 extern void do_send_status_message_about_reboot_to_aprsis();
-#if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
 extern void do_send_status_message_about_shutdown_to_aprsis();
-#endif
 #endif
 
 // Variables for APRS packaging
@@ -267,8 +265,8 @@ String aprsPresetShown = "P";
 TaskHandle_t xHandle_GPS;	// needed for being able to suspend/resume task when GPS sleeps
 volatile boolean gps_task_enabled = false;
 uint8_t gps_may_sleep = 1;      // gps may go to sleep: 1 only if we are battery powered. 2 always
-uint32_t t_gps_powersave_operation_until_fix = 0L;
 uint32_t t_gps_fix_lost = 1L;
+uint32_t t_gps_got_first_fix_after_last_loss = 0L;
 
 // as we now collect the gps_data at the beginning of loop(), also the speed ist from there, we should not query gps.speed.kmph() directly later on
 // the same show be done with course and alti (later)
@@ -648,6 +646,19 @@ char blacklist_calls[256] = "";
       void display(void) { return; }
   };
   Emulated_SSD1306 display;
+
+  void do_tft_init() {
+    tft.init();
+    tft.begin();
+    tft.setRotation(1);
+    tft.setTextFont(0);
+    tft.fillScreen(TFT_BLACK);
+    tft.setTextColor(TFT_WHITE,TFT_BLACK);
+    tft.setTextSize(bigSizeFont);
+    tft.setCursor(0, 0);
+    display_do_full_refresh = true;
+    display.dim(false);
+  }
 
 #else
   #ifdef HELTEC_WIRELESS_TRACKER
@@ -1456,6 +1467,9 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, uint8_t fla
 
 
 void batt_read(){
+  static float InpVolts_measures[5] = { 4.5, 4.5, 4.5, 4.5, 4.5 };
+  static int InpVolts_measures_pos = 0.0;
+
 #if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
   BattVolts = ((float ) axp.getBattVoltage())/1000.0;
   InpVolts = ((float ) axp.getVbusVoltage())/1000.0;
@@ -1474,6 +1488,12 @@ void batt_read(){
 #else
   InpVolts = analogRead(BATTERY_PIN)*7.221/4096;
 #endif
+
+
+  InpVolts_measures[InpVolts_measures_pos] = InpVolts;
+  InpVolts_measures_pos = (InpVolts_measures_pos + 1) % 5;
+  InpVolts = (InpVolts_measures[0]+InpVolts_measures[1]+InpVolts_measures[2]+InpVolts_measures[3]+InpVolts_measures[4])/5;
+
 }
 
 
@@ -1490,6 +1510,10 @@ void setup_oled_timer_values() {
 void enableOled() {
   if (!enabled_oled)
     return;
+  #if defined(HELTEC_WIRELESS_TRACKER) && defined(VEXT_CTRL) && defined(HAS_TFT)
+    if (gps_state && !gps_task_enabled)
+      return;
+  #endif
   // This function enables OLED display after pressing a button
   oled_timer = millis() + oled_timeout;
 }
@@ -1497,6 +1521,10 @@ void enableOled() {
 void enableOled_now() {
   if (!enabled_oled)
     return;
+  #if defined(HELTEC_WIRELESS_TRACKER) && defined(VEXT_CTRL) && defined(HAS_TFT)
+    if (gps_state && !gps_task_enabled)
+      return;
+  #endif
   if (!display_is_on) {
     display.dim(false);
     display_is_on = true;
@@ -1505,43 +1533,6 @@ void enableOled_now() {
 }
 
 void writedisplaytext(String HeaderTxt, String Line1, String Line2, String Line3, String Line4, String Line5) {
-  batt_read();
-#ifdef notdef
-  if (InpVolts < 1.0) {
-    if (BattVolts < 3.5 && BattVolts > 3.3){
-      #ifdef ENABLE_LED_SIGNALING
-        #ifdef T_BEAM_V1_0
-          axp.setChgLEDMode(AXP20X_LED_BLINK_4HZ);
-        #elif T_BEAM_V1_2
-          axp.setChargingLedMode(XPOWERS_CHG_LED_BLINK_4HZ);
-      #endif
-      #endif
-    } else if (BattVolts <= 3.3) {
-      #if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
-        // enforce display wakeup (because we will not reach the timer function for setting it on)
-        enableOled_now();
-        // send_status_message_about_shutdown_to_rf() writes also to display. Display HALT afterwards
-        if (send_status_message_about_shutdown_to_rf) {
-          String msg = String("B") + buildnr + String(",up:") + String((int ) (millis()/1000/60)) + String(" qrt");
-          sendStatusPacket(msg);
-        }
-        writedisplaytext("((HALT))","","Powering","down","","");
-        #ifdef ENABLE_WIFI
-          do_send_status_message_about_shutdown_to_aprsis();
-        #endif
-        delay(2000);
-      #endif
-      #ifdef T_BEAM_V1_0
-        axp.setChgLEDMode(AXP20X_LED_OFF);
-      #elif T_BEAM_V1_2
-        axp.setChargingLedMode(XPOWERS_CHG_LED_OFF);
-      #endif
-      #if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
-        //axp.shutdown(); <-we need fix this
-      #endif
-    }
-  }
-#endif
   // some assurances
   // Line1 has a larger font
   if (Line1.length() > OLED_LINE_LEN_MAX) Line1.remove(OLED_LINE_LEN_MAX, Line1.length()-OLED_LINE_LEN_MAX);
@@ -1633,6 +1624,9 @@ void timer_once_a_second() {
     return;
 
   t_next_run = millis() + 1000;
+
+  batt_read();
+
   // update gps time string once a second
   if (getLocalTimeTheBetterWay(&timeinfo)) {
     strftime(gps_time_s, sizeof(gps_time_s), "%H:%M:%S", &timeinfo);
@@ -3986,6 +3980,56 @@ void load_preferences_from_flash()
 #endif // ENABLE_PREFERENCES
 
 
+// Power on / off GPS
+void do_poweroff_gps()
+{
+  gps_task_enabled = false;  // vTaskSuspend() is done by taskGPS itself (he needs to delete the wdt timer)
+  #ifdef T_BEAM_V1_0
+    axp.setPowerOutPut(AXP192_LDO3, AXP202_OFF);                          // switch off GPS
+  #elif T_BEAM_V1_2
+    axp.disableALDO3();                                                   // switch off GPS
+  #elif HELTEC_WIRELESS_TRACKER
+    #ifdef VEXT_CTRL
+      digitalWrite(VEXT_CTRL, LOW);
+      #ifdef HAS_TFT
+        display_is_on = false;
+      #endif
+    #endif
+  #endif
+  gps_isValid = false;
+  t_gps_fix_lost = millis();
+  t_gps_got_first_fix_after_last_loss = 0L;
+}
+
+void do_poweron_gps(int also_reinit_other_devices_controlled_by_VEXT_CTRL)
+{
+  #ifdef T_BEAM_V1_0
+    axp.setPowerOutPut(AXP192_LDO3, AXP202_ON);                           // switch on GPS
+  #elif T_BEAM_V1_2
+    axp.setALDO3Voltage(3300);
+    axp.enableALDO3();                                                    // switch on GPS
+  #elif HELTEC_WIRELESS_TRACKER
+    #ifdef VEXT_CTRL
+      //also_reinit_other_devices_controlled_by_VEXT_CTRL
+      digitalWrite(VEXT_CTRL, HIGH);
+      #ifdef HAS_TFT
+        // Display was also turned off. Reinitialize..
+        do_tft_init();
+        fillDisplayLine1(5);
+        fillDisplayLine2();
+        fillDisplayLines3to5(1);
+        enableOled_now(); // enable OLED
+      #endif
+    #endif
+  #endif
+  t_gps_fix_lost = millis();
+  t_gps_got_first_fix_after_last_loss = 0L;
+  if (xHandle_GPS) {
+    vTaskResume(xHandle_GPS);
+  }
+  gps_task_enabled = true;
+}
+
 
 void setup_phase2_soft_reconfiguration(boolean runtime_reconfiguration) {
 
@@ -4023,61 +4067,16 @@ void setup_phase2_soft_reconfiguration(boolean runtime_reconfiguration) {
   #endif
 
   if (gps_state) {
-    if (!gps_task_enabled) {
-      #ifdef T_BEAM_V1_0
-        axp.setPowerOutPut(AXP192_LDO3, AXP202_ON);                           // switch on GPS
-      #elif T_BEAM_V1_2
-        axp.setButtonBatteryChargeVoltage(3300);			      // enable charge of the gps battery
-        axp.enableButtonBatteryCharge();
-        axp.setALDO3Voltage(3300);
-        axp.enableALDO3();                                                    // switch on GPS
-      #elif HELTEC_WIRELESS_TRACKER
-        #ifdef VEXT_CTRL
-          digitalWrite(VEXT_CTRL, HIGH);
-          // Display was also turned off. Reinitialize..
-          #ifdef HAS_TFT
-            tft.init();
-            tft.begin();
-            tft.setRotation(1);
-            tft.setTextFont(0);
-            tft.fillScreen(TFT_BLACK);
-
-            tft.setTextColor(TFT_WHITE,TFT_BLACK);
-            tft.setTextSize(bigSizeFont);
-            tft.setCursor(0, 0);
-            display_do_full_refresh = true;
-            fillDisplayLine1(5);
-            fillDisplayLine2();
-            fillDisplayLines3to5(1);
-          #endif
-        #endif
-      #endif
-      gps_task_enabled = true;
-    }
-    t_gps_powersave_operation_until_fix = 0L;
+    if (!gps_task_enabled)
+      do_poweron_gps(0);
     if (!xHandle_GPS) {
       // new process: GPS
       writedisplaytext(Tcall,"","Init:","Waiting for GPS","","");
       xTaskCreate(taskGPS, "taskGPS", 5000, nullptr, 1, &xHandle_GPS);
       writedisplaytext(Tcall,"","Init:","GPS Task Created!","","");
-    } else {
-      vTaskResume(xHandle_GPS);
-    }
+    } // else: resume() done by do_poweron_gps()
   } else {
-    gps_task_enabled = false;
-    t_gps_powersave_operation_until_fix = millis();
-    t_gps_fix_lost = millis();
-    gps_isValid = false;
-    #ifdef T_BEAM_V1_0
-      axp.setPowerOutPut(AXP192_LDO3, AXP202_OFF);                          // switch off GPS
-    #elif T_BEAM_V1_2
-      axp.disableALDO3();                                                   // switch off GPS
-      axp.disableButtonBatteryCharge();				            // disable charge of the gps battery
-    #elif HELTEC_WIRELESS_TRACKER
-      #ifdef VEXT_CTRL
-        digitalWrite(VEXT_CTRL, LOW);
-      #endif
-    #endif
+    do_poweroff_gps();
   }
   Serial.printf("GPS powered %s\r\n", gps_state ? "on" : "off");
   gps_state_before_autochange = false;
@@ -4226,6 +4225,43 @@ void setup_compile_flags_info()
 }
 
 
+void do_shutdown(boolean update_display_text = true, const String& status_message_detail = "") {
+  // enforce display wakeup (because we will not reach the timer function for setting it on)
+  enableOled_now();
+
+  if (update_display_text)
+    writedisplaytext("((HALT))","","Powering","down","","");
+
+  esp_task_wdt_reset();
+  #ifdef ENABLE_WIFI
+    do_send_status_message_about_shutdown_to_aprsis();
+  #endif
+  esp_task_wdt_reset();
+  delay(2000);
+
+  // send_status_message_about_shutdown_to_rf() writes also to display. Display HALT afterwards
+  if (send_status_message_about_shutdown_to_rf) {
+    String msg = String("B") + buildnr + String(",up:") + String((int ) (millis()/1000/60)) + String(" qrt");
+    if (!status_message_detail.isEmpty())
+      msg = msg + " " + status_message_detail;
+    sendStatusPacket(msg);
+  }
+
+  #ifdef T_BEAM_V1_0
+    axp.setChgLEDMode(AXP20X_LED_OFF);
+    axp.shutdown();
+  #elif T_BEAM_V1_2
+    axp.setChargingLedMode(XPOWERS_CHG_LED_OFF);
+    axp.shutdown();
+  #else
+    display.dim(true);
+  #ifdef VEXT_CTRL
+    digitalWrite(VEXT_CTRL, LOW);
+  #endif
+    esp_deep_sleep_start();
+  #endif
+}
+
 // + SETUP --------------------------------------------------------------+//
 void setup()
 {
@@ -4260,16 +4296,12 @@ void setup()
   Wire.begin(I2C_SDA, I2C_SCL);
 
 #ifdef HAS_TFT
-  tft.init();
-  tft.begin();
-  tft.setRotation(1);
-  tft.setTextFont(0);
-  tft.fillScreen(TFT_BLACK);
-
-  tft.setTextColor(TFT_WHITE,TFT_BLACK);
-  tft.setTextSize(bigSizeFont);
-  tft.setCursor(0, 0);
-  display_do_full_refresh = true;
+  #ifdef VEXT_CTRL
+    #if HELTEC_WIRELESS_TRACKER
+      digitalWrite(VEXT_CTRL, HIGH);
+    #endif
+  #endif
+  do_tft_init();
 #else
   // Enable OLED as soon as possible, for better disgnostics
    if (!display.begin(SSD1306_SWITCHCAPVCC, SSD1306_ADDRESS)) {
@@ -5606,9 +5638,7 @@ void handle_usb_serial_input(void) {
             Serial.println("  nmea <on|off>");
             Serial.println("  trace <on|off>");
             Serial.println("  reboot");
-#if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
             Serial.println("  shutdown");
-#endif
 #ifdef ENABLE_WIFI
             Serial.println("  wifi <on|off>");
 #endif
@@ -5626,31 +5656,13 @@ void handle_usb_serial_input(void) {
             #endif
             delay(500);
             ESP.restart();
-#if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
           } else if (cmd == "shutdown") {
-            // enforce display wakeup (because we will not reach the timer function for setting it on)
-            enableOled_now();
-            // send_status_message_about_shutdown_to_rf() writes also to display. Display HALT afterwards
-            if (send_status_message_about_shutdown_to_rf) {
-              String msg = String("B") + buildnr + String(",up:") + String((int ) (millis()/1000/60)) + String(" qrt");
-              sendStatusPacket(msg);
-            }
-            writedisplaytext("((HALT))","","Powering","down","","");
-#ifdef ENABLE_WIFI
-            do_send_status_message_about_shutdown_to_aprsis();
-#endif
+            // enableOled_now() is called by do_shutdown()
             Serial.println("*** shutdown: halting!");
             #if defined(ENABLE_SYSLOG) && defined(ENABLE_WIFI)
               syslog_log(LOG_WARNING, String("usb-serial: halting: user entered shutdown command. Shutdown.."));
             #endif
-            delay(500);
-            #ifdef T_BEAM_V1_0
-              axp.setChgLEDMode(AXP20X_LED_OFF);
-            #elif T_BEAM_V1_2
-              axp.setChargingLedMode(XPOWERS_CHG_LED_OFF);
-            #endif
-            axp.shutdown();
-#endif // T_BEAM_V1_x
+            do_shutdown();
           } else if (cmd == "version") {
             Serial.print("*** version: ");
             Serial.print(VERSION);
@@ -6207,93 +6219,108 @@ void loop()
         if (debug_verbose > 1) Serial.printf("Button has been pressed %dx (2)\r\n", button_down_count);
       #endif
       if (digitalRead(BUTTON) == HIGH) {
-        #if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
-          if (shutdown_active && shutdown_countdown_timer_enable) {
-            enableOled_now(); // turn ON OLED now
-            shutdown_countdown_timer_enable = false;
+        if (shutdown_active && shutdown_countdown_timer_enable) {
+          enableOled_now(); // turn ON OLED now
+          shutdown_countdown_timer_enable = false;
+          #if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
             writedisplaytext("((ABORT))","","Shutdown aborted:","middle Button","was pressed","");
-            button_key_up = true;
-            button_down_count = 0;
-          } else
-        #endif
-          if (!(display_is_on && enabled_oled)) {
-            write2display();
-            enableOled_now(); // turn ON OLED now
-            button_down_count = 0;
-          } else {
-            enableOled(); // rewind oled_timer
-            freeze_display = true;
-            #ifdef DEVELOPMENT_DEBUG
-              if (debug_verbose > 1) Serial.printf("Button Count (Oled on): %d\r\n", button_down_count);
-            #endif
-            if (button_down_count == 1) {
-              write_last_heard_calls_with_distance_and_course_to_display();
-              // double click? -> Send beacon
-              delay(500);
-              if (digitalRead(BUTTON) == LOW) {
-                goto send_beacon;
-              }
-            } else if (button_down_count == 2) {
-              String RXMessageTimeAndSender = "";
-              if (!LastRXMessageSender.isEmpty()) {
-                String RXMessageTimeStr;
-                if (LastRXMessageTimeStr.isEmpty()) {
-                  RXMessageTimeStr = compute_time_since_received(millis()/1000L - LastRXMessageChanged/1000L) + " ago";
-                } else {
-                  RXMessageTimeStr = LastRXMessageTimeStr;
-                }
-                RXMessageTimeAndSender = RXMessageTimeStr + " " + LastRXMessageSender + ":";
-              }
-              writedisplaytext("((MSG))",RXMessageTimeAndSender,LastRXMessage,"","","");
-              // Message has been displayed, we can remove the "new message-indicator"
-              if (LastRXMessageInfo & 2) {
-                // last received was a winlink notification and we just read that message
-                winlink_notified = 0L;
-              }
-              LastRXMessageInfo = 0;
-            } else if (button_down_count < 6) {
-              int n = button_down_count-3;
-              writedisplaytext("RX raw-" + String(n+1),"",RX_RAW_PACKET_LIST[n],"","","");
-              time_to_refresh = millis() + showRXTime;
-            } else if (button_down_count == 6) {
-              writedisplaytext("((BN))","BuildNr:" + buildnr,"by DL9SAU & DL3EL","","next press: tx bcn","or wait ...");
-            } else if (button_down_count == 7) {
-send_beacon:
-              button_down_count = 0;
-              if (lora_tx_enabled || aprsis_enabled || usb_serial_data_type == 0 || usb_serial_data_type & 2) {
-                freeze_display = false;
-                fillDisplayLines3to5(1);
-                if (gps_state && gps_isValid) {
-#ifdef ENABLE_WIFI
-                  writedisplaytext("((MAN TX))","SSID: " + oled_wifi_SSID_curr, "IP: " + oled_wifi_IP_curr, OledLine3, OledLine4, OledLine5);
-#else
-                  fillDisplayLines3to5(0);
-                  writedisplaytext("((MAN TX))","","",OledLine3, OledLine4, OledLine5);
-#endif
-                  sendpacket(SP_POS_GPS);
-                } else {
-#ifdef ENABLE_WIFI
-                  writedisplaytext("((FIX TX))","SSID: " + oled_wifi_SSID_curr, "IP: " + oled_wifi_IP_curr, OledLine3, OledLine4, OledLine5);
-#else
-                  fillDisplayLines3to5(0);
-                  writedisplaytext("((FIX TX))","","",OledLine3, OledLine4, OledLine5);
-#endif
-                  sendpacket(SP_POS_FIXED);
-                }
-                // reset timer for automatic fixed beacon after manual beacon
-                next_fixed_beacon = millis() + fix_beacon_interval;
-              }
-            } else {
-              #ifdef DEVELOPMENT_DEBUG
-                if (debug_verbose > 1) Serial.printf("Button pressed check >= 6: %d, shouldn't come here\r\n", button_down_count);
-              #endif
-              button_down_count = 0;
-            }
-            button_key_up = true;
-          }
-          #ifdef DEVELOPMENT_DEBUG
-            if (debug_verbose > 1) Serial.printf("Button still down %dx \r\n", button_down_count);
+          #else
+            writedisplaytext("((ABORT))","","Shutdown aborted:","User Button","was pressed","");
           #endif
+          button_key_up = true;
+          button_down_count = 0;
+        } else if (!(display_is_on && enabled_oled)) {
+            #if defined(HELTEC_WIRELESS_TRACKER) && defined(VEXT_CTRL) && defined(HAS_TFT)
+              if (gps_state && !gps_task_enabled) {
+                // On heltec wireles tracker we need to switch on VEXT_CTL on again if it was off
+                // GPS also wakes up, because it's controlled by the same pin
+                digitalWrite(VEXT_CTRL, HIGH);
+                do_poweron_gps(0);
+                // Display was also turned off. Reinitialize..
+                do_tft_init();
+                fillDisplayLine1(5);
+                fillDisplayLine2();
+                fillDisplayLines3to5(1);
+                display_is_on = false; // needed below (for state wake up: show main screeen, not ((LH)))
+              }
+            #endif
+          write2display();
+          enableOled_now(); // turn ON OLED now
+          button_down_count = 0;
+        } else {
+          enableOled(); // rewind oled_timer
+          freeze_display = true;
+          #ifdef DEVELOPMENT_DEBUG
+            if (debug_verbose > 1) Serial.printf("Button Count (Oled on): %d\r\n", button_down_count);
+          #endif
+          if (button_down_count == 1) {
+            write_last_heard_calls_with_distance_and_course_to_display();
+            // double click? -> Send beacon
+            delay(500);
+            if (digitalRead(BUTTON) == LOW) {
+              goto send_beacon;
+            }
+          } else if (button_down_count == 2) {
+            String RXMessageTimeAndSender = "";
+            if (!LastRXMessageSender.isEmpty()) {
+              String RXMessageTimeStr;
+              if (LastRXMessageTimeStr.isEmpty()) {
+                RXMessageTimeStr = compute_time_since_received(millis()/1000L - LastRXMessageChanged/1000L) + " ago";
+              } else {
+                RXMessageTimeStr = LastRXMessageTimeStr;
+              }
+              RXMessageTimeAndSender = RXMessageTimeStr + " " + LastRXMessageSender + ":";
+            }
+            writedisplaytext("((MSG))",RXMessageTimeAndSender,LastRXMessage,"","","");
+            // Message has been displayed, we can remove the "new message-indicator"
+            if (LastRXMessageInfo & 2) {
+              // last received was a winlink notification and we just read that message
+              winlink_notified = 0L;
+            }
+            LastRXMessageInfo = 0;
+          } else if (button_down_count < 6) {
+            int n = button_down_count-3;
+            writedisplaytext("RX raw-" + String(n+1),"",RX_RAW_PACKET_LIST[n],"","","");
+            time_to_refresh = millis() + showRXTime;
+          } else if (button_down_count == 6) {
+            writedisplaytext("((BN))","BuildNr:" + buildnr,"by DL9SAU & DL3EL","","next press: tx bcn","or wait ...");
+          } else if (button_down_count == 7) {
+send_beacon:
+            button_down_count = 0;
+            if (lora_tx_enabled || aprsis_enabled || usb_serial_data_type == 0 || usb_serial_data_type & 2) {
+              freeze_display = false;
+              fillDisplayLines3to5(1);
+              if (gps_state && gps_isValid) {
+#ifdef ENABLE_WIFI
+                writedisplaytext("((MAN TX))","SSID: " + oled_wifi_SSID_curr, "IP: " + oled_wifi_IP_curr, OledLine3, OledLine4, OledLine5);
+#else
+                fillDisplayLines3to5(0);
+                writedisplaytext("((MAN TX))","","",OledLine3, OledLine4, OledLine5);
+#endif
+                sendpacket(SP_POS_GPS);
+              } else {
+#ifdef ENABLE_WIFI
+                writedisplaytext("((FIX TX))","SSID: " + oled_wifi_SSID_curr, "IP: " + oled_wifi_IP_curr, OledLine3, OledLine4, OledLine5);
+#else
+                fillDisplayLines3to5(0);
+                writedisplaytext("((FIX TX))","","",OledLine3, OledLine4, OledLine5);
+#endif
+                sendpacket(SP_POS_FIXED);
+              }
+              // reset timer for automatic fixed beacon after manual beacon
+              next_fixed_beacon = millis() + fix_beacon_interval;
+            }
+          } else {
+            #ifdef DEVELOPMENT_DEBUG
+              if (debug_verbose > 1) Serial.printf("Button pressed check >= 6: %d, shouldn't come here\r\n", button_down_count);
+            #endif
+            button_down_count = 0;
+          }
+          button_key_up = true;
+        }
+        #ifdef DEVELOPMENT_DEBUG
+          if (debug_verbose > 1) Serial.printf("Button still down %dx \r\n", button_down_count);
+        #endif
       } else {
         #ifdef DEVELOPMENT_DEBUG
           if (debug_verbose > 1) Serial.printf("Button now up %dx \r\n", button_down_count);
@@ -6319,110 +6346,87 @@ send_beacon:
             1
           #endif
       )) {
-    static uint32_t t_gps_powersave_operation_until_fix__next_action = 0L;
-    static uint8_t gps_wakeups = 0;
+    static uint32_t t_gps_powersave_operation__next_action = 0L;
+    static uint8_t gps_wakeups = 3; // initial sleep will be 8min
+    static uint32_t t_last_movement = 0L;
     boolean do_suspend_gps = false;
     boolean do_resume_gps = false;
-    boolean gps_may_sleep_because_we_dont_move = false;
 
-    if (t_gps_fix_lost == 0L && t_gps_powersave_operation_until_fix == 0L && gps_isValid) {
-      static uint32_t last_tests = millis();
-      static double lastDoubleLat = 0.0f;
-      static double lastDoubleLng = 0.0f;
-      if (last_tests + 5*60*1000L < millis()) {
-        if (curr_kmph < 3.6 || TinyGPSPlus::distanceBetween(lastDoubleLat, lastDoubleLng, bestDoubleLat, bestDoubleLng) < 185.2) {
-          // gps may sleep
-          gps_may_sleep_because_we_dont_move = true;
-        }
-        lastDoubleLat = bestDoubleLat;
-        lastDoubleLng = bestDoubleLng;
-        last_tests = millis();
-      }
-    }
+    if (gps_task_enabled && gps_isValid && t_gps_fix_lost == 0L && t_gps_got_first_fix_after_last_loss > 0L) {
+      static double lastStopAfterMoveDoubleLat = bestDoubleLat;
+      static double lastStopAfterMoveDoubleLng = bestDoubleLng;
+      float dist = TinyGPSPlus::distanceBetween(lastStopAfterMoveDoubleLat, lastStopAfterMoveDoubleLng, bestDoubleLat, bestDoubleLng);
 
-    if (t_gps_fix_lost > 0L || gps_may_sleep_because_we_dont_move) {
+      // GPS is valid
+      // -> reset gps_wakups to 3 -> initial sleep after loss will be 8min
+      gps_wakeups = 3;
+      // make sure that the next_action timer is reset. This mitigates the case
+      // when gps fix is lost and timer is -15min (which could lead to an immediate gps sleep condition
+      // in the gps toggle part below)
+      t_gps_powersave_operation__next_action = 0L;
 
-      if (t_gps_powersave_operation_until_fix == 0L) {
-        if (gps_may_sleep_because_we_dont_move || millis() - t_gps_fix_lost > 10*60*1000L) {
-          t_gps_powersave_operation_until_fix = millis();
-          gps_wakeups = 0;
-          if (gps_task_enabled)
-            do_suspend_gps = true;
-        }
-      } else if (t_gps_powersave_operation_until_fix__next_action > 0L && millis() > t_gps_powersave_operation_until_fix__next_action) {
-        if (gps_task_enabled)
-          do_suspend_gps = true;
-        else
-          do_resume_gps = true;
-      }
+      // Movement detection: poweroff gps after detected speed or distance >limit
+      if (t_last_movement > 0L && millis() - t_last_movement > 5*60*1000L &&
+           ( (dist < 185.2 && millis() - t_gps_got_first_fix_after_last_loss > 3*60*1000L) ||
+             (curr_kmph < (sb_min_speed > 7.2 ? sb_min_speed/2 : 3.6) && millis() - t_gps_got_first_fix_after_last_loss > 1*60*1000L) ) ) {
 
-      if (do_suspend_gps && gps_task_enabled) {
-        gps_task_enabled = false;  // vTaskSuspend() is done by taskGPS itself (he needs to delete the wdt timer)
-        #ifdef T_BEAM_V1_0
-          axp.setPowerOutPut(AXP192_LDO3, AXP202_OFF);                          // switch off GPS
-        #elif T_BEAM_V1_2
-          axp.disableALDO3();                                                   // switch off GPS
-        #elif HELTEC_WIRELESS_TRACKER
-          #ifdef VEXT_CTRL
-            digitalWrite(VEXT_CTRL, LOW);
-          #endif
-        #endif
-        gps_isValid = false;
-        t_gps_fix_lost = millis();
-        // No fix? Sleep intervals 1min, 2min, 4min, 8min, 1min, 2min, .. No-movement-case: Ratio 5min:5min
-        if (gps_may_sleep_because_we_dont_move) {
-          t_gps_powersave_operation_until_fix__next_action = millis() + 5*60*1000L;
-          gps_wakeups = 2; // make gps to be awake also 5min
-        } else {
-          t_gps_powersave_operation_until_fix__next_action = millis() + (1 << (gps_wakeups % 4)) * 60*1000L;
-        }
-      } else if (do_resume_gps && !gps_task_enabled) {
-        if (xHandle_GPS) {
-          #ifdef T_BEAM_V1_0
-            axp.setPowerOutPut(AXP192_LDO3, AXP202_ON);                           // switch on GPS
-          #elif T_BEAM_V1_2
-            axp.setALDO3Voltage(3300);
-            axp.enableALDO3();                                                    // switch on GPS
-          #elif HELTEC_WIRELESS_TRACKER
-            #ifdef VEXT_CTRL
-              // Display was also turned off. Reinitialize..
-              digitalWrite(VEXT_CTRL, HIGH);
-              #ifdef HAS_TFT
-                tft.init();
-                tft.begin();
-                tft.setRotation(1);
-                tft.setTextFont(0);
-                tft.fillScreen(TFT_BLACK);
-
-                tft.setTextColor(TFT_WHITE,TFT_BLACK);
-                tft.setTextSize(bigSizeFont);
-                tft.setCursor(0, 0);
-                display_do_full_refresh = true;
-                fillDisplayLine1(5);
-                fillDisplayLine2();
-                fillDisplayLines3to5(1);
-              #endif
-            #endif
-          #endif
-          gps_task_enabled = true;
-          t_gps_fix_lost = millis();
-          vTaskResume(xHandle_GPS);
-          // Keep running first try: 6.25min, 5.41min, 5min, 8.75min, 6.25min, ..
-          // No gps fix since 3 rounds? -> Give once (every 4 rounds) a higher grace time for getting a fix (10min)
-          gps_wakeups++;
-          //t_gps_powersave_operation_until_fix__next_action = millis() + ((gps_wakeups % 12) ? (2*60*1000L / ((gps_wakeups % 4) + 1)) : 10*60*1000L);
-          t_gps_powersave_operation_until_fix__next_action = millis() + ((gps_wakeups % 12) ? ((5*60*1000L / ((gps_wakeups % 4) + 1))+3.75*60*1000L) : 10*60*1000L);
+        // t_gps_got_first_fix_after_last_loss > 1min also ensures that gps does not run for only a few seconds.
+        // gps should sleep
+        do_suspend_gps = true;
+        // No-movement-case: starts with Ratio 4min sleep 5min awake, then
+        // (if no fix) 8min sleep, 8.75min awake, or (if fix and still not moving) this ratio again
+        gps_wakeups = 2;
+      } else {
+        if (t_last_movement == 0L || dist >= 185.2 || curr_kmph >= (sb_min_speed > 7.2 ? sb_min_speed/2 : 3.6)) {
+          t_last_movement = millis();
+          // store last position only on these cases: initial (t_last_movement == 0), or (dist or speed) < limit
+          // So we always compare the distance between current lat/lon and last movement.
+          // So even if we move slow, we can detect this (which would not be the case
+          // if we would always store lat/lon)
+          lastStopAfterMoveDoubleLat = bestDoubleLat;
+          lastStopAfterMoveDoubleLng = bestDoubleLng;
         }
       }
-
     } else {
-      if (t_gps_powersave_operation_until_fix > 0L) {
-        t_gps_powersave_operation_until_fix = 0L;
-        t_gps_powersave_operation_until_fix__next_action = 0L;
+      // GPS fix lost. Go to normal cyclic gps toggle below
+      t_last_movement = 0L;
+    }
+
+    if (!do_suspend_gps && t_gps_fix_lost > 0L) {
+      if (gps_task_enabled && millis() - t_gps_fix_lost > 10*60*1000L) {
+        // new powersave operation cycle, because we lost gps fix 10min ago
+  Serial.print(String(millis()/1000));
+  Serial.println(" debug: powersave operation may start1");
+        do_suspend_gps = true;
+      } else if (t_gps_powersave_operation__next_action > 0L && millis() > t_gps_powersave_operation__next_action) {
+        // powersave operation on/off toggles
+        if (gps_task_enabled) {
+          do_suspend_gps = true;
+        } else {
+          do_resume_gps = true;
+        }
+  Serial.print(String(millis()/1000));
+  Serial.println(" debug: powersave operation may start2");
       }
     }
 
+
+    // Power saving capabilities with sleep-if-no-gps-fix:
+    // ((8.75*2+10)+6.25*3+5.41*3+5*3) / (((8.75*2+10)+6.25*3+5.41*3+5*3) + (8*3+1*3+2*3+4*3)) = 0.63 % power
+    if (do_suspend_gps) {
+      do_poweroff_gps();
+      // No fix? Sleep intervals 8min, 1min, 2min, 4min, 8min, 1min, 2min, ..
+      t_gps_powersave_operation__next_action = millis() + (1 << (gps_wakeups % 4)) * 60*1000L;
+    } else if (do_resume_gps) {
+      do_poweron_gps(1);
+      // Keep running first try: 8.75min, 6.25min, 5.41min, 5min, 8.75min, 6.25min, ..
+      // No gps fix since 3 rounds? -> Give once (every 4 rounds) a higher grace time for getting a fix (10min)
+      gps_wakeups++;
+      //t_gps_powersave_operation__next_action = millis() + ((gps_wakeups % 12) ? (2*60*1000L / ((gps_wakeups % 4) + 1)) : 10*60*1000L);
+      t_gps_powersave_operation__next_action = millis() + ((gps_wakeups % 12) ? ((5*60*1000L / ((gps_wakeups % 4) + 1))+3.75*60*1000L) : 10*60*1000L);
+    }
   }
+
 
   // Time to adjust time?
   int8_t t_hour_adjust_next = -1;
@@ -6478,6 +6482,8 @@ send_beacon:
         bestDoubleLat = gps.location.lat();
         bestDoubleLng = gps.location.lng();
         bestHdop = curr_hdop;
+        if (t_gps_got_first_fix_after_last_loss == 0L)
+          t_gps_got_first_fix_after_last_loss = millis();
       }
 
       uint32_t t_elapsed = millis() - t_interval_start;
@@ -6528,6 +6534,7 @@ send_beacon:
     // String functions are cpu consuming. We adust string aprsPresetShown only if we changed status.
     if (!gps_isValid) {
       t_gps_fix_lost = millis();
+      t_gps_got_first_fix_after_last_loss = 0L;
       // update to the old values
       update_speed_from_gps();
       if (gps_state && gps.speed.age() < 2000 && curr_knots > 4.0 && curr_hdop < 1.5) {
@@ -6618,7 +6625,11 @@ send_beacon:
     }
   } else {
     // state change of oled timer? switch backlight on, if oled is enabled
-    if (enabled_oled && oled_timer != 0L) {
+    if (enabled_oled && oled_timer != 0L
+          #if defined(HELTEC_WIRELESS_TRACKER) && defined(VEXT_CTRL) && defined(HAS_TFT)
+            && (!gps_state || gps_task_enabled)
+          #endif
+          ) {
       display.dim(false);
       display_is_on = true;
     } // else: enabled_oled == false: never turn on. enabled_oled == true and oled_timer == 0L: recently turned off -> also no need to be turned on.
@@ -6653,12 +6664,8 @@ send_beacon:
     } else {
       #ifdef HELTEC_WIRELESS_TRACKER
         writedisplaytext("LoRa-APRS","","Button:","Shutdown","","Release Button now!");
-        delay(3000);
-        display.dim(true);
-        #ifdef VEXT_CTRL
-          digitalWrite(VEXT_CTRL, LOW);
-        #endif
-        esp_deep_sleep_start();
+        delay(1000);
+        do_shutdown(false);
       #else
         writedisplaytext("LoRa-APRS","","Button:","Rebooting,","for stoping WiFi.","Release Button now!");
         do_send_status_message_about_reboot_to_aprsis();
@@ -6669,14 +6676,11 @@ send_beacon:
 #else
   #ifdef HELTEC_WIRELESS_TRACKER
     writedisplaytext("LoRa-APRS","","Button:","Shutdown","","Release Button now!");
-    delay(3000);
-    display.dim(true);
-    #ifdef VEXT_CTRL
-      digitalWrite(VEXT_CTRL, LOW);
-    #endif
-    esp_deep_sleep_start();
+    delay(1000);
+    do_shutdown(false);
   #else
     writedisplaytext("LoRa-APRS","","Button:","Rebooting","","Release Button now!");
+    do_send_status_message_about_reboot_to_aprsis();
     delay(3000);
     ESP.restart();
   #endif
@@ -6701,44 +6705,11 @@ send_beacon:
            // ^kiss client has not recently sent a position gain (sb_max_interval plus 10 seconds grace) and kiss client sent no other data
          ((time_last_frame_via_kiss_received + sb_max_interval * 2 + 10*1000L) < millis())) {
             // ^ kiss client sent no positions and stoped sending other data for 2*sb_max_interval (plus 10 seconds grace)
-#if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
-      if (!gps_state && gps_state_before_autochange) {
-        #ifdef T_BEAM_V1_0
-          axp.setPowerOutPut(AXP192_LDO3, AXP202_ON);
-        #elif T_BEAM_V1_2
-          axp.setALDO3Voltage(3300);
-          axp.enableALDO3();
-        #elif HELTEC_WIRELESS_TRACKER
-          #ifdef VEXT_CTRL
-            // Display was also turned off. Reinitialize..
-            digitalWrite(VEXT_CTRL, HIGH);
-            #ifdef HAS_TFT
-              tft.init();
-              tft.begin();
-              tft.setRotation(1);
-              tft.setTextFont(0);
-              tft.fillScreen(TFT_BLACK);
-
-              tft.setTextColor(TFT_WHITE,TFT_BLACK);
-              tft.setTextSize(bigSizeFont);
-              tft.setCursor(0, 0);
-              display_do_full_refresh = true;
-              fillDisplayLine1(5);
-              fillDisplayLine2();
-              fillDisplayLines3to5(1);
-            #endif
-          #endif
-        #endif
-        if (xHandle_GPS) {
-          gps_task_enabled = true;
-          vTaskResume(xHandle_GPS);
-          t_gps_powersave_operation_until_fix = 0L;
-        }
-      }
-#endif
+      if (!gps_state && gps_state_before_autochange)
+        do_poweron_gps(1);
       gps_state = gps_state_before_autochange;
       if (gps_state_before_autochange)
-      dont_send_own_position_packets = false;
+        dont_send_own_position_packets = false;
       time_last_own_position_via_kiss_received = 0L;
       time_last_frame_via_kiss_received = 0L;
 #ifdef ENABLE_BLUETOOTH
@@ -6789,24 +6760,49 @@ send_beacon:
   }
 #endif
 
+  // On T-Beam >= V1.0, we have the AXP chip which does good battery management.
+  // And we can inform if USB power is pluggd in/off, and do a shutdown (if configured) on plug off.
+  // On other devices it's a good ide to do use the esp32_depp_sleep function in order to prevent
+  // battery damage. We "re-used" the usb_status variable from the previous T-Beam implementation
+  // On a device with AXP, InpVolt > 4.3 indicates we run on external power; else: on battery.
+  //   The AXP chip does his job and prevents deep discharge; we don't need here to handle this case.
+  // On a device without AXP, InpVolt > 3.4 indicates our battery charge is still ok; else: enter deep sleep.
   #if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
     //if (InpVolts > 4.3) {  // No, my usb hub suddenly only made 4.1V
-    if (InpVolts > 4.0) {
+    if (InpVolts > 4.1) {
+  #else
+    if (InpVolts > 3.4) {
+  #endif
       if (!usb_status_before) {
         enableOled_now(); // Turn Oled on as indicatior that external power is plugged on
         if (shutdown_active && shutdown_countdown_timer_enable) {
           shutdown_countdown_timer_enable = false;
-          writedisplaytext("((ABORT))","External Power","plugged in","Shutdown aborted","","");
+          #if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
+            writedisplaytext("((ABORT))","External Power","plugged in","Shutdown aborted","","");
+          #else
+            writedisplaytext("((ABORT))","External Power","Voltage ok","Shutdown aborted","","");
+          #endif
           freeze_display = true;
         } else {
-          writedisplaytext("((POWER))","External Power","plugged in","","","");
+          #if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
+            writedisplaytext("((POWER))","External Power","plugged in","","","");
+          #else
+            writedisplaytext("((POWER))","External Power","Voltage ok","","","");
+          #endif
         }
         usb_status_before = true;
       }
     } else {
       if (usb_status_before) {
         enableOled_now(); // Turn Oled on as indicatior that external power is plugged off
-        writedisplaytext("((POWER))","","External Power","plugged off","Running on","batteries now");
+        #if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
+          writedisplaytext("((POWER))","","External Power","plugged off","Running on","batteries now");
+        #else
+          if (shutdown_active && !shutdown_countdown_timer_enable)
+            writedisplaytext("((POWER))","","External Power","Voltage too low!","Enabling","shutdown timer");
+           else
+            writedisplaytext("((POWER))","","External Power","Voltage too low!","Use shutdown timer to","prevent LiPo damage");
+        #endif
         freeze_display = true;
         if (shutdown_active && !shutdown_countdown_timer_enable) {
           shutdown_countdown_timer_enable = true;
@@ -6821,26 +6817,25 @@ send_beacon:
             enableOled_now(); // Turn Oled on as indicatior that external power is plugged off
             if ((millis() >= shutdown_countdown_timer)) {
               // send_status_message_about_shutdown_to_rf() writes also to display. Display HALT afterwards
+              String msg = "";
               if (send_status_message_about_shutdown_to_rf) {
-                String msg = String("B") + buildnr + String(",up:") + String((int ) (millis()/1000/60)) + String(" qrt (ext. power plugged off)");
-                sendStatusPacket(msg);
+                #if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
+                  msg = "ext. power plugged off";
+                #else
+                  msg = "V low: " + String(InpVolts, 2) + "";
+                #endif
               }
-              writedisplaytext("((HALT))","","Powering","down","","");
-              #ifdef ENABLE_WIFI
-                do_send_status_message_about_shutdown_to_aprsis();
-              #endif
               #if defined(ENABLE_SYSLOG) && defined(ENABLE_WIFI)
                 syslog_log(LOG_WARNING, String("shutdown_countdown_timer_enable: halting: timer expired after powerloss or undervoltage. Shutdown.."));
               #endif
-              delay(2000);
-              #ifdef T_BEAM_V1_0
-                axp.setChgLEDMode(AXP20X_LED_OFF);
-              #elif T_BEAM_V1_2
-                axp.setChargingLedMode(XPOWERS_CHG_LED_OFF);
-              #endif
-              axp.shutdown();
+              delay(1000);
+              do_shutdown(true, msg);
             } else {
-              writedisplaytext("((POWER))","","External Power","plugged off","Shutdown in",String((shutdown_countdown_timer-millis())/1000) + String("s"));
+              #if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
+                writedisplaytext("((POWER))","","External Power","plugged off","Shutdown in",String((shutdown_countdown_timer-millis())/1000) + String("s"));
+              #else
+                writedisplaytext("((POWER))","","External Power",String("too low:")+String(InpVolts, 2),"Shutdown in",String((shutdown_countdown_timer-millis())/1000) + String("s"));
+              #endif
               freeze_display = true;
             }
           } else if (shutdown_countdown_timer - shutdown_delay_time + 15500L >= millis()) {
@@ -6849,7 +6844,6 @@ send_beacon:
         }
       }
     }
-  #endif
 
   #ifdef KISS_PROTOCOL
     String *TNC2DataFrame = nullptr;
@@ -6874,25 +6868,9 @@ send_beacon:
             #endif
             if (!dont_send_own_position_packets) {
               gps_state_before_autochange = gps_state;
-              if (gps_allow_sleep_while_kiss) {
-                #if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
-                  if (gps_state) {
-                    gps_isValid = false;
-                    gps_task_enabled = false;  // vTaskSuspend() is done by taskGPS itself (he needs to delete the wdt timer)
-                    #ifdef T_BEAM_V1_0
-                      axp.setPowerOutPut(AXP192_LDO3, AXP202_OFF);                           // switch off GPS
-                    #elif T_BEAM_V1_2
-                      axp.disableALDO3();
-                    #elif HELTEC_WIRELESS_TRACKER
-                      #ifdef VEXT_CTRL
-                        digitalWrite(VEXT_CTRL, LOW);
-                      #endif
-                    #endif
-                }
-                #endif
+              if (gps_allow_sleep_while_kiss && gps_state) {
+                do_poweroff_gps();
                 gps_state = false;
-                t_gps_powersave_operation_until_fix = millis();
-                t_gps_fix_lost = millis();
               }
               dont_send_own_position_packets = true;
               // TODO: there are also tcp kiss devices. Instead of 'kiss_client_came_via_bluetooth', we should mark it in a session struct where we can iterate through

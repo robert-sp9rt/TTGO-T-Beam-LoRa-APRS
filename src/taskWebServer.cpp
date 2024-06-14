@@ -117,16 +117,15 @@ const int MAX_RECEIVED_LIST_SIZE = 50;
 // last i/o to aprsis-connection (needed for anti-idle timer)
 uint32_t t_aprsis_lastRXorTX = 0L;
 
+extern void do_shutdown(boolean, const String &);
+
 // needed for aprsis igate functionality
 String aprsis_status = "Disconnected";
 // aprsis 3rd party traffic encoding
 String generate_third_party_packet(String, String);
 void do_send_status_message_about_reboot_to_aprsis();
-extern void sendStatusPacket(const String &);
 extern String handle_aprs_messsage_addressed_to_us(const char *);
-#if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
 void do_send_status_message_about_shutdown_to_aprsis();
-#endif
 #ifdef KISS_PROTOCOL
 extern void sendToTNC(const String &);
 #endif
@@ -426,31 +425,12 @@ void handle_Beacon() {
 }
 
 void handle_Shutdown() {
-  #if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
-    #if defined(ENABLE_SYSLOG)
-      syslog_log(LOG_WARNING, String("WebServer: Shutdown Request -> Shutdown..."));
-    #endif
-    Serial.println("WebServer: Shutdown Request -> Shutdown...");
-    server.send(200,"text/html", "Shutdown");
-    if (send_status_message_about_shutdown_to_rf) {
-      String msg = String("B") + buildnr + String(",up:") + String((int ) (millis()/1000/60)) + String(" qrt");
-      sendStatusPacket(msg);
-    }
-    do_send_status_message_about_shutdown_to_aprsis();
-    delay(500);
-    #ifdef T_BEAM_V1_0
-      axp.setChgLEDMode(AXP20X_LED_OFF);
-    #elif T_BEAM_V1_2
-      axp.setChargingLedMode(XPOWERS_CHG_LED_OFF);
-    #endif
-    axp.shutdown();
-  #else
-    #if defined(ENABLE_SYSLOG)
-      syslog_log(LOG_WARNING, String("WebServer: Shutdown Request. Your device does not support this. Canceled!"));
-    #endif
-    do_serial_println("WebServer: Shutdown Request -> Your device does not support this. Canceled!");
-    server.send(404,"text/html", "Not supported");
+  #if defined(ENABLE_SYSLOG)
+    syslog_log(LOG_WARNING, String("WebServer: Shutdown Request -> Shutdown..."));
   #endif
+  Serial.println("WebServer: Shutdown Request -> Shutdown...");
+  server.send(200,"text/html", "Shutdown");
+  do_shutdown(true, "");
 }
 
 void handle_Restore() {
@@ -1592,12 +1572,10 @@ void do_send_status_message_about_reboot_to_aprsis()
 {
   do_send_status_message_about_shutdown_or_reboot_to_aprsis(SSMASTA_REBOOT);
 }
-#if defined(T_BEAM_V1_0) || defined(T_BEAM_V1_2)
 void do_send_status_message_about_shutdown_to_aprsis()
 {
   do_send_status_message_about_shutdown_or_reboot_to_aprsis(SSMASTA_SHUTDOWN);
 }
-#endif
 
 // send status mesg to APRS-IS. If (re)booted, print BUILDNUMBER
 void do_send_status_message_about_connect_to_aprsis(void) {
