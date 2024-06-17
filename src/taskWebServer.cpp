@@ -85,6 +85,8 @@ extern ulong lora_speed_rx_curr;
 extern boolean lora_tx_enabled;
 extern boolean lora_rx_enabled;
 
+extern void sema_lock_or_unlock__lora(int);
+
 extern String aprsLatPreset;
 extern String aprsLonPreset;
 extern String aprsLatPresetNiceNotation;
@@ -99,12 +101,6 @@ extern String OledLine4;
 extern String OledLine5;
 
 extern char compile_flags[];
-
-#ifdef IF_SEMAS_WOULD_WORK
-extern xSemaphoreHandle sema_lora_chip;
-#else
-extern volatile boolean sema_lora_chip;
-#endif
 
 extern volatile boolean flag_lora_packet_available;
 
@@ -1622,11 +1618,9 @@ void do_send_status_message_about_connect_to_aprsis(void) {
   outString.replace(":>", ",RFONLY:>");
   if (lora_tx_enabled && tx_own_beacon_from_this_device_or_fromKiss__to_frequencies) {
     if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies % 2) {
-      esp_task_wdt_reset();
       loraSend(txPower, lora_freq, lora_speed, 0, outString);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
     }
     if (((tx_own_beacon_from_this_device_or_fromKiss__to_frequencies > 1 && lora_digipeating_mode > 1) || tx_own_beacon_from_this_device_or_fromKiss__to_frequencies == 5) && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq) {
-      esp_task_wdt_reset();
       loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, 0, outString);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
     }
   }
@@ -2128,49 +2122,23 @@ void read_from_aprsis(void) {
   // Sema locking is important because waitAvailableTimeout() calls available() which calls setModeRx() and this may cause a
   // panic if the chip is currently transmitting. We can skip this, if lora rx is disabled (which, btw, would not make sense)
   if (lora_rx_enabled) {
-    esp_task_wdt_reset();
     #ifdef HAS_SX127X
-      #ifdef IF_SEMAS_WOULD_WORK
-        int n = 0;
-        while (xSemaphoreTake(sema_lora_chip, 100) != pdTRUE) {
-          esp_task_wdt_reset();
-          if (n++ > 3000)
-            ESP.restart();
-         }
-      #else
-        for (int n = 0; sema_lora_chip; n++) {
-          delay(10);
-          if (!(n % 100))
-            esp_task_wdt_reset();
-          if (n > 30000)
-            ESP.restart();
-        }
-        sema_lora_chip = true;
-      #endif
+      sema_lock_or_unlock__lora(1);
       //flag_lora_packet_available = rf95.waitAvailableTimeout(lora_speed_rx_curr > 300 ? 2500 : 10000);
       flag_lora_packet_available = rf95.available();
-      esp_task_wdt_reset();
-      #ifdef IF_SEMAS_WOULD_WORK
-        xSemaphoreGive(sema_lora_chip);
-      #else
-        sema_lora_chip = false;
-      #endif
+      sema_lock_or_unlock__lora(0);
     #elif HAS_SX126X
       // RadioLib driver sets the flag if a packet is received
     #endif
     // After lock release, main thread could gather packet. Give him enough time to receive and parse the packet
     if (flag_lora_packet_available) {
       delay(250);
-      esp_task_wdt_reset();
     }
   }
   if (aprsis_data_allow_inet_to_rf % 2) {
-    esp_task_wdt_reset();
     loraSend(txPower, lora_freq, lora_speed, 0, third_party_packet);
-    esp_task_wdt_reset();
   }
   if (aprsis_data_allow_inet_to_rf > 1 && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq) {
-    esp_task_wdt_reset();
     loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, 0, third_party_packet);
   }
 }
@@ -2291,6 +2259,7 @@ void send_queue_to_aprsis()
     static bool aprsis_enabled_prev = aprsis_enabled;
     static bool lora_rx_enabled_prev = lora_rx_enabled;
     static bool lora_tx_enabled_prev = lora_tx_enabled;
+    bool unlock_sema_and_reinit_lora_chip = false;
     HTTPUpload& upload = server.upload();
     if (upload.status == UPLOAD_FILE_START) {
       lora_rx_enabled = false;
@@ -2299,24 +2268,7 @@ void send_queue_to_aprsis()
         aprsis_client.stop();
       }
       aprsis_enabled = false;
-      #ifdef IF_SEMAS_WOULD_WORK
-        int n = 0;
-        while (xSemaphoreTake(sema_lora_chip, 100) != pdTRUE) {
-          esp_task_wdt_reset();
-          if (n++ > 3000)
-            ESP.restart();
-        }
-      #else
-        for (int n = 0; sema_lora_chip; n++) {
-          delay(10);
-          if (!(n % 100))
-            esp_task_wdt_reset();
-          if (n > 30000)
-            ESP.restart();
-        }
-        sema_lora_chip = true;
-      #endif
-      esp_task_wdt_reset();
+      sema_lock_or_unlock__lora(1);
       #ifdef HAS_SX127X
         rf95.setTxPower(0);
         // hack to circumvent crash on interrupt handler isr0():
@@ -2350,29 +2302,7 @@ void send_queue_to_aprsis()
           syslog_log(LOG_ERR, String("Firmware: Update error: ") + Update.errorString());
         #endif
         Update.printError(Serial);
-        #ifdef T_BEAM_V1_0
-          axp.setPowerOutPut(AXP192_LDO2, AXP202_ON);
-        #elif T_BEAM_V1_2
-          axp.setALDO2Voltage(3300);
-          axp.enableALDO2();
-        #endif
-        // hack to circumvent crash on interrupt handler isr0():
-        #ifdef HAS_SX127X
-          rf95.setFrequency(lora_freq_rx_curr);
-          rf95.setTxPower(txPower);
-        #elif HAS_SX126X
-          radio.setFrequency(lora_freq_rx_curr);
-          radio.setOutputPower(txPower);
-        #endif
-        lora_set_speed(lora_speed_rx_curr);
-        lora_tx_enabled = lora_tx_enabled_prev;
-        lora_rx_enabled = lora_rx_enabled_prev;
-        aprsis_enabled = aprsis_enabled_prev;
-        #ifdef IF_SEMAS_WOULD_WORK
-          xSemaphoreGive(sema_lora_chip);
-        #else
-          sema_lora_chip = false;
-        #endif
+        unlock_sema_and_reinit_lora_chip = true;
       }
     } else if (upload.status == UPLOAD_FILE_END) {
       if (Update.end(true)) { //true to set the size to the current progress
@@ -2385,13 +2315,30 @@ void send_queue_to_aprsis()
           syslog_log(LOG_ERR, String("Firmware: Update error: ") + Update.errorString());
         #endif
         Update.printError(Serial);
-        #ifdef T_BEAM_V1_0
-          axp.setPowerOutPut(AXP192_LDO2, AXP202_ON);
-        #elif T_BEAM_V1_2
-          axp.setALDO2Voltage(3300);
-          axp.enableALDO2();
-        #endif
       }
+      unlock_sema_and_reinit_lora_chip = true;
+    }
+    if (unlock_sema_and_reinit_lora_chip) {
+      sema_lock_or_unlock__lora(0);
+      #ifdef T_BEAM_V1_0
+        axp.setPowerOutPut(AXP192_LDO2, AXP202_ON);
+      #elif T_BEAM_V1_2
+        axp.setALDO2Voltage(3300);
+        axp.enableALDO2();
+      #endif
+      // hack to circumvent crash on interrupt handler isr0():
+      #ifdef HAS_SX127X
+        rf95.setFrequency(lora_freq_rx_curr);
+        rf95.setTxPower(txPower);
+      #elif HAS_SX126X
+        radio.setFrequency(lora_freq_rx_curr);
+        radio.setOutputPower(txPower);
+      #endif
+      lora_set_speed(lora_speed_rx_curr);
+      lora_tx_enabled = lora_tx_enabled_prev;
+      lora_rx_enabled = lora_rx_enabled_prev;
+      aprsis_enabled = aprsis_enabled_prev;
+      unlock_sema_and_reinit_lora_chip = false;
     }
   });
   server.onNotFound(handle_NotFound);

@@ -1282,6 +1282,51 @@ out_relay_path:
 }
 
 
+#ifdef IF_SEMAS_WOULD_WORK
+void sema_lock_or_unlock__common(xSemaphoreHandle *sema, int acquire_lock) {
+#else
+void sema_lock_or_unlock__common(volatile boolean *sema, int acquire_lock) {
+#endif
+  if (acquire_lock) {
+    #ifdef IF_SEMAS_WOULD_WORK
+      int n = 0;
+      while (xSemaphoreTake(*sema, 0) != pdTRUE) {
+        vTaskDelay(10 / portTICK_PERIOD_MS);
+        if (!(n % 100))
+          esp_task_wdt_reset();
+        if (n++ > 30000)
+          ESP.restart();
+      }
+    #else
+      for (int n = 0; *sema; n++) {
+        vTaskDelay(10 / portTICK_PERIOD_MS);
+        if (!(n % 100))
+          esp_task_wdt_reset();
+        if (n > 30000)
+          ESP.restart();
+      }
+      *sema = true;
+    #endif
+  } else {
+    #ifdef IF_SEMAS_WOULD_WORK
+      xSemaphoreGive(*sema);
+    #else
+      *sema = false;
+    #endif
+  }
+}
+
+void sema_lock_or_unlock__lora(int acquire_lock) {
+  return sema_lock_or_unlock__common(&sema_lora_chip, acquire_lock);
+}
+void sema_lock_or_unlock__handle_aprs_message_addressed_to_us(int acquire_lock) {
+  return sema_lock_or_unlock__common(&sema_handle_aprs_message_addressed_to_us, acquire_lock);
+}
+void sema_lock_or_unlock__is_call_blacklisted(int acquire_lock) {
+  return sema_lock_or_unlock__common(&sema_is_call_blacklisted, acquire_lock);
+}
+
+
 /**
  * Send message as APRS LoRa packet
  * @param lora_LTXPower
@@ -1312,26 +1357,8 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, uint8_t fla
   else if (lora_speed  == 1200) wait_for_signal = 125;
 
   // sema lock for lora chip operations
-  esp_task_wdt_reset();
-#ifdef IF_SEMAS_WOULD_WORK
-  int n = 0;
-  while (xSemaphoreTake(sema_lora_chip, 100) != pdTRUE) {
-    esp_task_wdt_reset();
-    if (n++ > 3000)
-      ESP.restart();
-  }
-#else
-  for (int n = 0; sema_lora_chip; n++) {
-    delay(10);
-    if (!(n % 100))
-      esp_task_wdt_reset();
-    if (n > 30000)
-      ESP.restart();
-  }
-  sema_lora_chip = true;
-#endif
+  sema_lock_or_unlock__lora(1);
 
-  esp_task_wdt_reset();
 #ifdef T_BEAM_V1_0
   axp.setPowerOutPut(AXP192_LDO2, AXP202_ON);                           // switch LoRa chip on
 #elif T_BEAM_V1_2
@@ -1349,18 +1376,18 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, uint8_t fla
   // before any access to it
 
   for (int n = 0; n < 30; n++) {
-    esp_task_wdt_reset();
     delay(wait_for_signal);
     if (n == 1 && (flags & LORA_FLAGS_NODELAY)) {
       // send without delay (on turn), we may wait one round for checking ifg channel is free
       break;
     }
+    esp_task_wdt_reset();
     #ifdef HAS_SX127X
       if (rf95.SignalDetected()) {
         continue;
       }
     #endif
-    delay(100);
+    vTaskDelay(100 / portTICK_PERIOD_MS);
     #ifdef HAS_SX127X
       if (!rf95.SignalDetected() && random(256) < 64) break;
     #else
@@ -1373,7 +1400,6 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, uint8_t fla
     digitalWrite(TXLED, TXLED_HIGH);
   #endif
 
-  esp_task_wdt_reset();
   lora_set_speed(lora_SPEED);
   #ifdef HAS_SX127X
     //byte array
@@ -1384,8 +1410,8 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, uint8_t fla
     rf95.setFrequency(lora_FREQ);
     rf95.setTxPower(lora_LTXPower);
     rf95.setPreambleLength(lora_FREQ == lora_freq ? preambleLen : preambleLen_default);
+    esp_task_wdt_reset();
     rf95.sendAPRS(lora_TXBUFF, messageSize);
-    delay(100);
     rf95.waitPacketSent();
   #elif HAS_SX126X
     radio.setFrequency(lora_FREQ);
@@ -1453,16 +1479,10 @@ void loraSend(byte lora_LTXPower, float lora_FREQ, ulong lora_SPEED, uint8_t fla
     #endif
   }
 
-  // Mitigate locking problem when we called too early for digipeating to the second qrg
-  esp_task_wdt_reset();
-  delay(1000);
-  esp_task_wdt_reset();
   // release lock
-#ifdef IF_SEMAS_WOULD_WORK
-  xSemaphoreGive(sema_lora_chip);
-#else
-  sema_lora_chip = false;
-#endif
+  esp_task_wdt_reset();
+  sema_lock_or_unlock__lora(0);
+
 }
 
 
@@ -4691,24 +4711,7 @@ int packet_is_valid (const char *frame_start) {
 
 int is_call_blacklisted(const char *frame_start) {
 
-  esp_task_wdt_reset();
-  #ifdef IF_SEMAS_WOULD_WORK
-    int n = 0;
-    while (xSemaphoreTake(sema_is_call_blacklisted, 100) != pdTRUE) {
-      esp_task_wdt_reset();
-      if (n++ > 3000)
-        ESP.restart();
-    }
-  #else
-    for (int n = 0; sema_is_call_blacklisted; n++) {
-      delay(10);
-      if (!(n % 100))
-        esp_task_wdt_reset();
-      if (n > 30000)
-        ESP.restart();
-    }
-    sema_is_call_blacklisted = true;
-  #endif
+  sema_lock_or_unlock__is_call_blacklisted(1);
 
   // src-call_validation
   const char *p_call = frame_start;
@@ -4837,11 +4840,7 @@ int is_call_blacklisted(const char *frame_start) {
   ret = 0;
 
 end:
-  #ifdef IF_SEMAS_WOULD_WORK
-    xSemaphoreGive(sema_is_call_blacklisted);
-  #else
-    sema_is_call_blacklisted = false;
-  #endif
+  sema_lock_or_unlock__is_call_blacklisted(0);
   return ret;
 }
 
@@ -5832,11 +5831,9 @@ void handle_usb_serial_input(void) {
             writedisplaytext("((KISSTX))","",inputBuf,"","","");
             if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies % 2) {
               loraSend(txPower, lora_freq, lora_speed, 0, inputBuf);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
-              esp_task_wdt_reset();
             }
             if (((tx_own_beacon_from_this_device_or_fromKiss__to_frequencies > 1 && lora_digipeating_mode > 1) || tx_own_beacon_from_this_device_or_fromKiss__to_frequencies == 5) && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq) {
               loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, 0, inputBuf);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
-              esp_task_wdt_reset();
             }
           } else {
             Serial.println("*** Warning: lora tx must be enabled! Not sending to RF");
@@ -5880,23 +5877,7 @@ String handle_aprs_messsage_addressed_to_us(const char *received_frame) {
   char *header_normal_or_third_party_end;
   char *q;
 
-  #ifdef IF_SEMAS_WOULD_WORK
-    int n = n;
-    while (xSemaphoreTake(sema_handle_aprs_message_addressed_to_us, 100) != pdTRUE) {
-      esp_task_wdt_reset();
-      if (n++ > 3000)
-        ESP.restart();
-    }
-  #else
-    for (int n = 0; sema_handle_aprs_message_addressed_to_us; n++) {
-      delay(10);
-      if (!(n % 100))
-        esp_task_wdt_reset();
-      if (n > 30000)
-         ESP.restart();
-    }
-    sema_handle_aprs_message_addressed_to_us = true;
-  #endif
+  sema_lock_or_unlock__handle_aprs_message_addressed_to_us(1);
 
   String answer_message = "";
   if (!received_frame)
@@ -5994,12 +5975,7 @@ String handle_aprs_messsage_addressed_to_us(const char *received_frame) {
   }
 
 end:
-  #ifdef IF_SEMAS_WOULD_WORK
-    xSemaphoreGive(sema_handle_aprs_message_addressed_to_us);
-  #else
-    sema_handle_aprs_message_addressed_to_us = false;
-  #endif
-
+  sema_lock_or_unlock__handle_aprs_message_addressed_to_us(0);
   return String(answer_message);
 }
 
@@ -6975,40 +6951,19 @@ out:
     }
   #endif // KISS_PROTOCOL
 
-
-  // sema lock for lora chip operations
-  boolean sema_lora_lock_success = false;
-
   esp_task_wdt_reset();
   // lora chip is in mode RX
 #ifdef HAS_SX126X
   // We need the sema lock later for non-blocking receive
   if (flag_lora_packet_available) {
 #else
-  {
+  static uint32_t last_receive_check = 0L;
+  if (last_receive_check + 300 < millis()) {
+    last_receive_check = millis();
 #endif
-    #ifdef IF_SEMAS_WOULD_WORK
-      if (xSemaphoreTake(sema_lora_chip, 100) == pdTRUE)
-        sema_lora_lock_success = true;
-    #else
-      for (int n = 0; n < 10; n++) {
-        if (!sema_lora_chip) {
-          sema_lora_chip = true;
-          sema_lora_lock_success = true;
-          break;
-        }
-        delay(10);
-      }
-    #endif
+    sema_lock_or_unlock__lora(1);
     esp_task_wdt_reset();
-    if (!sema_lora_lock_success) {
-      #ifdef IF_SEMAS_WOULD_WORK
-        xSemaphoreGive(sema_lora_chip);
-      #else
-        sema_lora_chip = false;
-      #endif
     #ifdef HAS_SX127X
-    } else {
       //if (rf95.waitAvailableTimeout(10)) {
       if (rf95.available()) {
         flag_lora_packet_available = true;
@@ -7016,12 +6971,12 @@ out:
         // keep sema up
       } else {
         flag_lora_packet_available = false;
+        sema_lock_or_unlock__lora(0);
       }
     #elif HAS_SX126X
       // no else. Elegant: radio.setDio1Action() sets flag_lora_packet_available via signal_new_packet_received() if a packet was received.
       // keep sema up
     #endif
-    }
   }
   if (flag_lora_packet_available) {
     // we still take the lock
@@ -7067,11 +7022,7 @@ out:
     flag_lora_packet_available = false;
 
     // release lock here. We read the data from the lora chip. And we may call later loraSend (which should not be blocked by ourself)
-    #ifdef IF_SEMAS_WOULD_WORK
-      xSemaphoreGive(sema_lora_chip);
-    #else
-      sema_lora_chip = false;
-    #endif
+    sema_lock_or_unlock__lora(0);
 
     const char *rssi_for_path = encode_snr_rssi_in_path(lastSNR, lastRssi);
 
@@ -7372,47 +7323,28 @@ invalid_packet:
       if (*p_curr_slot_table != ((p_curr_slot_table > curr_slot_table) ? p_curr_slot_table[-1] : curr_slot_table[9])) {
         lora_freq_rx_curr = (*p_curr_slot_table) ? lora_freq_cross_digi : lora_freq;
         lora_speed_rx_curr = (*p_curr_slot_table) ? lora_speed_cross_digi : lora_speed;
-        boolean sema_lora_lock_success = false;
         esp_task_wdt_reset();
-        #ifdef IF_SEMAS_WOULD_WORK
-          if (xSemaphoreTake(sema_lora_chip, 250) == pdTRUE)
-            sema_lora_lock_success = true;
-        #else
-          for (int n = 0; n < 25; n++) {
-            if (!sema_lora_chip) {
-              sema_lora_chip = true;
-              sema_lora_lock_success = true;
-              break;
-            }
-            delay(10);
+        sema_lock_or_unlock__lora(1);
+        esp_task_wdt_reset();
+        lora_set_speed(lora_speed_rx_curr);
+        #ifdef HAS_SX127X
+          // Avoid packet in rx queue from secondary qrg being interpreted to come from main qrg
+          if (lora_freq_rx_curr == lora_freq) {
+            rf95.recvAPRS(0, 0);
+            flag_lora_packet_available = false;
           }
+          rf95.setFrequency(lora_freq_rx_curr);
+        #elif HAS_SX126X
+          // Avoid packet in rx queue from secondary qrg being interpreted to come from main qrg
+          if (lora_freq_rx_curr == lora_freq && flag_lora_packet_available) {
+            String tmp_buf;
+            radio.readData(tmp_buf);
+            flag_lora_packet_available = false;
+          }
+          radio.setFrequency(lora_freq_rx_curr);
+          radio.startReceive();
         #endif
-        esp_task_wdt_reset();
-        if (sema_lora_lock_success) {
-          lora_set_speed(lora_speed_rx_curr);
-          #ifdef HAS_SX127X
-            // Avoid packet in rx queue from secondary qrg being interpreted to come from main qrg
-            if (lora_freq_rx_curr == lora_freq) {
-              rf95.recvAPRS(0, 0);
-              flag_lora_packet_available = false;
-            }
-            rf95.setFrequency(lora_freq_rx_curr);
-          #elif HAS_SX126X
-            // Avoid packet in rx queue from secondary qrg being interpreted to come from main qrg
-            if (lora_freq_rx_curr == lora_freq && flag_lora_packet_available) {
-              String tmp_buf;
-              radio.readData(tmp_buf);
-              flag_lora_packet_available = false;
-            }
-            radio.setFrequency(lora_freq_rx_curr);
-            radio.startReceive();
-          #endif
-          #ifdef IF_SEMAS_WOULD_WORK
-            xSemaphoreGive(sema_lora_chip);
-          #else
-            sema_lora_chip = false;
-          #endif
-        }
+        sema_lock_or_unlock__lora(0);
       }
       // restart from beginning of current row?
       if ((p_curr_slot_table - curr_slot_table) >= 9)
