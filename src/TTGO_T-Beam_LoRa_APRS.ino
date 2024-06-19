@@ -7389,9 +7389,9 @@ invalid_packet:
 
   boolean display_was_updated = false;
   ulong tmp_t_since_last_sb_tx = millis() - lastPositionTX;
-  static boolean reason_course_change = 0;  // used as hint for sendpacket. static, because
-                                            // we may not be sure (if we are not TXing now but in one of the next rounds)
-                                            // when looking at nextTX == 0: was  the reason a course change
+  static boolean reason_course_change = false;  // used as hint for sendpacket. static, because
+                                                // we may not be sure (if we are not TXing now but in one of the next rounds)
+                                                // when looking at nextTX == 0: was  the reason a course change
 
   // Send position, if not requested to do not ;) But enter this part if user likes our LA/LON/SPD/CRS to be displayed on his screen ('!gps_allow_sleep_while_kiss' caused 'gps_state false')
   if (!gps_state && (!dont_send_own_position_packets || !(lora_tx_enabled || aprsis_enabled)))
@@ -7507,7 +7507,7 @@ invalid_packet:
         writedisplaytext("  ((TX))","",OledLine2,OledLine3,OledLine4,OledLine5);
       }
       sendpacket(SP_POS_GPS | (reason_course_change ? SP_ENFORCE_COURSE : 0 ));
-      reason_course_change = 0;
+      reason_course_change = false;
       // for fixed beacon (if we loose gps fix, we'll send our last position in fix_beacon_interval)
       // We just transmitted. We transmitted due to turn (nextTX == 1)? Also Don't TX again in next round, sendpacket() adjustet nextTX
     } else {
