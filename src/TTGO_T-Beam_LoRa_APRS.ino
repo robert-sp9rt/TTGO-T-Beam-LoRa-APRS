@@ -1218,10 +1218,12 @@ void sendpacket(uint8_t sp_flags){
   batt_read();
   prepareAPRSFrame(sp_flags);
   if (lora_tx_enabled && tx_own_beacon_from_this_device_or_fromKiss__to_frequencies) {
-    if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies % 2)
+    if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies % 2) {
       loraSend(txPower, lora_freq, lora_speed, (sp_flags & SP_ENFORCE_COURSE) ? LORA_FLAGS_NODELAY : 0, outString);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
-    if (((tx_own_beacon_from_this_device_or_fromKiss__to_frequencies > 1 && lora_digipeating_mode > 1) || tx_own_beacon_from_this_device_or_fromKiss__to_frequencies == 5) && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq)
+    }
+    if (((tx_own_beacon_from_this_device_or_fromKiss__to_frequencies > 1 && lora_digipeating_mode > 1) || tx_own_beacon_from_this_device_or_fromKiss__to_frequencies == 5) && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq) {
       loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, (sp_flags & SP_ENFORCE_COURSE) ? LORA_FLAGS_NODELAY : 0, outString);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
+    }
   }
   #if defined(ENABLE_WIFI)
     if (tx_own_beacon_from_this_device_or_fromKiss__to_aprsis)
@@ -5827,13 +5829,21 @@ void handle_usb_serial_input(void) {
             esp_task_wdt_reset();
           #endif
           if (lora_tx_enabled) {
+            int do_delay = 0;
             enableOled_now(); // enable OLED
             writedisplaytext("((KISSTX))","",inputBuf,"","","");
             if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies % 2) {
               loraSend(txPower, lora_freq, lora_speed, 0, inputBuf);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
+              do_delay = 600000 / lora_speed;
             }
             if (((tx_own_beacon_from_this_device_or_fromKiss__to_frequencies > 1 && lora_digipeating_mode > 1) || tx_own_beacon_from_this_device_or_fromKiss__to_frequencies == 5) && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq) {
               loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, 0, inputBuf);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
+              if (!do_delay || lora_speed_cross_digi < lora_speed)
+                do_delay = 600000 / lora_speed_cross_digi;
+            }
+            if (do_delay) {
+              delay(do_delay);
+              esp_task_wdt_reset();
             }
           } else {
             Serial.println("*** Warning: lora tx must be enabled! Not sending to RF");
@@ -6934,17 +6944,21 @@ send_beacon:
           }
         }
 #endif
-
         if (lora_tx_enabled) {
           enableOled_now(); // enable OLED
           writedisplaytext("((KISSTX))","",String(data),"","","");
+          int do_delay = 0;
           if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies % 2) {
             loraSend(txPower, lora_freq, lora_speed, 0, String(data));  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
+            do_delay = 600000 / lora_speed;
           } if (((tx_own_beacon_from_this_device_or_fromKiss__to_frequencies > 1 && lora_digipeating_mode > 1) || tx_own_beacon_from_this_device_or_fromKiss__to_frequencies == 5) && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq) {
             loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, 0, String(data));  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
+            if (!do_delay || lora_speed_cross_digi < lora_speed)
+              do_delay = 600000 / lora_speed_cross_digi;
           }
+          if (do_delay)
+            delay(do_delay);
         }
-
 out:
         delete TNC2DataFrame;
       }
@@ -7375,6 +7389,9 @@ invalid_packet:
 
   boolean display_was_updated = false;
   ulong tmp_t_since_last_sb_tx = millis() - lastPositionTX;
+  static boolean reason_course_change = 0;  // used as hint for sendpacket. static, because
+                                            // we may not be sure (if we are not TXing now but in one of the next rounds)
+                                            // when looking at nextTX == 0: was  the reason a course change
 
   // Send position, if not requested to do not ;) But enter this part if user likes our LA/LON/SPD/CRS to be displayed on his screen ('!gps_allow_sleep_while_kiss' caused 'gps_state false')
   if (!gps_state && (!dont_send_own_position_packets || !(lora_tx_enabled || aprsis_enabled)))
@@ -7392,9 +7409,11 @@ invalid_packet:
   }
   average_speed_final = (average_speed[0]+average_speed[1]+average_speed[2]+average_speed[3]+average_speed[4])/5;
 
-  if (gps.course.isValid() && gps.course.age() < 10000L) {
+  if ((millis()<sb_max_interval)&&(lastPositionTX == 0)) {
+    nextTX = 0;
+  } else if (gps.course.isValid() && gps.course.age() < 10000L) {
     //average_course[point_avg_course] = ((curr_kmph > 1.8 && ((curr_hdop < 1.5 && curr_sats >= 3 && curr_kmph <= 16.0) || (curr_hdop < 4.0 && curr_sats >= 3 && curr_kmph > 16.0))) ? gps.course.deg() : average_course[(point_avg_course-1) % ANGLE_AVGS]);   // calculate smart beaconing course
-average_course[point_avg_course] = ((average_speed_final > 1.8 && ((curr_hdop < 1.5 && curr_sats >= 3 && average_speed_final <= 16.0) || (curr_hdop < 4.0 && curr_sats >= 3 && average_speed_final > 16.0))) ? gps.course.deg() : average_course[(point_avg_course-1) % ANGLE_AVGS]);   // calculate smart beaconing course
+    average_course[point_avg_course] = ((average_speed_final > 1.8 && ((curr_hdop < 1.5 && curr_sats >= 3 && average_speed_final <= 16.0) || (curr_hdop < 4.0 && curr_sats >= 3 && average_speed_final > 16.0))) ? gps.course.deg() : average_course[(point_avg_course-1) % ANGLE_AVGS]);   // calculate smart beaconing course
     ++point_avg_course;
 
     if (point_avg_course>(ANGLE_AVGS-1)) {
@@ -7412,39 +7431,38 @@ average_course[point_avg_course] = ((average_speed_final > 1.8 && ((curr_hdop < 
       // too much false positives
       // Only in 30s interval and if we did not announce turn in last round.
       // Algo from Kenwood SB Docu. Considered values should be int.
-      // algo is: (int ) ((int )sb_angle + 10 * turn_slope / (int ) mph). In km/h, we have (int ) ((int ) ab_angle + 16 *turn_slope / (int ) mph)
-      //if (nextTX > 1 && tmp_t_since_last_sb_tx > (sb_turn_time*1000L) && average_speed_final >= sb_min_speed) {
-if (nextTX > 1 && tmp_t_since_last_sb_tx > (sb_turn_time*1000L) && average_speed_final >= 1.8) {
+      // algo is: (int ) ((int )sb_angle + 10 * turn_slope / (int ) mph). In km/h, we have (int ) ((int ) ab_angle + 16 *turn_slope / (int ) km/h)
+      //if (nextTX && tmp_t_since_last_sb_tx > (sb_turn_time*1000L) && average_speed_final >= sb_min_speed) {
+      if (nextTX && tmp_t_since_last_sb_tx > (sb_turn_time*1000L) && average_speed_final >= 1.8) {
         // cave: average_speed_final must not be 0 (division by zero). Becuse sb_min_speed may be configured as zero, check above is not enough
         int int_average_speed_final = (int ) average_speed_final;
         if (int_average_speed_final < 1) int_average_speed_final = 1;
         int sb_turn_threshold=min(120, (int ) ((int ) sb_angle + 16 * sb_turn_slope / int_average_speed_final));
         if ((old_course < sb_turn_threshold) && (new_course > (360-sb_turn_threshold))) {
           if (abs(new_course-old_course-360)>=sb_turn_threshold) {
-            nextTX = 1;
+            nextTX = 0;
           }
         } else {
           if ((old_course > (360-sb_turn_threshold)) && (new_course < sb_turn_threshold)) {
             if (abs(new_course-old_course+360)>=sb_turn_threshold) {
-              nextTX = 1;
+              nextTX = 0;
             }
           } else {
             if (abs(new_course-old_course)>=sb_turn_threshold) {
-              nextTX = 1;
+              nextTX = 0;
             }
           }
         }
+        if (nextTX == 0)
+          reason_course_change = true;
       }
       old_course = new_course;
     }
   }
 
-  if ((millis()<sb_max_interval)&&(lastPositionTX == 0)) {
-    nextTX = 0;
-  }
 
-  // No course change (indicator nextTX==1)? Recompute nextTX
-  if (gps.speed.isValid() && gps.speed.age() < 10000 && /* nextTX > 1 && */ nextTX > sb_min_interval) {
+  // No course change (indicator nextTX==0)? Recompute nextTX
+  if (nextTX > sb_min_interval && gps.speed.isValid() && gps.speed.age() < 10000) {
 #ifdef SB_ALGO_KENWOOD
     if (average_speed_final >= sb_max_speed) {
       nextTX = sb_min_interval;
@@ -7464,7 +7482,6 @@ if (nextTX > 1 && tmp_t_since_last_sb_tx > (sb_turn_time*1000L) && average_speed
     nextTX = ((sb_max_speed > average_speed_final) ? ((sb_max_interval-sb_min_interval)/(sb_max_speed-sb_min_speed)*(sb_max_speed-average_speed_final)+sb_min_interval) : sb_min_interval);
     //if (nextTX < sb_min_interval) {nextTX=sb_min_interval;}   // already assured (  (sb_max_speed <= average_speed_final) -> nextTX=sb_min_interval)
     if (nextTX > sb_max_interval) {nextTX=sb_max_interval;}
-- #endif
     // now, nextTX is <= sb_max_interval
 #endif
   }
@@ -7475,9 +7492,9 @@ if (nextTX > 1 && tmp_t_since_last_sb_tx > (sb_turn_time*1000L) && average_speed
     goto behind_position_tx;
 
   // rate limit to 20s in SF12 CR4/5 aka lora_speed 300; 5s in lora_speed 1200 (SF9 CR4/7). -> 1200/lora_speed*5 seconds == 6000000 / lora_speed ms
-  // If special case nextTX <= 1: we already enforced rate-limiting (see course computation)
 
-  if (!fixed_beacon_enabled && !dont_send_own_position_packets && (lora_tx_enabled || aprsis_enabled) && (lastPositionTX+nextTX) < millis() && (nextTX <= 1 || (tmp_t_since_last_sb_tx >= (6000000L / lora_speed) ))) {
+  if (!fixed_beacon_enabled && !dont_send_own_position_packets && (lora_tx_enabled || aprsis_enabled) &&
+      tmp_t_since_last_sb_tx >= (6000000L / lora_speed) && (lastPositionTX + nextTX) < millis()) {
     if (gps_isValid) {
       //enableOled(); // enable OLED
       // we need to send, display it and cancel skip through pages
@@ -7489,7 +7506,8 @@ if (nextTX > 1 && tmp_t_since_last_sb_tx > (sb_turn_time*1000L) && average_speed
         fillDisplayLines3to5(1);
         writedisplaytext("  ((TX))","",OledLine2,OledLine3,OledLine4,OledLine5);
       }
-      sendpacket(SP_POS_GPS | (nextTX == 1 ? SP_ENFORCE_COURSE : 0));
+      sendpacket(SP_POS_GPS | (reason_course_change ? SP_ENFORCE_COURSE : 0 ));
+      reason_course_change = 0;
       // for fixed beacon (if we loose gps fix, we'll send our last position in fix_beacon_interval)
       // We just transmitted. We transmitted due to turn (nextTX == 1)? Also Don't TX again in next round, sendpacket() adjustet nextTX
     } else {

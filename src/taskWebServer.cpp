@@ -1616,14 +1616,20 @@ void do_send_status_message_about_connect_to_aprsis(void) {
   aprsis_client.print(outString + "\r\n");
 
   outString.replace(":>", ",RFONLY:>");
+  int do_delay = 0;
   if (lora_tx_enabled && tx_own_beacon_from_this_device_or_fromKiss__to_frequencies) {
     if (tx_own_beacon_from_this_device_or_fromKiss__to_frequencies % 2) {
       loraSend(txPower, lora_freq, lora_speed, 0, outString);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
+      do_delay = 600000 / lora_speed;
     }
     if (((tx_own_beacon_from_this_device_or_fromKiss__to_frequencies > 1 && lora_digipeating_mode > 1) || tx_own_beacon_from_this_device_or_fromKiss__to_frequencies == 5) && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq) {
       loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, 0, outString);  //send the packet, data is in TXbuff from lora_TXStart to lora_TXEnd
+      if (!do_delay || lora_speed_cross_digi < lora_speed)
+        do_delay = 600000 / lora_speed_cross_digi;
     }
   }
+  if (do_delay)
+    delay(do_delay);
 
   esp_task_wdt_reset();
   #ifdef KISS_PROTOCOL
@@ -2135,11 +2141,19 @@ void read_from_aprsis(void) {
       delay(250);
     }
   }
+  int do_delay = 0;
   if (aprsis_data_allow_inet_to_rf % 2) {
     loraSend(txPower, lora_freq, lora_speed, 0, third_party_packet);
+    do_delay = 600000 / lora_speed;
   }
   if (aprsis_data_allow_inet_to_rf > 1 && lora_freq_cross_digi > 1.0 && lora_freq_cross_digi != lora_freq) {
     loraSend(txPower_cross_digi, lora_freq_cross_digi, lora_speed_cross_digi, 0, third_party_packet);
+    if (!do_delay || lora_speed_cross_digi < lora_speed)
+      do_delay = 600000 / lora_speed_cross_digi;
+  }
+  if (do_delay) {
+    delay(do_delay);
+    esp_task_wdt_reset();
   }
 }
 
